@@ -11,8 +11,8 @@ Output: JSON with geometry and full tags.
 
 [out:json][timeout:300];
 
-/* Deterministic Berlin selector (Berlin, Germany admin boundary relation) */
-rel(62422)->.berlinRel;
+/* Deterministic Berlin selector: relation 62422 (Berlin, Germany / Q64) */
+rel(62422)["name"="Berlin"]["wikidata"="Q64"]->.berlinRel;
 map_to_area .berlinRel->.searchArea;
 
 (
