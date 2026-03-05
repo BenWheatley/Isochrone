@@ -2,12 +2,12 @@
 Berlin routing-focused OSM extraction (no polygons)
 
 Includes:
-- all highway ways/relations (roads, footpaths, cycleways, etc.)
-- full way/relation tags for routing (maxspeed, access, foot, vehicle, oneway, sidewalk, etc.)
+- all highway ways (roads, footpaths, cycleways, etc.)
+- full way tags for routing (maxspeed, access, foot, vehicle, oneway, sidewalk, etc.)
 - connector nodes for graph stitching/penalties: barrier, crossings, level crossings, entrances
 - ferry transit routes and ferry stop/terminal nodes (for later transit integration)
 
-Output: JSON with geometry and full tags.
+Output: JSON with tags + node references + referenced node coordinates (no duplicated inline geometry).
 */
 
 [out:json][timeout:300];
@@ -19,7 +19,6 @@ rel(62422)["name"="Berlin"]["wikidata"="Q64"]->.berlinRel;
 (
   /* Core transport geometry */
   way(area.searchArea)["highway"];
-  relation(area.searchArea)["highway"];
 
   /* Connector nodes used by pedestrian routing logic */
   node(area.searchArea)["barrier"];
@@ -35,5 +34,11 @@ rel(62422)["name"="Berlin"]["wikidata"="Q64"]->.berlinRel;
   node(area.searchArea)["public_transport"="platform"]["ferry"="yes"];
 );
 
-/* Return full tags + geometry; qt for faster server-side ordering */
-out geom qt;
+/* Download-friendly output:
+   1) body: tags + way node refs
+   2) recurse: fetch all referenced members (especially nodes)
+   3) skel: output node coordinates once, without tag duplication
+*/
+out body qt;
+>;
+out skel qt;
