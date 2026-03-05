@@ -24,8 +24,3 @@ web/dist/
 # Build artifacts and logs
 *.log
 .cache/
-
-# Local data artifacts (can be regenerated)
-data_pipeline/input/*
-data_pipeline/output/
-!data_pipeline/input/berlin-routing.osm.json
