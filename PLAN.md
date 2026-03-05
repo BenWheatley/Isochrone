@@ -16,9 +16,9 @@ Estimates assume a **junior developer familiar with JavaScript and basic GIS con
 Estimated time: 30 min
 
 Tasks
-- Create repository
-- Create folders: `/data_pipeline`, `/web`, `/docs`
-- Add placeholder files: `PLAN.md`, `README.md`
+- [x] Create repository
+- [x] Create folders: `/data_pipeline`, `/web`, `/docs`
+- [x] Add placeholder files: `PLAN.md`, `README.md`
 
 ---
 
@@ -26,10 +26,10 @@ Tasks
 Estimated time: 45 min
 
 Tasks
-- Install Python 3.11+
-- Create virtual environment (`python -m venv .venv`)
-- Install and pin: `pyosmium`, `pyproj`, `numpy`, `struct` (stdlib)
-- Write `requirements.txt`
+- [x] Install Python 3.11+
+- [x] Create virtual environment (`python -m venv .venv`)
+- [x] Install and pin: `pyosmium` (PyPI package name: `osmium`), `pyproj`, `numpy`, `struct` (stdlib)
+- [x] Write `requirements.txt`
 
 ---
 
@@ -42,24 +42,24 @@ Estimated time: 45 min
 Estimated time: 15 min
 
 Tasks
-- `npm init -y` in `/web`
-- `npm install --save-dev esbuild`
-- Confirm `npx esbuild --version`
+- [x] `npm init -y` in `/web`
+- [x] `npm install --save-dev esbuild`
+- [x] Confirm `npx esbuild --version`
 
 ### 1.3.2 Write build script
 Estimated time: 15 min
 
 Tasks
-- Add `build` script to `package.json`: `esbuild src/app.js --bundle --minify --outfile=dist/app.js`
-- Add `dev` script with `--watch` flag and `--sourcemap`
+- [x] Add `build` script to `package.json`: `esbuild src/app.js --bundle --minify --outfile=dist/app.js`
+- [x] Add `dev` script with `--watch` flag and `--sourcemap`
 
 ### 1.3.3 Create source layout
 Estimated time: 15 min
 
 Tasks
-- Create `/web/src/` for ES module source files
-- Create `/web/dist/` as build output (git-ignored in dev, committed for Pages deploy)
-- Create stub `src/app.js` with a single `console.log`
+- [x] Create `/web/src/` for ES module source files
+- [x] Create `/web/dist/` as build output (git-ignored in dev, committed for Pages deploy)
+- [x] Create stub `src/app.js` with a single `console.log`
 
 ---
 
@@ -74,16 +74,16 @@ Estimated time: 45 min
 Estimated time: 15 min
 
 Tasks
-- Download Berlin `.pbf` from Geofabrik (free, no registration)
-- Store in `/data_pipeline/input/`
+- [ ] Download Berlin `.pbf` from Geofabrik (free, no registration)
+- [ ] Store in `/data_pipeline/input/`
 
 ### 2.1.2 Survey walkable way tags
 Estimated time: 30 min
 
 Tasks
-- Write a short script to count `highway=*` values present in the extract
-- Record which values are usable for pedestrian routing
-- Note typical node density per km of way
+- [ ] Write a short script to count `highway=*` values present in the extract
+- [ ] Record which values are usable for pedestrian routing
+- [ ] Note typical node density per km of way
 
 ---
 
@@ -182,17 +182,17 @@ Estimated time: 45 min
 Estimated time: 25 min
 
 Tasks
-- `BinaryWriter` class wrapping `bytearray`
-- Methods: `write_u8`, `write_u16`, `write_u32`, `write_i32`, `write_f32`, `write_f64`
-- Method: `pad_to(alignment)` — fills to next multiple of alignment
+- [x] `BinaryWriter` class wrapping `bytearray`
+- [x] Methods: `write_u8`, `write_u16`, `write_u32`, `write_i32`, `write_f32`, `write_f64`
+- [x] Method: `pad_to(alignment)` — fills to next multiple of alignment
 
 ### 2.3.2 Write reader test script
 Estimated time: 20 min
 
 Tasks
-- Parse magic, version, counts from header
-- Print node 0 and edge 0
-- Assert offsets are consistent with header-declared positions
+- [ ] Parse magic, version, counts from header
+- [ ] Print node 0 and edge 0
+- [ ] Assert offsets are consistent with header-declared positions
 
 ---
 
@@ -207,7 +207,9 @@ Estimated time: 20 min
 Tasks
 - Use `pyosmium.SimpleHandler`
 - Collect all `way` objects with a pedestrian-usable `highway` tag
+- Preserve routing constraint tags on each candidate way: `access`, `foot`, `oneway`, `oneway:foot`, `sidewalk`
 - Record the set of node IDs referenced by those ways
+- Collect connector nodes in a second lightweight pass: `barrier=*`, `highway=crossing`, `railway=level_crossing`, `entrance=*`
 
 ### 3.1.2 Load referenced nodes
 Estimated time: 20 min
@@ -249,6 +251,8 @@ Tasks
 - For each walkable way, iterate consecutive node pairs
 - Emit edge (A→B) and (B→A) for each pair (walking is bidirectional by default)
 - Exception: `oneway:foot=yes` ways emit only forward edge
+- Respect constraints during edge creation: exclude disallowed segments (`access=private/no`, `foot=no`) and keep `sidewalk=*` metadata for later refinements
+- Preserve connector-node flags (`crossing`, `level_crossing`, `entrance`, `barrier`) so later routing logic can apply penalties/filters without re-parsing OSM
 
 ### 3.3.2 Compute edge walking cost
 Estimated time: 20 min
@@ -768,3 +772,8 @@ Post-MVP (Phase 11, GTFS transit) adds approximately **7–9 hours** of developm
 ## Post-MVP additions
 - Augmented `berlin_graph.bin.gz` with transit tables populated
 - `/web/src/csa.js` — Connection Scan Algorithm module
+
+---
+
+## Note On Public Polygons
+Public polygons (parks, greens, woods, recreation areas) are useful for context and optional future area-aware routing, but movement inside them is neither always free nor always represented by dense internal paths. Densely wooded and otherwise inaccessible sub-areas exist; in other cases only sparse walkable tracks are mapped. The routing model must therefore treat polygon-level walkability as conditional and constrained, not uniformly traversable.
