@@ -190,9 +190,9 @@ Tasks
 Estimated time: 20 min
 
 Tasks
-- [ ] Parse magic, version, counts from header
-- [ ] Print node 0 and edge 0
-- [ ] Assert offsets are consistent with header-declared positions
+- [x] Parse magic, version, counts from header
+- [x] Print node 0 and edge 0
+- [x] Assert offsets are consistent with header-declared positions
 
 ---
 
