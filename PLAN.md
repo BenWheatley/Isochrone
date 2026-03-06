@@ -280,31 +280,31 @@ Estimated time: 1 hour 30 min
 Estimated time: 10 min
 
 Tasks
-- Any node within 50 m of a GTFS stop position is flagged `is_stop_attachment`
-- These nodes are excluded from merging even if degree-2
-- *(Stop positions are not yet loaded in MVP; this flag is set to 0 and the step is a no-op until post-MVP. The code path must exist now so simplification is stop-safe from the start.)*
+- [x] Any node within 50 m of a GTFS stop position is flagged `is_stop_attachment`
+- [x] These nodes are excluded from merging even if degree-2
+- [x] *(Stop positions are not yet loaded in MVP; this flag is set to 0 and the step is a no-op until post-MVP. The code path must exist now so simplification is stop-safe from the start.)*
 
 ### 3.4.2 Detect degree-2 nodes eligible for merging
 Estimated time: 20 min
 
 Tasks
-- Count in-degree and out-degree per node
-- A node is a merge candidate if: total degree = 2, not flagged `is_stop_attachment`, not a dead-end
+- [x] Count in-degree and out-degree per node
+- [x] A node is a merge candidate if: total degree = 2, not flagged `is_stop_attachment`, not a dead-end
 
 ### 3.4.3 Merge linear chains
 Estimated time: 30 min
 
 Tasks
-- Walk chains of degree-2 nodes; replace with a single edge whose cost is the sum of constituent edge costs
-- Accumulate the chain; the merged edge's cost is capped at uint16 max (split chains that would overflow)
+- [x] Walk chains of degree-2 nodes; replace with a single edge whose cost is the sum of constituent edge costs
+- [x] Accumulate the chain; the merged edge's cost is capped at uint16 max (split chains that would overflow)
 
 ### 3.4.4 Reindex nodes and edges
 Estimated time: 30 min
 
 Tasks
-- Assign new contiguous indices to surviving nodes
-- Rebuild adjacency lists with new indices
-- Log before/after node and edge counts
+- [x] Assign new contiguous indices to surviving nodes
+- [x] Rebuild adjacency lists with new indices
+- [x] Log before/after node and edge counts
 
 ---
 
