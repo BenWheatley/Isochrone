@@ -1,0 +1,74 @@
+{
+  "generated_at_utc": "2026-03-06T18:33:32.160045+00:00",
+  "input": "data_pipeline/output/graph-walk.bin",
+  "reader_lines": [
+    "path=data_pipeline/output/graph-walk.bin",
+    "size_bytes=26173276",
+    "magic=0x49534F43",
+    "version=1",
+    "counts=nodes:573834 edges:1415989 stops:0 tedges:0",
+    "offsets=nodes:64 edges:9181408 stops:26173276",
+    "node0=NodeRecord(x_m=17144, y_m=25444, first_edge_index=0, edge_count=3, flags=0)",
+    "edge0=EdgeRecord(target_node_index=524319, cost_seconds=6, flags=0, reserved=0)"
+  ],
+  "header": {
+    "magic": "0x49534F43",
+    "version": 1,
+    "n_nodes": 573834,
+    "n_edges": 1415989,
+    "n_stops": 0,
+    "n_tedges": 0,
+    "node_table_offset": 64,
+    "edge_table_offset": 9181408,
+    "stop_table_offset": 26173276
+  },
+  "node_sample_count": 5,
+  "node_spot_checks": [
+    {
+      "node_index": 173735,
+      "x_m": 36484,
+      "y_m": 21617,
+      "easting": 406519.4331555407,
+      "northing": 5821379.899206582,
+      "lat": 52.53448128442219,
+      "lon": 13.621804906566757
+    },
+    {
+      "node_index": 348954,
+      "x_m": 29869,
+      "y_m": 21449,
+      "easting": 399904.4331555407,
+      "northing": 5821211.899206582,
+      "lat": 52.53179600648851,
+      "lon": 13.524363805096325
+    },
+    {
+      "node_index": 383619,
+      "x_m": 21975,
+      "y_m": 23305,
+      "easting": 392010.4331555407,
+      "northing": 5823067.899206582,
+      "lat": 52.5469675781369,
+      "lon": 13.407431786139032
+    },
+    {
+      "node_index": 402343,
+      "x_m": 26399,
+      "y_m": 10720,
+      "easting": 396434.4331555407,
+      "northing": 5810482.899206582,
+      "lat": 52.43472549603419,
+      "lon": 13.47656274143002
+    },
+    {
+      "node_index": 559169,
+      "x_m": 39186,
+      "y_m": 8440,
+      "easting": 409221.4331555407,
+      "northing": 5808202.899206582,
+      "lat": 52.41650632147611,
+      "lon": 13.665217821430778
+    }
+  ],
+  "edge_target_violations": 0
+}

@@ -350,10 +350,10 @@ Tasks
 Estimated time: 30 min
 
 Tasks
-- Run reader test script from Phase 2.3.2
-- Assert magic and version
-- Spot-check 5 random nodes: decode coordinates, confirm they fall within Berlin bounding box
-- Assert all edge target indices < N_nodes
+- [x] Run reader test script from Phase 2.3.2
+- [x] Assert magic and version
+- [x] Spot-check 5 random nodes: decode coordinates, confirm they fall within Berlin bounding box
+- [x] Assert all edge target indices < N_nodes
 
 ---
 
