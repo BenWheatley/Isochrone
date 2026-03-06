@@ -363,9 +363,9 @@ Tasks
 Estimated time: 30 min
 
 Tasks
-- `index.html` with: `<canvas id="map">`, time-of-day input (default 08:00), loading overlay `<div id="loading">`
-- Link to `dist/app.js`
-- No inline JS; no inline styles beyond basic layout
+- [x] `index.html` with: `<canvas id="map">`, time-of-day input (default 08:00), loading overlay `<div id="loading">`
+- [x] Link to `dist/app.js`
+- [x] No inline JS; no inline styles beyond basic layout
 
 ---
 

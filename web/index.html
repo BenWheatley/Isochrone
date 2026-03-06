@@ -4,11 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Isochrone</title>
+    <link rel="stylesheet" href="./src/styles.css" />
   </head>
   <body>
-    <main>
-      <h1>Isochrone</h1>
-      <p>Berlin walking isochrone app scaffold.</p>
+    <main class="app-shell">
+      <header class="app-header">
+        <h1>Isochrone</h1>
+        <label for="departure-time">Departure time</label>
+        <input id="departure-time" name="departure-time" type="time" value="08:00" step="60" />
+      </header>
+
+      <section class="map-region" aria-label="Map viewport">
+        <canvas id="map" width="1024" height="768" aria-label="Berlin map canvas"></canvas>
+        <div id="loading" role="status" aria-live="polite">Loading map and graph data...</div>
+      </section>
     </main>
     <script src="./dist/app.js"></script>
   </body>
