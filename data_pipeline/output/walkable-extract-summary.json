@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-03-05T16:37:53.191587+00:00",
+  "generated_at_utc": "2026-03-06T08:46:12.601040+00:00",
   "input": "data_pipeline/input/berlin-routing.osm.json",
   "way_count": 438877,
   "node_count": 1240433,

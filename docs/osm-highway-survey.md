@@ -1,6 +1,6 @@
 # Berlin Highway Survey (Local Overpass JSON)
 
-Generated: 2026-03-05T15:36:04.904661+00:00
+Generated: 2026-03-06T08:41:09.167025+00:00
 
 ## Input
 - Source: `data_pipeline/input/berlin-routing.osm.json`
