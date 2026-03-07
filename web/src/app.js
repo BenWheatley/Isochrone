@@ -32,6 +32,7 @@ export function initializeAppShell(doc) {
   sizeCanvasToCssPixels(mapCanvas);
   sizeCanvasToCssPixels(boundaryCanvas);
 
+  loadingOverlay.hidden = false;
   loadingOverlay.textContent = 'Loading district boundaries...';
 
   return { mapCanvas, boundaryCanvas, loadingOverlay };
@@ -137,6 +138,8 @@ export function drawBoundaryBasemap(boundaryCanvas, payload) {
     throw new Error('boundaryCanvas must provide getContext("2d")');
   }
 
+  sizeCanvasToCssPixels(boundaryCanvas);
+
   const parsed = parseBoundaryBasemapPayload(payload);
   const context = boundaryCanvas.getContext('2d');
   if (!context) {
@@ -196,6 +199,7 @@ export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
   }
 
   shell.loadingOverlay.textContent = 'Loading district boundaries...';
+  shell.loadingOverlay.hidden = false;
 
   try {
     const response = await fetchImpl(url);
@@ -206,9 +210,11 @@ export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
     const payload = await response.json();
     const renderSummary = drawBoundaryBasemap(shell.boundaryCanvas, payload);
 
-    shell.loadingOverlay.textContent = 'Loading graph...';
+    shell.loadingOverlay.textContent = 'Map ready.';
+    shell.loadingOverlay.hidden = true;
     return renderSummary;
   } catch (error) {
+    shell.loadingOverlay.hidden = false;
     shell.loadingOverlay.textContent = 'Failed to load district boundaries.';
     throw error;
   }
@@ -220,8 +226,12 @@ function sizeCanvasToCssPixels(canvas) {
   }
 
   const { width, height } = canvas.getBoundingClientRect();
-  const nextWidth = Math.max(1, Math.round(width));
-  const nextHeight = Math.max(1, Math.round(height));
+  if (width < 2 || height < 2) {
+    return;
+  }
+
+  const nextWidth = Math.round(width);
+  const nextHeight = Math.round(height);
 
   if (canvas.width !== nextWidth) {
     canvas.width = nextWidth;

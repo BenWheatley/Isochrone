@@ -25,3 +25,10 @@ def test_web_directory_has_no_node_toolchain_files() -> None:
     assert not (WEB_ROOT / "package-lock.json").exists()
     assert not (WEB_ROOT / "eslint.config.js").exists()
     assert not (WEB_ROOT / "tests").exists()
+
+
+def test_app_js_has_zero_size_canvas_guard_and_no_stale_loading_graph_text() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "Loading graph..." not in app_js
+    assert "if (width < 2 || height < 2)" in app_js
