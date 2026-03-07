@@ -424,9 +424,9 @@ Tasks
 Estimated time: 30 min
 
 Tasks
-- Allocate `Uint8ClampedArray` of size `grid_width_px × grid_height_px × 4` (RGBA)
-- `clearGrid()`: fill alpha to 0 (fully transparent)
-- `setPixel(x_px, y_px, r, g, b, a)`: bounds-checked write
+- [x] Allocate `Uint8ClampedArray` of size `grid_width_px × grid_height_px × 4` (RGBA)
+- [x] `clearGrid()`: fill alpha to 0 (fully transparent)
+- [x] `setPixel(x_px, y_px, r, g, b, a)`: bounds-checked write
 
 ---
 

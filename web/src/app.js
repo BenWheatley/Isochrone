@@ -402,11 +402,51 @@ export async function initializeMapData(shell, options = {}) {
 
   const boundarySummary = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
   const graph = await loadGraphBinary(shell, graphOptions);
+  const pixelGrid = createPixelGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
+  clearGrid(pixelGrid);
 
   return {
     boundarySummary,
     graph,
+    pixelGrid,
   };
+}
+
+export function createPixelGrid(widthPx, heightPx) {
+  if (!Number.isInteger(widthPx) || widthPx <= 0) {
+    throw new Error('pixel grid width must be a positive integer');
+  }
+  if (!Number.isInteger(heightPx) || heightPx <= 0) {
+    throw new Error('pixel grid height must be a positive integer');
+  }
+
+  return {
+    widthPx,
+    heightPx,
+    rgba: new Uint8ClampedArray(widthPx * heightPx * 4),
+  };
+}
+
+export function clearGrid(pixelGrid) {
+  validatePixelGrid(pixelGrid);
+  for (let i = 3; i < pixelGrid.rgba.length; i += 4) {
+    pixelGrid.rgba[i] = 0;
+  }
+}
+
+export function setPixel(pixelGrid, xPx, yPx, r, g, b, a) {
+  validatePixelGrid(pixelGrid);
+
+  if (xPx < 0 || yPx < 0 || xPx >= pixelGrid.widthPx || yPx >= pixelGrid.heightPx) {
+    return false;
+  }
+
+  const offset = (yPx * pixelGrid.widthPx + xPx) * 4;
+  pixelGrid.rgba[offset] = r;
+  pixelGrid.rgba[offset + 1] = g;
+  pixelGrid.rgba[offset + 2] = b;
+  pixelGrid.rgba[offset + 3] = a;
+  return true;
 }
 
 function sizeCanvasToCssPixels(canvas) {
@@ -457,6 +497,27 @@ function parseContentLength(value) {
 function formatMebibytes(bytes) {
   const safeBytes = Math.max(0, bytes);
   return `${(safeBytes / BYTES_PER_MEBIBYTE).toFixed(2)} MB`;
+}
+
+function validatePixelGrid(pixelGrid) {
+  if (!pixelGrid || typeof pixelGrid !== 'object') {
+    throw new Error('pixelGrid must be an object');
+  }
+  if (!Number.isInteger(pixelGrid.widthPx) || pixelGrid.widthPx <= 0) {
+    throw new Error('pixelGrid.widthPx must be a positive integer');
+  }
+  if (!Number.isInteger(pixelGrid.heightPx) || pixelGrid.heightPx <= 0) {
+    throw new Error('pixelGrid.heightPx must be a positive integer');
+  }
+  if (!(pixelGrid.rgba instanceof Uint8ClampedArray)) {
+    throw new Error('pixelGrid.rgba must be a Uint8ClampedArray');
+  }
+  const expectedLength = pixelGrid.widthPx * pixelGrid.heightPx * 4;
+  if (pixelGrid.rgba.length !== expectedLength) {
+    throw new Error(
+      `pixelGrid.rgba length mismatch: got ${pixelGrid.rgba.length}, expected ${expectedLength}`,
+    );
+  }
 }
 
 function parseCoordinatePair(value, context) {
