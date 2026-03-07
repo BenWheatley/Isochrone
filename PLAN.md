@@ -490,9 +490,9 @@ Estimated time: 45 min
 Estimated time: 30 min
 
 Tasks
-- The Dijkstra loop is broken into time-sliced chunks: process nodes for up to 8 ms, then `requestAnimationFrame` to yield
-- After each chunk: paint currently-settled nodes to the isochrone canvas
-- Visual effect: isochrone expands outward in real time as search progresses
+- [x] The Dijkstra loop is broken into time-sliced chunks: process nodes for up to 8 ms, then `requestAnimationFrame` to yield
+- [x] After each chunk: paint currently-settled nodes to the isochrone canvas
+- [x] Visual effect: isochrone expands outward in real time as search progresses
 
 ### 7.2.2 Routing status text
 Estimated time: 15 min

@@ -117,6 +117,21 @@ def test_app_js_has_loading_progress_bar_and_fade_contract() -> None:
     assert "classList.add('is-fading')" in app_js
 
 
+def test_app_js_has_time_sliced_search_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "export async function runSearchTimeSliced(" in app_js
+    assert "const sliceBudgetMs = options.sliceBudgetMs ?? 8;" in app_js
+    assert "const requestAnimationFrameImpl = options.requestAnimationFrameImpl" in app_js
+    assert "while (!isDone(searchState))" in app_js
+    assert "while (elapsedMs < sliceBudgetMs && !isDone(searchState))" in app_js
+    assert "onSlice(settledBatch);" in app_js
+    assert "await waitForAnimationFrame(requestAnimationFrameImpl);" in app_js
+    assert "export async function runSearchTimeSlicedWithRendering(" in app_js
+    assert "paintSettledBatchToGrid(" in app_js
+    assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
+
+
 def test_styles_prevent_zero_height_map_region() -> None:
     styles_css = (WEB_ROOT / "src" / "styles.css").read_text(encoding="utf-8")
 

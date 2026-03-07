@@ -583,6 +583,123 @@ export function renderReachableNodes(shell, mapData, distSeconds, options = {}) 
   return paintedNodeCount;
 }
 
+export function paintSettledBatchToGrid(pixelGrid, nodePixels, distSeconds, settledBatch, options = {}) {
+  validatePixelGrid(pixelGrid);
+  validateNodePixels(nodePixels);
+  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
+  validateSettledBatch(settledBatch);
+
+  const alpha = options.alpha ?? 180;
+  let paintedCount = 0;
+
+  for (const nodeIndex of settledBatch) {
+    if (nodeIndex < 0 || nodeIndex >= nodePixels.nodePixelX.length) {
+      continue;
+    }
+    if (!(distSeconds[nodeIndex] < Infinity)) {
+      continue;
+    }
+
+    const [r, g, b] = timeToColour(distSeconds[nodeIndex]);
+    const xPx = nodePixels.nodePixelX[nodeIndex];
+    const yPx = nodePixels.nodePixelY[nodeIndex];
+    if (setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)) {
+      paintedCount += 1;
+    }
+  }
+
+  return paintedCount;
+}
+
+export async function runSearchTimeSliced(searchState, options = {}) {
+  validateSearchState(searchState);
+
+  const sliceBudgetMs = options.sliceBudgetMs ?? 8;
+  const onSlice = options.onSlice ?? (() => {});
+  const nowImpl = options.nowImpl ?? defaultNowMs;
+  const requestAnimationFrameImpl = options.requestAnimationFrameImpl ?? globalThis.requestAnimationFrame;
+
+  if (!Number.isFinite(sliceBudgetMs) || sliceBudgetMs <= 0) {
+    throw new Error('sliceBudgetMs must be a positive finite number');
+  }
+  if (typeof onSlice !== 'function') {
+    throw new Error('onSlice must be a function');
+  }
+  if (typeof nowImpl !== 'function') {
+    throw new Error('nowImpl must be a function');
+  }
+
+  let totalSettledCount = 0;
+  let sliceCount = 0;
+
+  while (!isDone(searchState)) {
+    const settledBatch = [];
+    const sliceStartMs = nowImpl();
+    let elapsedMs = 0;
+
+    while (elapsedMs < sliceBudgetMs && !isDone(searchState)) {
+      const settledNodeIndex = searchState.expandOne();
+      if (Number.isInteger(settledNodeIndex) && settledNodeIndex >= 0) {
+        settledBatch.push(settledNodeIndex);
+        totalSettledCount += 1;
+      }
+
+      elapsedMs = nowImpl() - sliceStartMs;
+    }
+
+    onSlice(settledBatch);
+    sliceCount += 1;
+
+    if (!isDone(searchState)) {
+      await waitForAnimationFrame(requestAnimationFrameImpl);
+    }
+  }
+
+  return {
+    totalSettledCount,
+    sliceCount,
+  };
+}
+
+export async function runSearchTimeSlicedWithRendering(shell, mapData, searchState, options = {}) {
+  if (!shell || !shell.isochroneCanvas) {
+    throw new Error('shell.isochroneCanvas is required');
+  }
+  if (!mapData || typeof mapData !== 'object') {
+    throw new Error('mapData must be an object');
+  }
+
+  clearGrid(mapData.pixelGrid);
+  blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+
+  const alpha = options.alpha ?? 180;
+  const onSliceExternal = options.onSlice;
+  let paintedNodeCount = 0;
+
+  const runSummary = await runSearchTimeSliced(searchState, {
+    ...options,
+    onSlice(settledBatch) {
+      paintedNodeCount += paintSettledBatchToGrid(
+        mapData.pixelGrid,
+        mapData.nodePixels,
+        searchState.distSeconds,
+        settledBatch,
+        { alpha },
+      );
+      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+
+      if (typeof onSliceExternal === 'function') {
+        onSliceExternal(settledBatch);
+      }
+    },
+  });
+
+  return {
+    ...runSummary,
+    paintedNodeCount,
+  };
+}
+
 function sizeCanvasToCssPixels(canvas) {
   if (typeof canvas.getBoundingClientRect !== 'function') {
     return;
@@ -707,6 +824,54 @@ function validateDistSeconds(distSeconds, expectedLength) {
   if (distSeconds.length < expectedLength) {
     throw new Error('distSeconds is shorter than node pixel arrays');
   }
+}
+
+function validateSettledBatch(settledBatch) {
+  if (!settledBatch || typeof settledBatch[Symbol.iterator] !== 'function') {
+    throw new Error('settledBatch must be iterable');
+  }
+}
+
+function validateSearchState(searchState) {
+  if (!searchState || typeof searchState !== 'object') {
+    throw new Error('searchState must be an object');
+  }
+  if (typeof searchState.expandOne !== 'function') {
+    throw new Error('searchState.expandOne must be a function');
+  }
+  if (typeof searchState.isDone !== 'function' && typeof searchState.done !== 'boolean') {
+    throw new Error('searchState must expose isDone() or done boolean');
+  }
+}
+
+function isDone(searchState) {
+  if (typeof searchState.isDone === 'function') {
+    return Boolean(searchState.isDone());
+  }
+  return Boolean(searchState.done);
+}
+
+function waitForAnimationFrame(requestAnimationFrameImpl) {
+  if (typeof requestAnimationFrameImpl === 'function') {
+    return new Promise((resolve) => {
+      requestAnimationFrameImpl(() => {
+        resolve(undefined);
+      });
+    });
+  }
+
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      resolve(undefined);
+    }, 0);
+  });
+}
+
+function defaultNowMs() {
+  if (globalThis.performance && typeof globalThis.performance.now === 'function') {
+    return globalThis.performance.now();
+  }
+  return Date.now();
 }
 
 function validateGraphForNodePixels(graph) {
