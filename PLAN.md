@@ -477,9 +477,9 @@ Tasks
 Estimated time: 30 min
 
 Tasks
-- Loading overlay (see Phase 5.1) shows two sequential phases: "Loading district boundaries…" and "Loading graph: X%"
-- Overlay uses a simple CSS progress bar (`<div style="width: X%">`)
-- On completion of both, overlay fades out and click interaction is enabled
+- [x] Loading overlay (see Phase 5.1) shows two sequential phases: "Loading district boundaries…" and "Loading graph: X%"
+- [x] Overlay uses a simple CSS progress bar (`<div style="width: X%">`)
+- [x] On completion of both, overlay fades out and click interaction is enabled
 
 ---
 

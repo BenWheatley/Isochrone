@@ -11,6 +11,9 @@ def test_index_html_uses_native_module_entrypoint() -> None:
     assert 'id="boundaries"' in index_html
     assert 'id="isochrone"' in index_html
     assert 'id="loading"' in index_html
+    assert 'id="loading-text"' in index_html
+    assert 'id="loading-progress"' in index_html
+    assert 'id="loading-progress-bar"' in index_html
     assert "dist/app.js" not in index_html
     assert re.search(
         r'<script[^>]*type="module"[^>]*src="\./src/app\.js"',
@@ -104,6 +107,16 @@ def test_app_js_uses_isochrone_canvas_layer() -> None:
     assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
 
 
+def test_app_js_has_loading_progress_bar_and_fade_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "loading-progress-bar" in app_js
+    assert "Loading graph:" in app_js
+    assert "progressPercent" in app_js
+    assert "style.width" in app_js
+    assert "classList.add('is-fading')" in app_js
+
+
 def test_styles_prevent_zero_height_map_region() -> None:
     styles_css = (WEB_ROOT / "src" / "styles.css").read_text(encoding="utf-8")
 
@@ -111,3 +124,6 @@ def test_styles_prevent_zero_height_map_region() -> None:
     assert "height: 100vh;" in styles_css
     assert ".map-region" in styles_css
     assert "min-height: 16rem;" in styles_css
+    assert "#loading-progress" in styles_css
+    assert "#loading-progress-bar" in styles_css
+    assert "#loading.is-fading" in styles_css

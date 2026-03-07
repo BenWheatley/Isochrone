@@ -7,6 +7,7 @@ const HEADER_SIZE = 64;
 const NODE_RECORD_SIZE = 16;
 const EDGE_RECORD_SIZE = 12;
 const BYTES_PER_MEBIBYTE = 1024 * 1024;
+const LOADING_FADE_MS = 180;
 
 export function minutesToSeconds(minutes) {
   if (minutes < 0) {
@@ -26,6 +27,8 @@ export function initializeAppShell(doc) {
     resolvedDocument.getElementById('isochrone') ?? resolvedDocument.getElementById('map');
   const boundaryCanvas = resolvedDocument.getElementById('boundaries');
   const loadingOverlay = resolvedDocument.getElementById('loading');
+  const loadingText = resolvedDocument.getElementById('loading-text');
+  const loadingProgressBar = resolvedDocument.getElementById('loading-progress-bar');
 
   if (!isochroneCanvas || isochroneCanvas.tagName !== 'CANVAS') {
     throw new Error('index.html is missing <canvas id="isochrone">');
@@ -36,6 +39,12 @@ export function initializeAppShell(doc) {
   if (!loadingOverlay || loadingOverlay.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="loading">');
   }
+  if (!loadingText || loadingText.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="loading-text">');
+  }
+  if (!loadingProgressBar || loadingProgressBar.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="loading-progress-bar">');
+  }
 
   sizeCanvasToCssPixels(isochroneCanvas);
   sizeCanvasToCssPixels(boundaryCanvas);
@@ -43,13 +52,18 @@ export function initializeAppShell(doc) {
   isochroneCanvas.style.pointerEvents = 'none';
   isochroneCanvas.dataset.graphLoaded = 'false';
   loadingOverlay.hidden = false;
-  loadingOverlay.textContent = 'Loading district boundaries...';
+  loadingOverlay.classList.remove('is-fading');
+  loadingText.textContent = 'Loading district boundaries...';
+  setLoadingProgressBar(loadingProgressBar, 0);
 
   return {
     isochroneCanvas,
     mapCanvas: isochroneCanvas,
     boundaryCanvas,
     loadingOverlay,
+    loadingText,
+    loadingProgressBar,
+    loadingFadeTimeoutId: null,
   };
 }
 
@@ -213,8 +227,7 @@ export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
     throw new Error('fetch is not available');
   }
 
-  shell.loadingOverlay.textContent = 'Loading district boundaries...';
-  shell.loadingOverlay.hidden = false;
+  showLoadingOverlay(shell, 'Loading district boundaries...', 0);
 
   try {
     const response = await fetchImpl(url);
@@ -225,12 +238,10 @@ export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
     const payload = await response.json();
     const renderSummary = drawBoundaryBasemap(shell.boundaryCanvas, payload);
 
-    shell.loadingOverlay.textContent = 'Loading graph: 0.00 MB';
-    shell.loadingOverlay.hidden = false;
+    showLoadingOverlay(shell, 'Loading graph: 0.00 MB', 0);
     return renderSummary;
   } catch (error) {
-    shell.loadingOverlay.hidden = false;
-    shell.loadingOverlay.textContent = 'Failed to load district boundaries.';
+    showLoadingOverlay(shell, 'Failed to load district boundaries.', 0);
     throw error;
   }
 }
@@ -376,28 +387,26 @@ export async function loadGraphBinary(shell, options = {}) {
   const url = options.url ?? DEFAULT_GRAPH_BINARY_URL;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
 
-  shell.loadingOverlay.hidden = false;
-  shell.loadingOverlay.textContent = 'Loading graph: 0.00 MB';
+  showLoadingOverlay(shell, 'Loading graph: 0.00 MB', 0);
 
   try {
     const buffer = await fetchBinaryWithProgress(url, {
       fetchImpl,
       onProgress(receivedBytes, totalBytes) {
-        updateGraphLoadingText(shell.loadingOverlay, receivedBytes, totalBytes);
+        updateGraphLoadingText(shell, receivedBytes, totalBytes);
       },
     });
 
     const graph = parseGraphBinary(buffer);
     shell.isochroneCanvas.style.pointerEvents = 'auto';
     shell.isochroneCanvas.dataset.graphLoaded = 'true';
-    shell.loadingOverlay.hidden = true;
-    shell.loadingOverlay.textContent = '';
+    showLoadingOverlay(shell, 'Loading graph: 100%', 100);
+    fadeOutLoadingOverlay(shell);
     return graph;
   } catch (error) {
     shell.isochroneCanvas.style.pointerEvents = 'none';
     shell.isochroneCanvas.dataset.graphLoaded = 'false';
-    shell.loadingOverlay.hidden = false;
-    shell.loadingOverlay.textContent = 'Failed to load graph binary.';
+    showLoadingOverlay(shell, 'Failed to load graph binary.', 0);
     throw error;
   }
 }
@@ -595,16 +604,47 @@ function sizeCanvasToCssPixels(canvas) {
   }
 }
 
-function updateGraphLoadingText(overlay, receivedBytes, totalBytes) {
+function updateGraphLoadingText(shell, receivedBytes, totalBytes) {
   const receivedText = formatMebibytes(receivedBytes);
   if (totalBytes === null || totalBytes <= 0) {
-    overlay.textContent = `Loading graph: ${receivedText}`;
+    shell.loadingText.textContent = `Loading graph: ${receivedText}`;
     return;
   }
 
   const totalText = formatMebibytes(totalBytes);
   const percent = Math.min(100, Math.round((receivedBytes / totalBytes) * 100));
-  overlay.textContent = `Loading graph: ${receivedText} / ${totalText} (${percent}%)`;
+  shell.loadingText.textContent = `Loading graph: ${receivedText} / ${totalText} (${percent}%)`;
+  setLoadingProgressBar(shell.loadingProgressBar, percent);
+}
+
+function showLoadingOverlay(shell, text, progressPercent) {
+  if (shell.loadingFadeTimeoutId !== null) {
+    clearTimeout(shell.loadingFadeTimeoutId);
+    shell.loadingFadeTimeoutId = null;
+  }
+
+  shell.loadingOverlay.hidden = false;
+  shell.loadingOverlay.classList.remove('is-fading');
+  shell.loadingText.textContent = text;
+  setLoadingProgressBar(shell.loadingProgressBar, progressPercent);
+}
+
+function fadeOutLoadingOverlay(shell) {
+  if (shell.loadingFadeTimeoutId !== null) {
+    clearTimeout(shell.loadingFadeTimeoutId);
+  }
+
+  shell.loadingOverlay.classList.add('is-fading');
+  shell.loadingFadeTimeoutId = setTimeout(() => {
+    shell.loadingOverlay.hidden = true;
+    shell.loadingOverlay.classList.remove('is-fading');
+    shell.loadingFadeTimeoutId = null;
+  }, LOADING_FADE_MS);
+}
+
+function setLoadingProgressBar(progressBar, progressPercent) {
+  const clamped = clampInt(Math.round(progressPercent), 0, 100);
+  progressBar.style.width = `${clamped}%`;
 }
 
 function parseContentLength(value) {

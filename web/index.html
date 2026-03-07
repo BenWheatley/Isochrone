@@ -24,7 +24,12 @@
           ></canvas>
           <canvas id="isochrone" width="1024" height="768" aria-label="Berlin map canvas"></canvas>
         </div>
-        <div id="loading" role="status" aria-live="polite">Loading district boundaries...</div>
+        <div id="loading" role="status" aria-live="polite">
+          <div id="loading-text">Loading district boundaries...</div>
+          <div id="loading-progress" aria-hidden="true">
+            <div id="loading-progress-bar"></div>
+          </div>
+        </div>
       </section>
     </main>
     <script type="module" src="./src/app.js"></script>
