@@ -400,8 +400,6 @@ export async function loadGraphBinary(shell, options = {}) {
     const graph = parseGraphBinary(buffer);
     shell.isochroneCanvas.style.pointerEvents = 'auto';
     shell.isochroneCanvas.dataset.graphLoaded = 'true';
-    showLoadingOverlay(shell, 'Loading graph: 100%', 100);
-    fadeOutLoadingOverlay(shell);
     return graph;
   } catch (error) {
     shell.isochroneCanvas.style.pointerEvents = 'none';
@@ -415,19 +413,27 @@ export async function initializeMapData(shell, options = {}) {
   const boundaryOptions = options.boundaries ?? {};
   const graphOptions = options.graph ?? {};
 
-  const boundarySummary = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
-  const graph = await loadGraphBinary(shell, graphOptions);
-  const nodePixels = precomputeNodePixelCoordinates(graph);
-  const pixelGrid = createPixelGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
-  clearGrid(pixelGrid);
-  blitPixelGridToCanvas(shell.isochroneCanvas, pixelGrid);
+  try {
+    const boundarySummary = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
+    const graph = await loadGraphBinary(shell, graphOptions);
+    const nodePixels = precomputeNodePixelCoordinates(graph);
+    const pixelGrid = createPixelGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
+    clearGrid(pixelGrid);
+    blitPixelGridToCanvas(shell.isochroneCanvas, pixelGrid);
 
-  return {
-    boundarySummary,
-    graph,
-    nodePixels,
-    pixelGrid,
-  };
+    showLoadingOverlay(shell, 'Loading graph: 100%', 100);
+    fadeOutLoadingOverlay(shell);
+
+    return {
+      boundarySummary,
+      graph,
+      nodePixels,
+      pixelGrid,
+    };
+  } catch (error) {
+    showLoadingOverlay(shell, 'Initialization failed.', 0);
+    throw error;
+  }
 }
 
 export function precomputeNodePixelCoordinates(graph) {

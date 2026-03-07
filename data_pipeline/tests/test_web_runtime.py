@@ -115,6 +115,7 @@ def test_app_js_has_loading_progress_bar_and_fade_contract() -> None:
     assert "progressPercent" in app_js
     assert "style.width" in app_js
     assert "classList.add('is-fading')" in app_js
+    assert "showLoadingOverlay(shell, 'Initialization failed.', 0);" in app_js
 
 
 def test_app_js_has_time_sliced_search_contract() -> None:
