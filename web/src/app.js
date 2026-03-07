@@ -402,14 +402,46 @@ export async function initializeMapData(shell, options = {}) {
 
   const boundarySummary = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
   const graph = await loadGraphBinary(shell, graphOptions);
+  const nodePixels = precomputeNodePixelCoordinates(graph);
   const pixelGrid = createPixelGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
   clearGrid(pixelGrid);
 
   return {
     boundarySummary,
     graph,
+    nodePixels,
     pixelGrid,
   };
+}
+
+export function precomputeNodePixelCoordinates(graph) {
+  validateGraphForNodePixels(graph);
+
+  if (graph.header.gridWidthPx > 0xffff || graph.header.gridHeightPx > 0xffff) {
+    throw new Error('grid dimensions exceed Uint16 capacity for node pixel index arrays');
+  }
+
+  const pixelSizeM = graph.header.pixelSizeM;
+  if (!(pixelSizeM > 0)) {
+    throw new Error('graph header pixelSizeM must be positive');
+  }
+
+  const maxX = graph.header.gridWidthPx - 1;
+  const maxY = graph.header.gridHeightPx - 1;
+  const nodePixelX = new Uint16Array(graph.header.nNodes);
+  const nodePixelY = new Uint16Array(graph.header.nNodes);
+
+  for (let nodeIndex = 0; nodeIndex < graph.header.nNodes; nodeIndex += 1) {
+    const xM = graph.nodeI32[nodeIndex * 4];
+    const yM = graph.nodeI32[nodeIndex * 4 + 1];
+    const pxX = Math.floor(xM / pixelSizeM);
+    const pxY = Math.floor(yM / pixelSizeM);
+
+    nodePixelX[nodeIndex] = clampInt(pxX, 0, maxX);
+    nodePixelY[nodeIndex] = clampInt(pxY, 0, maxY);
+  }
+
+  return { nodePixelX, nodePixelY };
 }
 
 export function createPixelGrid(widthPx, heightPx) {
@@ -518,6 +550,40 @@ function validatePixelGrid(pixelGrid) {
       `pixelGrid.rgba length mismatch: got ${pixelGrid.rgba.length}, expected ${expectedLength}`,
     );
   }
+}
+
+function validateGraphForNodePixels(graph) {
+  if (!graph || typeof graph !== 'object') {
+    throw new Error('graph must be an object');
+  }
+  if (!graph.header || typeof graph.header !== 'object') {
+    throw new Error('graph.header is required');
+  }
+  if (!Number.isInteger(graph.header.nNodes) || graph.header.nNodes < 0) {
+    throw new Error('graph.header.nNodes must be a non-negative integer');
+  }
+  if (!Number.isInteger(graph.header.gridWidthPx) || graph.header.gridWidthPx <= 0) {
+    throw new Error('graph.header.gridWidthPx must be a positive integer');
+  }
+  if (!Number.isInteger(graph.header.gridHeightPx) || graph.header.gridHeightPx <= 0) {
+    throw new Error('graph.header.gridHeightPx must be a positive integer');
+  }
+  if (!(graph.nodeI32 instanceof Int32Array)) {
+    throw new Error('graph.nodeI32 must be an Int32Array');
+  }
+  if (graph.nodeI32.length < graph.header.nNodes * 4) {
+    throw new Error('graph.nodeI32 is too short for node records');
+  }
+}
+
+function clampInt(value, minValue, maxValue) {
+  if (value < minValue) {
+    return minValue;
+  }
+  if (value > maxValue) {
+    return maxValue;
+  }
+  return value;
 }
 
 function parseCoordinatePair(value, context) {

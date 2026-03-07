@@ -434,9 +434,9 @@ Tasks
 Estimated time: 20 min
 
 Tasks
-- For each node: `px_x = floor(node.x_m / 10)`, `px_y = floor(node.y_m / 10)`
-- Pre-compute and store as `Uint16Array nodePixelX[N]`, `nodePixelY[N]`
-- These are computed once after graph load; not recomputed per routing run
+- [x] For each node: `px_x = floor(node.x_m / 10)`, `px_y = floor(node.y_m / 10)`
+- [x] Pre-compute and store as `Uint16Array nodePixelX[N]`, `nodePixelY[N]`
+- [x] These are computed once after graph load; not recomputed per routing run
 
 ---
 
