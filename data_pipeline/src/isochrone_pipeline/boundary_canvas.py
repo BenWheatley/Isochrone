@@ -29,6 +29,21 @@ def extract_overpass_boundary_features(
         raise ValueError("Overpass JSON must contain an 'elements' list")
 
     features: list[BoundaryFeature] = []
+    way_geometry_by_id: dict[int, tuple[tuple[float, float], ...]] = {}
+
+    for element in elements:
+        if not isinstance(element, dict):
+            continue
+        if element.get("type") != "way":
+            continue
+
+        way_id = element.get("id")
+        if not isinstance(way_id, int):
+            continue
+
+        way_geometry = _parse_geometry_points(element.get("geometry"))
+        if len(way_geometry) >= 2:
+            way_geometry_by_id[way_id] = way_geometry
 
     for element in elements:
         if not isinstance(element, dict):
@@ -51,32 +66,29 @@ def extract_overpass_boundary_features(
 
         name = str(tags.get("name") or f"relation_{relation_id}")
 
-        members = element.get("members")
-        if not isinstance(members, list):
-            continue
-
         paths: list[tuple[tuple[float, float], ...]] = []
-        for member in members:
-            if not isinstance(member, dict):
-                continue
-            if member.get("type") != "way":
-                continue
+        relation_geometry = _parse_geometry_points(element.get("geometry"))
+        if len(relation_geometry) >= 2:
+            paths.append(relation_geometry)
 
-            geometry = member.get("geometry")
-            if not isinstance(geometry, list):
-                continue
-
-            path_points: list[tuple[float, float]] = []
-            for point in geometry:
-                if not isinstance(point, dict):
+        members = element.get("members")
+        if isinstance(members, list):
+            for member in members:
+                if not isinstance(member, dict):
                     continue
-                lat = point.get("lat")
-                lon = point.get("lon")
-                if isinstance(lat, int | float) and isinstance(lon, int | float):
-                    path_points.append((float(lon), float(lat)))
+                if member.get("type") != "way":
+                    continue
 
-            if len(path_points) >= 2:
-                paths.append(tuple(path_points))
+                member_geometry = _parse_geometry_points(member.get("geometry"))
+                if len(member_geometry) >= 2:
+                    paths.append(member_geometry)
+                    continue
+
+                member_ref = member.get("ref")
+                if isinstance(member_ref, int):
+                    referenced_geometry = way_geometry_by_id.get(member_ref)
+                    if referenced_geometry is not None:
+                        paths.append(referenced_geometry)
 
         if paths:
             features.append(
@@ -154,6 +166,12 @@ def simplify_overpass_boundaries_for_canvas(
         raise ValueError("tolerance must be non-negative")
 
     features = extract_overpass_boundary_features(overpass_json, admin_level=admin_level)
+    if not features:
+        raise ValueError(
+            "No administrative boundary geometry found. "
+            "Ensure Overpass output includes relation member way geometry "
+            "(for example: '(.districts;>;); out body geom qt;')."
+        )
 
     if units == "meters":
         transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg_code}", always_xy=True)
@@ -250,6 +268,22 @@ def simplify_overpass_boundaries_for_canvas(
             "output_point_count": output_point_count,
         },
     }
+
+
+def _parse_geometry_points(raw_geometry: Any) -> tuple[tuple[float, float], ...]:
+    if not isinstance(raw_geometry, list):
+        return tuple()
+
+    points: list[tuple[float, float]] = []
+    for point in raw_geometry:
+        if not isinstance(point, dict):
+            continue
+        lat = point.get("lat")
+        lon = point.get("lon")
+        if isinstance(lat, int | float) and isinstance(lon, int | float):
+            points.append((float(lon), float(lat)))
+
+    return tuple(points)
 
 
 def _distance_point_to_segment(

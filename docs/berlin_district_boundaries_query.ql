@@ -12,5 +12,7 @@ rel(62422)->.berlin;
 rel(area.berlinArea)
   ["boundary"="administrative"]
   ["type"="boundary"]
-  ["admin_level"="9"];
-out tags geom qt;
+  ["admin_level"="9"]->.districts;
+
+(.districts;>;);
+out body geom qt;

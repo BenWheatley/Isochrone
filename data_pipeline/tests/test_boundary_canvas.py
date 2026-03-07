@@ -40,6 +40,48 @@ SAMPLE_OVERPASS = {
     ]
 }
 
+SAMPLE_OVERPASS_REF_WAYS = {
+    "elements": [
+        {
+            "type": "relation",
+            "id": 101,
+            "tags": {
+                "boundary": "administrative",
+                "type": "boundary",
+                "admin_level": "9",
+                "name": "Pankow",
+            },
+            "members": [
+                {"type": "way", "ref": 9001, "role": "outer"},
+            ],
+        },
+        {
+            "type": "way",
+            "id": 9001,
+            "geometry": [
+                {"lat": 52.5300, "lon": 13.4000},
+                {"lat": 52.5310, "lon": 13.4010},
+                {"lat": 52.5320, "lon": 13.4020},
+            ],
+        },
+    ]
+}
+
+SAMPLE_OVERPASS_NO_GEOMETRY = {
+    "elements": [
+        {
+            "type": "relation",
+            "id": 102,
+            "tags": {
+                "boundary": "administrative",
+                "type": "boundary",
+                "admin_level": "9",
+                "name": "NoGeom",
+            },
+        },
+    ]
+}
+
 
 def test_extract_overpass_boundary_features_filters_admin_level() -> None:
     features = extract_overpass_boundary_features(SAMPLE_OVERPASS, admin_level="9")
@@ -88,3 +130,26 @@ def test_simplify_overpass_boundaries_for_canvas_meters() -> None:
     assert payload["coordinate_space"]["units"] == "meters"
     assert payload["coordinate_space"]["projection"] == "EPSG:25833"
     assert payload["stats"]["output_point_count"] <= payload["stats"]["input_point_count"]
+
+
+def test_extract_overpass_boundary_features_uses_way_refs_with_geometry() -> None:
+    features = extract_overpass_boundary_features(SAMPLE_OVERPASS_REF_WAYS, admin_level="9")
+
+    assert len(features) == 1
+    assert features[0].relation_id == 101
+    assert len(features[0].paths_lat_lon) == 1
+    assert len(features[0].paths_lat_lon[0]) == 3
+
+
+def test_simplify_overpass_boundaries_requires_geometry() -> None:
+    try:
+        simplify_overpass_boundaries_for_canvas(
+            SAMPLE_OVERPASS_NO_GEOMETRY,
+            tolerance=25.0,
+            units="meters",
+            admin_level="9",
+        )
+    except ValueError as exc:
+        assert "No administrative boundary geometry found" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
