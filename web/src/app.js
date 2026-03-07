@@ -405,6 +405,7 @@ export async function initializeMapData(shell, options = {}) {
   const nodePixels = precomputeNodePixelCoordinates(graph);
   const pixelGrid = createPixelGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
   clearGrid(pixelGrid);
+  blitPixelGridToCanvas(shell.mapCanvas, pixelGrid);
 
   return {
     boundarySummary,
@@ -505,6 +506,68 @@ export function setPixel(pixelGrid, xPx, yPx, r, g, b, a) {
   return true;
 }
 
+export function paintReachableNodesToGrid(pixelGrid, nodePixels, distSeconds, options = {}) {
+  validatePixelGrid(pixelGrid);
+  validateNodePixels(nodePixels);
+  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
+
+  const alpha = options.alpha ?? 180;
+  let paintedCount = 0;
+
+  for (let nodeIndex = 0; nodeIndex < nodePixels.nodePixelX.length; nodeIndex += 1) {
+    if (distSeconds[nodeIndex] < Infinity) {
+      const [r, g, b] = timeToColour(distSeconds[nodeIndex]);
+      const xPx = nodePixels.nodePixelX[nodeIndex];
+      const yPx = nodePixels.nodePixelY[nodeIndex];
+      if (setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)) {
+        paintedCount += 1;
+      }
+    }
+  }
+
+  return paintedCount;
+}
+
+export function blitPixelGridToCanvas(canvas, pixelGrid) {
+  if (!canvas || typeof canvas.getContext !== 'function') {
+    throw new Error('canvas must provide getContext("2d")');
+  }
+  validatePixelGrid(pixelGrid);
+
+  if (canvas.width !== pixelGrid.widthPx) {
+    canvas.width = pixelGrid.widthPx;
+  }
+  if (canvas.height !== pixelGrid.heightPx) {
+    canvas.height = pixelGrid.heightPx;
+  }
+
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('Unable to get 2D context for isochrone canvas');
+  }
+
+  const imageData = new ImageData(pixelGrid.rgba, pixelGrid.widthPx, pixelGrid.heightPx);
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.putImageData(imageData, 0, 0);
+  return imageData;
+}
+
+export function renderReachableNodes(shell, mapData, distSeconds, options = {}) {
+  if (!mapData || typeof mapData !== 'object') {
+    throw new Error('mapData must be an object');
+  }
+
+  clearGrid(mapData.pixelGrid);
+  const paintedNodeCount = paintReachableNodesToGrid(
+    mapData.pixelGrid,
+    mapData.nodePixels,
+    distSeconds,
+    options,
+  );
+  blitPixelGridToCanvas(shell.mapCanvas, mapData.pixelGrid);
+  return paintedNodeCount;
+}
+
 function sizeCanvasToCssPixels(canvas) {
   if (typeof canvas.getBoundingClientRect !== 'function') {
     return;
@@ -573,6 +636,30 @@ function validatePixelGrid(pixelGrid) {
     throw new Error(
       `pixelGrid.rgba length mismatch: got ${pixelGrid.rgba.length}, expected ${expectedLength}`,
     );
+  }
+}
+
+function validateNodePixels(nodePixels) {
+  if (!nodePixels || typeof nodePixels !== 'object') {
+    throw new Error('nodePixels must be an object');
+  }
+  if (!(nodePixels.nodePixelX instanceof Uint16Array)) {
+    throw new Error('nodePixels.nodePixelX must be a Uint16Array');
+  }
+  if (!(nodePixels.nodePixelY instanceof Uint16Array)) {
+    throw new Error('nodePixels.nodePixelY must be a Uint16Array');
+  }
+  if (nodePixels.nodePixelX.length !== nodePixels.nodePixelY.length) {
+    throw new Error('node pixel arrays must have equal lengths');
+  }
+}
+
+function validateDistSeconds(distSeconds, expectedLength) {
+  if (!distSeconds || typeof distSeconds.length !== 'number') {
+    throw new Error('distSeconds must be an array-like sequence');
+  }
+  if (distSeconds.length < expectedLength) {
+    throw new Error('distSeconds is shorter than node pixel arrays');
   }
 }
 

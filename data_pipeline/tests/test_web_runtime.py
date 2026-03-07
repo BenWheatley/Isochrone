@@ -80,6 +80,22 @@ def test_app_js_has_time_to_colour_contract() -> None:
     assert "return [210, 58, 54];" in app_js
 
 
+def test_app_js_has_reachable_paint_and_blit_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "export function paintReachableNodesToGrid(" in app_js
+    assert "const alpha = options.alpha ?? 180;" in app_js
+    assert "if (distSeconds[nodeIndex] < Infinity)" in app_js
+    assert "const [r, g, b] = timeToColour(distSeconds[nodeIndex]);" in app_js
+    assert "setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)" in app_js
+    assert "export function blitPixelGridToCanvas(" in app_js
+    assert (
+        "const imageData = new ImageData(pixelGrid.rgba, pixelGrid.widthPx, pixelGrid.heightPx);"
+        in app_js
+    )
+    assert "context.putImageData(imageData, 0, 0);" in app_js
+
+
 def test_styles_prevent_zero_height_map_region() -> None:
     styles_css = (WEB_ROOT / "src" / "styles.css").read_text(encoding="utf-8")
 

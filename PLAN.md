@@ -454,9 +454,9 @@ Tasks
 Estimated time: 25 min
 
 Tasks
-- After routing: for each node with `dist[i] < Infinity`, call `setPixel` with colour mapped from travel time
-- `putImageData` to canvas (composited over boundary basemap using a second canvas layer with `globalAlpha`)
-- Reachable cells are drawn with alpha ~180 (semi-transparent); unreachable cells are transparent
+- [x] After routing: for each node with `dist[i] < Infinity`, call `setPixel` with colour mapped from travel time
+- [x] `putImageData` to canvas (composited over boundary basemap using a second canvas layer with `globalAlpha`)
+- [x] Reachable cells are drawn with alpha ~180 (semi-transparent); unreachable cells are transparent
 
 ---
 
