@@ -20,7 +20,7 @@ This repository is configured for autonomous coding agents. Follow these rules e
 
 ## Project layout
 - `data_pipeline/`: Python pipeline code and tests
-- `web/`: Client-side web app code and tests
+- `web/`: Client-side web app code (vanilla JS modules)
 - `docs/`: Architecture and process docs
 - `.github/workflows/`: CI quality gates
 
@@ -36,4 +36,4 @@ This repository is configured for autonomous coding agents. Follow these rules e
 - Lint/typecheck: `make lint`
 - Tests: `make test`
 - Full gate: `make check`
-- Build web bundle: `make build`
+- Verify static web packaging: `make build`

@@ -13,8 +13,8 @@ Provide deterministic workflows so human and AI contributors can work safely and
 
 ## Quality gates
 - Python: ruff, mypy, pytest
-- Web: eslint, prettier check, vitest, esbuild build
-- CI runs all gates on pull requests and pushes to `main`
+- Web runtime: direct browser smoke-check via static server (no Node.js toolchain)
+- CI runs Python gates on pull requests and pushes to `main`
 
 ## Change hygiene
 - Avoid unrelated modifications.

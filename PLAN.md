@@ -33,32 +33,32 @@ Tasks
 
 ---
 
-## 1.3 Configure JavaScript bundler
+## 1.3 Configure vanilla JavaScript runtime
 Estimated time: 45 min
 
-**Decision:** Use **esbuild**. It is a single binary with no configuration file required for basic usage, bundles ES modules, outputs a single minified file, and runs in under 100 ms on this codebase. No webpack, no Rollup, no Vite — esbuild is the minimal-complexity choice.
+**Decision:** Use native browser ES modules. No Node.js build toolchain, no bundler, no npm scripts.
 
-### 1.3.1 Install esbuild
+### 1.3.1 Set module loading strategy
 Estimated time: 15 min
 
 Tasks
-- [x] `npm init -y` in `/web`
-- [x] `npm install --save-dev esbuild`
-- [x] Confirm `npx esbuild --version`
+- [x] Use `<script type="module" src="./src/app.js">` in `index.html`
+- [x] Keep runtime dependencies browser-native (no npm package imports)
+- [x] Confirm app boots via static server (`python -m http.server`)
 
-### 1.3.2 Write build script
+### 1.3.2 Define static-serving workflow
 Estimated time: 15 min
 
 Tasks
-- [x] Add `build` script to `package.json`: `esbuild src/app.js --bundle --minify --outfile=dist/app.js`
-- [x] Add `dev` script with `--watch` flag and `--sourcemap`
+- [x] Document static serving entrypoint (`/web/index.html`)
+- [x] Use direct module files from `/web/src/` without transpilation
 
 ### 1.3.3 Create source layout
 Estimated time: 15 min
 
 Tasks
 - [x] Create `/web/src/` for ES module source files
-- [x] Create `/web/dist/` as build output (git-ignored in dev, committed for Pages deploy)
+- [x] Keep `/web/index.html` + `/web/src/` as deployable source (no build output dir required)
 - [x] Create stub `src/app.js` with a single `console.log`
 
 ---
@@ -364,7 +364,7 @@ Estimated time: 30 min
 
 Tasks
 - [x] `index.html` with: `<canvas id="map">`, time-of-day input (default 08:00), loading overlay `<div id="loading">`
-- [x] Link to `dist/app.js`
+- [x] Link to `src/app.js` via `<script type="module">`
 - [x] No inline JS; no inline styles beyond basic layout
 
 ---
@@ -606,12 +606,12 @@ Tasks
 
 ---
 
-## 10.2 Production build
+## 10.2 Production static package
 Estimated time: 20 min
 
 Tasks
-- Run esbuild build script (from Phase 1.3): outputs minified `dist/app.js`
-- Confirm total JS payload < 50 kB (expected ~20 kB)
+- Verify `index.html` loads `src/app.js` as ES module without bundling
+- Confirm static asset paths are relative and deploy-safe
 
 ---
 
@@ -619,7 +619,7 @@ Tasks
 Estimated time: 30 min
 
 Tasks
-- Push `/web/dist/` and `berlin_graph.bin.gz` to `gh-pages` branch (or configure Pages source)
+- Push `/web/` static files and `berlin_graph.bin.gz` to `gh-pages` branch (or configure Pages source)
 - Verify boundary basemap loading, graph loading, and click-to-isochrone in deployed environment
 - Verify `Content-Encoding: gzip` is being served correctly (check DevTools Network tab)
 
@@ -744,7 +744,7 @@ The pipeline is parameterised from Phase 3.2 onward: `--epsg`, `--input`, `--out
 
 | Phase | Description | Estimated Time |
 |-------|-------------|----------------|
-| 1 | Project setup + bundler | 2 h |
+| 1 | Project setup + vanilla JS runtime | 2 h |
 | 2 | Data exploration + schema design + writer | 2.5 h |
 | 3 | OSM extraction + graph build | 4.5 h |
 | 4 | Binary export + validation | 1.25 h |
@@ -768,8 +768,8 @@ Post-MVP (Phase 11, GTFS transit) adds approximately **7–9 hours** of developm
 - `/data_pipeline/input/berlin-routing.osm.json` — Overpass JSON extract for Berlin routing build
 - `/data_pipeline/output/berlin-district-boundaries-canvas.json` — simplified boundary basemap JSON
 - `/docs/berlin_district_boundaries_query.ql` — Overpass query for Berlin district boundaries
-- `/web/dist/index.html`
-- `/web/dist/app.js` — minified bundle
+- `/web/index.html`
+- `/web/src/app.js` — vanilla JS module entrypoint
 - `/data_pipeline/` — Python pipeline scripts
 
 ## Post-MVP additions

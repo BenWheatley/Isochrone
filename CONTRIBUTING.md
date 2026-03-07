@@ -1,7 +1,7 @@
 # Contributing
 
 ## Setup
-1. Install Python 3.11+ and Node.js 18+.
+1. Install Python 3.11+.
 2. Run `make bootstrap`.
 3. Run `make precommit-install`.
 
