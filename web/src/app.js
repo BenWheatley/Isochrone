@@ -444,6 +444,30 @@ export function precomputeNodePixelCoordinates(graph) {
   return { nodePixelX, nodePixelY };
 }
 
+export function timeToColour(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    throw new Error('seconds must be a non-negative finite number');
+  }
+
+  const minutes = seconds / 60;
+
+  if (minutes <= 5) {
+    return [32, 163, 78];
+  }
+  if (minutes <= 15) {
+    return [214, 201, 37];
+  }
+  if (minutes <= 30) {
+    return [230, 138, 43];
+  }
+  if (minutes <= 45) {
+    return [210, 58, 54];
+  }
+
+  // Clamp over-limit travel times to the outermost ramp colour.
+  return [210, 58, 54];
+}
+
 export function createPixelGrid(widthPx, heightPx) {
   if (!Number.isInteger(widthPx) || widthPx <= 0) {
     throw new Error('pixel grid width must be a positive integer');

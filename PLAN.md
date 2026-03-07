@@ -447,8 +447,8 @@ Estimated time: 45 min
 Estimated time: 20 min
 
 Tasks
-- Define colour ramp: 0–5 min → green, 5–15 min → yellow, 15–30 min → orange, 30–45 min → red
-- `timeToColour(seconds)` returns `[r, g, b]`
+- [x] Define colour ramp: 0–5 min → green, 5–15 min → yellow, 15–30 min → orange, 30–45 min → red
+- [x] `timeToColour(seconds)` returns `[r, g, b]`
 
 ### 6.3.2 Paint reachable nodes
 Estimated time: 25 min
