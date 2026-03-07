@@ -32,3 +32,12 @@ def test_app_js_has_zero_size_canvas_guard_and_no_stale_loading_graph_text() -> 
 
     assert "Loading graph..." not in app_js
     assert "if (width < 2 || height < 2)" in app_js
+
+
+def test_styles_prevent_zero_height_map_region() -> None:
+    styles_css = (WEB_ROOT / "src" / "styles.css").read_text(encoding="utf-8")
+
+    assert ".app-shell" in styles_css
+    assert "height: 100vh;" in styles_css
+    assert ".map-region" in styles_css
+    assert "min-height: 16rem;" in styles_css
