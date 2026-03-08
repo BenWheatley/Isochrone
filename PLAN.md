@@ -548,8 +548,8 @@ Tasks
 Estimated time: 20 min
 
 Tasks
-- After walking Dijkstra settles all nodes within walking range of stops, add a clearly-commented stub: `// POST-MVP: run CSA here, then re-run Dijkstra from transit-reached stops`
-- The stub reads `N_stops` from header; if 0, skips silently
+- [x] After walking Dijkstra settles all nodes within walking range of stops, add a clearly-commented stub: `// POST-MVP: run CSA here, then re-run Dijkstra from transit-reached stops`
+- [x] The stub reads `N_stops` from header; if 0, skips silently
 
 ---
 

@@ -358,11 +358,42 @@ export async function runWalkingIsochroneFromSourceNode(
 
   const searchState = createWalkingSearchState(mapData.graph, sourceNodeIndex, timeLimitSeconds);
   const timeLimitMinutes = options.timeLimitMinutes ?? Math.max(1, Math.round(timeLimitSeconds / 60));
-
-  return runSearchTimeSlicedWithRendering(shell, mapData, searchState, {
+  const runSummary = await runSearchTimeSlicedWithRendering(shell, mapData, searchState, {
     ...options,
     timeLimitMinutes,
   });
+  runPostMvpTransitStub(mapData.graph, searchState);
+  return runSummary;
+}
+
+export function runPostMvpTransitStub(graph, walkingSearchState) {
+  validateGraphForRouting(graph);
+
+  if (!walkingSearchState || typeof walkingSearchState !== 'object') {
+    throw new Error('walkingSearchState must be an object');
+  }
+  if (typeof walkingSearchState.isDone !== 'function' || !walkingSearchState.isDone()) {
+    throw new Error('walkingSearchState must be complete before transit integration');
+  }
+
+  const nStops = graph.header.nStops;
+  if (!Number.isInteger(nStops) || nStops < 0) {
+    throw new Error('graph.header.nStops must be a non-negative integer');
+  }
+  if (nStops === 0) {
+    return {
+      nStops,
+      ranCsa: false,
+      reranWalkingDijkstra: false,
+    };
+  }
+
+  // POST-MVP: run CSA here, then re-run Dijkstra from transit-reached stops
+  return {
+    nStops,
+    ranCsa: false,
+    reranWalkingDijkstra: false,
+  };
 }
 
 export function minutesToSeconds(minutes) {
