@@ -588,8 +588,8 @@ Tasks
 Estimated time: 20 min
 
 Tasks
-- [x] `<input type="range" min="5" max="90" step="5">` for time limit in minutes, with numeric label
-- [x] On change: re-run routing from last clicked node (debounced 200 ms)
+- [x] Remove walk-time cap UI for MVP travel-time field mode
+- [x] On click: compute full travel-time field across reachable graph nodes (no upper bound)
 
 ---
 

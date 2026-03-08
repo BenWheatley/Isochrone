@@ -46,15 +46,6 @@ body {
   min-width: 7.5rem;
 }
 
-.app-header input[type='range'] {
-  min-width: 9rem;
-}
-
-.app-header output {
-  min-width: 3.75rem;
-  font-variant-numeric: tabular-nums;
-}
-
 .map-region {
   position: relative;
   flex: 1 1 auto;

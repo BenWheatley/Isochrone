@@ -22,6 +22,7 @@ make review
 ## Runtime data
 - Web runtime loads `data_pipeline/output/graph-walk.bin.gz` by default.
 - The graph payload is gzip-compressed and decompressed in-browser before parsing.
+- Clicking the map computes a full travel-time field across all reachable graph nodes (no walk-time cap).
 
 ## Repository structure
 - `data_pipeline/`: Graph preprocessing and binary export logic

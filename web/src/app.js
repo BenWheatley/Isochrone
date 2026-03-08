@@ -217,14 +217,23 @@ export function runMinHeapSelfTest(seed = 0x12345678) {
   return true;
 }
 
-export function createWalkingSearchState(graph, sourceNodeIndex, timeLimitSeconds) {
+export function createWalkingSearchState(
+  graph,
+  sourceNodeIndex,
+  timeLimitSeconds = Number.POSITIVE_INFINITY,
+) {
   validateGraphForRouting(graph);
 
   if (!Number.isInteger(sourceNodeIndex) || sourceNodeIndex < 0 || sourceNodeIndex >= graph.header.nNodes) {
     throw new Error(`sourceNodeIndex out of range: ${sourceNodeIndex}`);
   }
-  if (!Number.isFinite(timeLimitSeconds) || timeLimitSeconds <= 0) {
-    throw new Error('timeLimitSeconds must be a positive finite number');
+  if (
+    !(
+      timeLimitSeconds === Number.POSITIVE_INFINITY ||
+      (Number.isFinite(timeLimitSeconds) && timeLimitSeconds > 0)
+    )
+  ) {
+    throw new Error('timeLimitSeconds must be a positive finite number or Infinity');
   }
 
   const distSeconds = new Float32Array(graph.header.nNodes);
@@ -269,7 +278,7 @@ export function createWalkingSearchState(graph, sourceNodeIndex, timeLimitSecond
         const nodeIndex = entry.nodeIndex;
         const cost = entry.cost;
 
-        if (cost > timeLimitSeconds) {
+        if (Number.isFinite(timeLimitSeconds) && cost > timeLimitSeconds) {
           done = true;
           return -1;
         }
@@ -289,7 +298,7 @@ export function createWalkingSearchState(graph, sourceNodeIndex, timeLimitSecond
           const edgeCostSeconds = graph.edgeU16[edgeIndex * 6 + 2];
           const nextCost = cost + edgeCostSeconds;
 
-          if (nextCost > timeLimitSeconds) {
+          if (Number.isFinite(timeLimitSeconds) && nextCost > timeLimitSeconds) {
             continue;
           }
           if (nextCost < distSeconds[targetIndex]) {
@@ -438,54 +447,16 @@ export function highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex, o
   return { nodeIndex, xPx, yPx };
 }
 
-export function readTimeLimitMinutes(timeLimitMinutesInput) {
-  if (!timeLimitMinutesInput || timeLimitMinutesInput.tagName !== 'INPUT') {
-    throw new Error('timeLimitMinutesInput must be an <input>');
-  }
-  if (timeLimitMinutesInput.type !== 'range') {
-    throw new Error('timeLimitMinutesInput must be type="range"');
-  }
-
-  const parsed = Number.parseInt(timeLimitMinutesInput.value, 10);
-  if (!Number.isFinite(parsed)) {
-    throw new Error('time limit input value must parse to a finite integer');
-  }
-  return clampInt(parsed, 5, 90);
-}
-
-function updateTimeLimitMinutesLabel(shell) {
-  const timeLimitMinutes = readTimeLimitMinutes(shell.timeLimitMinutesInput);
-  shell.timeLimitMinutesValue.textContent = `${timeLimitMinutes} min`;
-  return timeLimitMinutes;
-}
-
 export function bindCanvasClickRouting(shell, mapData, options = {}) {
   if (!shell || !shell.isochroneCanvas) {
     throw new Error('shell.isochroneCanvas is required');
-  }
-  if (!shell.timeLimitMinutesInput || !shell.timeLimitMinutesValue) {
-    throw new Error('shell time limit controls are required');
   }
   if (!mapData || typeof mapData !== 'object' || !mapData.graph) {
     throw new Error('mapData.graph is required');
   }
 
-  const timeLimitDebounceMs = options.timeLimitDebounceMs ?? 200;
-  if (!Number.isFinite(timeLimitDebounceMs) || timeLimitDebounceMs < 0) {
-    throw new Error('timeLimitDebounceMs must be a non-negative finite number');
-  }
-
   let activeRunToken = null;
-  let lastClickedNodeIndex = null;
-  let debounceTimeoutId = null;
   let isDisposed = false;
-
-  const resolveTimeLimitMinutes = () => {
-    if (Number.isFinite(options.timeLimitMinutes)) {
-      return Math.max(1, Math.round(options.timeLimitMinutes));
-    }
-    return updateTimeLimitMinutesLabel(shell);
-  };
 
   const runFromNodeIndex = async (nodeIndex) => {
     if (isDisposed) {
@@ -507,16 +478,13 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);
 
     try {
-      const timeLimitMinutes = resolveTimeLimitMinutes();
-      const timeLimitSeconds = options.timeLimitSeconds ?? minutesToSeconds(timeLimitMinutes);
       const runSummary = await runWalkingIsochroneFromSourceNode(
         shell,
         mapData,
         nodeIndex,
-        timeLimitSeconds,
+        Number.POSITIVE_INFINITY,
         {
           ...options,
-          timeLimitMinutes,
           isCancelled: () => runToken.cancelled,
         },
       );
@@ -527,7 +495,6 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
 
       return {
         nodeIndex,
-        timeLimitMinutes,
         ...runSummary,
       };
     } catch (error) {
@@ -540,7 +507,6 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
 
   const runFromCanvasPixel = async (xPx, yPx) => {
     const nearest = findNearestNodeForCanvasPixel(mapData, xPx, yPx);
-    lastClickedNodeIndex = nearest.nodeIndex;
     const runSummary = await runFromNodeIndex(nearest.nodeIndex);
 
     return {
@@ -561,27 +527,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     });
   };
 
-  const handleTimeLimitInput = () => {
-    updateTimeLimitMinutesLabel(shell);
-
-    if (lastClickedNodeIndex === null) {
-      return;
-    }
-    if (debounceTimeoutId !== null) {
-      clearTimeout(debounceTimeoutId);
-    }
-
-    debounceTimeoutId = setTimeout(() => {
-      debounceTimeoutId = null;
-      void runFromNodeIndex(lastClickedNodeIndex).catch((error) => {
-        setRoutingStatus(shell, 'Routing failed.');
-        console.error(error);
-      });
-    }, timeLimitDebounceMs);
-  };
-
   shell.isochroneCanvas.addEventListener('click', handleCanvasClick);
-  shell.timeLimitMinutesInput.addEventListener('input', handleTimeLimitInput);
 
   const dispose = () => {
     if (isDisposed) {
@@ -594,13 +540,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
       activeRunToken = null;
     }
 
-    if (debounceTimeoutId !== null) {
-      clearTimeout(debounceTimeoutId);
-      debounceTimeoutId = null;
-    }
-
     shell.isochroneCanvas.removeEventListener('click', handleCanvasClick);
-    shell.timeLimitMinutesInput.removeEventListener('input', handleTimeLimitInput);
   };
 
   return { dispose, runFromCanvasPixel };
@@ -610,7 +550,7 @@ export async function runWalkingIsochroneFromSourceNode(
   shell,
   mapData,
   sourceNodeIndex,
-  timeLimitSeconds,
+  timeLimitSeconds = Number.POSITIVE_INFINITY,
   options = {},
 ) {
   if (!mapData || typeof mapData !== 'object' || !mapData.graph) {
@@ -618,11 +558,7 @@ export async function runWalkingIsochroneFromSourceNode(
   }
 
   const searchState = createWalkingSearchState(mapData.graph, sourceNodeIndex, timeLimitSeconds);
-  const timeLimitMinutes = options.timeLimitMinutes ?? Math.max(1, Math.round(timeLimitSeconds / 60));
-  const runSummary = await runSearchTimeSlicedWithRendering(shell, mapData, searchState, {
-    ...options,
-    timeLimitMinutes,
-  });
+  const runSummary = await runSearchTimeSlicedWithRendering(shell, mapData, searchState, options);
   runPostMvpTransitStub(mapData.graph, searchState);
   return runSummary;
 }
@@ -657,14 +593,6 @@ export function runPostMvpTransitStub(graph, walkingSearchState) {
   };
 }
 
-export function minutesToSeconds(minutes) {
-  if (minutes < 0) {
-    throw new Error('minutes must be non-negative');
-  }
-
-  return Math.round(minutes * 60);
-}
-
 export function initializeAppShell(doc) {
   const resolvedDocument = doc ?? globalThis.document;
   if (!resolvedDocument) {
@@ -680,8 +608,6 @@ export function initializeAppShell(doc) {
   const loadingText = resolvedDocument.getElementById('loading-text');
   const loadingProgressBar = resolvedDocument.getElementById('loading-progress-bar');
   const routingStatus = resolvedDocument.getElementById('routing-status');
-  const timeLimitMinutesInput = resolvedDocument.getElementById('time-limit-minutes');
-  const timeLimitMinutesValue = resolvedDocument.getElementById('time-limit-value');
 
   if (!mapRegion || mapRegion.tagName !== 'SECTION') {
     throw new Error('index.html is missing <section id="map-region">');
@@ -707,15 +633,6 @@ export function initializeAppShell(doc) {
   if (!routingStatus || routingStatus.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="routing-status">');
   }
-  if (!timeLimitMinutesInput || timeLimitMinutesInput.tagName !== 'INPUT') {
-    throw new Error('index.html is missing <input id="time-limit-minutes">');
-  }
-  if (timeLimitMinutesInput.type !== 'range') {
-    throw new Error('index.html time limit input must be type="range"');
-  }
-  if (!timeLimitMinutesValue || timeLimitMinutesValue.tagName !== 'OUTPUT') {
-    throw new Error('index.html is missing <output id="time-limit-value">');
-  }
 
   sizeCanvasToCssPixels(isochroneCanvas);
   sizeCanvasToCssPixels(boundaryCanvas);
@@ -727,7 +644,6 @@ export function initializeAppShell(doc) {
   loadingText.textContent = 'Loading district boundaries...';
   setLoadingProgressBar(loadingProgressBar, 0);
   routingStatus.textContent = 'Ready.';
-  timeLimitMinutesValue.textContent = `${readTimeLimitMinutes(timeLimitMinutesInput)} min`;
 
   return {
     mapRegion,
@@ -739,8 +655,6 @@ export function initializeAppShell(doc) {
     loadingText,
     loadingProgressBar,
     routingStatus,
-    timeLimitMinutesInput,
-    timeLimitMinutesValue,
     loadingFadeTimeoutId: null,
   };
 }
@@ -1553,8 +1467,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   });
 
   if (!runSummary.cancelled) {
-    const doneMinutes = options.timeLimitMinutes ?? 30;
-    setRoutingStatus(shell, formatRoutingStatusDone(doneMinutes));
+    setRoutingStatus(shell, formatRoutingStatusDone());
   }
 
   return {
@@ -1568,9 +1481,8 @@ export function formatRoutingStatusCalculating(settledCount) {
   return `Calculating... (${safeCount} nodes settled)`;
 }
 
-export function formatRoutingStatusDone(minutes) {
-  const safeMinutes = Math.max(0, Math.round(minutes));
-  return `Done - reachable area for ${safeMinutes} min walk`;
+export function formatRoutingStatusDone() {
+  return 'Done - full travel-time field ready';
 }
 
 function setRoutingStatus(shell, text) {

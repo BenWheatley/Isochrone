@@ -15,14 +15,8 @@ def test_index_html_uses_native_module_entrypoint() -> None:
     assert 'id="loading-progress"' in index_html
     assert 'id="loading-progress-bar"' in index_html
     assert 'id="routing-status"' in index_html
-    assert 'id="time-limit-minutes"' in index_html
-    assert 'name="time-limit-minutes"' in index_html
-    assert 'id="time-limit-value"' in index_html
     assert 'id="map-region"' in index_html
     assert 'id="canvas-stack"' in index_html
-    assert 'min="5"' in index_html
-    assert 'max="90"' in index_html
-    assert 'step="5"' in index_html
     assert "dist/app.js" not in index_html
     assert re.search(
         r'<script[^>]*type="module"[^>]*src="\./src/app\.js"',
@@ -162,15 +156,13 @@ def test_app_js_has_routing_status_text_contract() -> None:
     assert "getElementById('routing-status')" in app_js
     assert "getElementById('map-region')" in app_js
     assert "getElementById('canvas-stack')" in app_js
-    assert "getElementById('time-limit-minutes')" in app_js
-    assert "getElementById('time-limit-value')" in app_js
     assert "export function formatRoutingStatusCalculating(" in app_js
     assert "Calculating..." in app_js
     assert "nodes settled" in app_js
     assert "export function formatRoutingStatusDone(" in app_js
-    assert "Done - reachable area for" in app_js
+    assert "Done - full travel-time field ready" in app_js
     assert "setRoutingStatus(shell, formatRoutingStatusCalculating(0));" in app_js
-    assert "setRoutingStatus(shell, formatRoutingStatusDone(doneMinutes));" in app_js
+    assert "setRoutingStatus(shell, formatRoutingStatusDone());" in app_js
 
 
 def test_app_js_has_min_heap_contract() -> None:
@@ -195,7 +187,7 @@ def test_app_js_has_walking_dijkstra_contract() -> None:
     assert "distSeconds.fill(Infinity);" in app_js
     assert "const settled = new Uint8Array(graph.header.nNodes);" in app_js
     assert "heap.push(sourceNodeIndex, 0);" in app_js
-    assert "if (cost > timeLimitSeconds)" in app_js
+    assert "if (Number.isFinite(timeLimitSeconds) && cost > timeLimitSeconds)" in app_js
     assert "if (nextCost < distSeconds[targetIndex])" in app_js
     assert "heap.decreaseKey(targetIndex, nextCost);" in app_js
     assert "export function findNearestNodeIndex(" in app_js
@@ -247,10 +239,7 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
     assert "export function bindCanvasClickRouting(" in app_js
-    assert "const timeLimitDebounceMs = options.timeLimitDebounceMs ?? 200;" in app_js
-    assert "let lastClickedNodeIndex = null;" in app_js
     assert "shell.isochroneCanvas.addEventListener('click', handleCanvasClick);" in app_js
-    assert "shell.timeLimitMinutesInput.addEventListener('input', handleTimeLimitInput);" in app_js
     assert "if (activeRunToken !== null) {" in app_js
     assert "activeRunToken.cancelled = true;" in app_js
     assert "const runToken = { cancelled: false };" in app_js
@@ -258,14 +247,9 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
     assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
     assert "findNearestNodeForCanvasPixel(mapData, xPx, yPx);" in app_js
     assert "highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);" in app_js
-    assert "lastClickedNodeIndex = nearest.nodeIndex;" in app_js
-    assert "debounceTimeoutId = setTimeout(() => {" in app_js
-    assert "void runFromNodeIndex(lastClickedNodeIndex)" in app_js
+    assert "runWalkingIsochroneFromSourceNode(" in app_js
+    assert "Number.POSITIVE_INFINITY" in app_js
     assert "isCancelled: () => runToken.cancelled," in app_js
-    assert "clearTimeout(debounceTimeoutId);" in app_js
-    assert (
-        "shell.timeLimitMinutesInput.removeEventListener('input', handleTimeLimitInput);" in app_js
-    )
     assert "return { dispose, runFromCanvasPixel };" in app_js
 
 
