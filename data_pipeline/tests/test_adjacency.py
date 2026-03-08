@@ -1,4 +1,8 @@
 from isochrone_pipeline.adjacency import (
+    EDGE_FLAG_RESERVED_DYNAMIC_ACCESS,
+    EDGE_FLAG_RESERVED_RESTRICTION_A,
+    EDGE_FLAG_RESERVED_RESTRICTION_B,
+    EDGE_FLAG_RESERVED_RESTRICTION_C,
     EDGE_FLAG_SIDEWALK_PRESENT,
     MODE_MASK_WALK,
     NODE_FLAG_BARRIER,
@@ -166,3 +170,13 @@ def test_edges_include_mode_speed_and_road_metadata() -> None:
         assert edge.mode_mask == MODE_MASK_WALK
         assert edge.maxspeed_kph == 48
         assert edge.road_class_id == 1
+
+
+def test_reserved_restriction_flag_bits_do_not_overlap_sidewalk_flag() -> None:
+    reserved_mask = (
+        EDGE_FLAG_RESERVED_RESTRICTION_A
+        | EDGE_FLAG_RESERVED_RESTRICTION_B
+        | EDGE_FLAG_RESERVED_RESTRICTION_C
+        | EDGE_FLAG_RESERVED_DYNAMIC_ACCESS
+    )
+    assert EDGE_FLAG_SIDEWALK_PRESENT & reserved_mask == 0

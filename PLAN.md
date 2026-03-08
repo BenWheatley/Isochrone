@@ -144,7 +144,7 @@ Estimated time: 45 min
 |--------|--------|-------|
 | 0      | uint32 | target_node_index |
 | 4      | uint16 | cost_seconds (walking, uint16 → max ~18 min per edge, sufficient) |
-| 6      | uint16 | flags |
+| 6      | uint16 | flags (bit 0 `sidewalk_present`; bits 8..11 reserved for turn/access restriction encoding) |
 | 8      | uint32 | packed metadata: bits 0..7 `mode_mask`, bits 8..15 `road_class_id`, bits 16..31 `maxspeed_kph` |
 
 *Tooling reads both v1 and v2. Writers emit v2.*
@@ -638,10 +638,10 @@ Estimated time: 45 min
 Tasks
 - [x] Bump binary format version (`version = 2`) and document backward compatibility policy (v1 read support in tooling; web runtime can require v2 once migrated)
 - [x] Extend edge schema to include per-mode access and speed metadata (at minimum: `mode_mask`, `maxspeed_kph`, `road_class_id`)
-- [ ] Decide and document cost storage strategy:
+- [x] Decide and document cost storage strategy:
   - [ ] Option A: store per-mode precomputed edge costs (`walk_s`, `bike_s`, `car_s`)
-  - [ ] Option B: store distance + speed metadata and compute mode costs at runtime
-- [ ] Reserve bits/fields for turn/access restrictions that affect car/bike legality (even if enforcement lands in a later phase)
+  - [x] Option B: store speed/access metadata and compute bike/car costs at runtime from edge geometry + metadata (walk stays precomputed in MVP transition)
+- [x] Reserve bits/fields for turn/access restrictions that affect car/bike legality (even if enforcement lands in a later phase)
 
 ### 10.4.2 Expand OSM extraction tags for mode/speed
 Estimated time: 1 hour
