@@ -18,6 +18,7 @@ def test_index_html_uses_native_module_entrypoint() -> None:
     assert 'id="time-limit-minutes"' in index_html
     assert 'name="time-limit-minutes"' in index_html
     assert 'id="time-limit-value"' in index_html
+    assert 'id="map-region"' in index_html
     assert 'id="canvas-stack"' in index_html
     assert 'min="5"' in index_html
     assert 'max="90"' in index_html
@@ -148,6 +149,7 @@ def test_app_js_has_routing_status_text_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
     assert "getElementById('routing-status')" in app_js
+    assert "getElementById('map-region')" in app_js
     assert "getElementById('canvas-stack')" in app_js
     assert "getElementById('time-limit-minutes')" in app_js
     assert "getElementById('time-limit-value')" in app_js
@@ -271,8 +273,13 @@ def test_app_js_has_boundary_graph_alignment_contract() -> None:
     assert "boundaryCanvas.height = graphHeader.gridHeightPx;" in app_js
     assert "drawBoundaryBasemapAlignedToGraphGrid(" in app_js
     assert "boundaryLoad.boundaryPayload," in app_js
-    assert "shell.canvasStack.style.aspectRatio =" in app_js
-    assert "`${graph.header.gridWidthPx} / ${graph.header.gridHeightPx}`" in app_js
+    assert "export function layoutMapViewportToContainGraph(" in app_js
+    assert "const regionRect = shell.mapRegion.getBoundingClientRect();" in app_js
+    assert "const graphAspect = graphHeader.gridWidthPx / graphHeader.gridHeightPx;" in app_js
+    assert "const regionAspect = regionRect.width / regionRect.height;" in app_js
+    assert "shell.canvasStack.style.width = `${layoutWidthPx}px`;" in app_js
+    assert "shell.canvasStack.style.height = `${layoutHeightPx}px`;" in app_js
+    assert "layoutMapViewportToContainGraph(shell, graph.header);" in app_js
 
 
 def test_styles_prevent_zero_height_map_region() -> None:
@@ -284,7 +291,8 @@ def test_styles_prevent_zero_height_map_region() -> None:
     assert "min-height: 16rem;" in styles_css
     assert "justify-content: center;" in styles_css
     assert "#canvas-stack" in styles_css
-    assert "aspect-ratio: var(--map-aspect-ratio, 4 / 3);" in styles_css
+    assert "max-width: 100%;" in styles_css
+    assert "max-height: 100%;" in styles_css
     assert "#loading-progress" in styles_css
     assert "#loading-progress-bar" in styles_css
     assert "#loading.is-fading" in styles_css

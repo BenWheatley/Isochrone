@@ -671,6 +671,7 @@ export function initializeAppShell(doc) {
     throw new Error('document is not available');
   }
 
+  const mapRegion = resolvedDocument.getElementById('map-region');
   const isochroneCanvas =
     resolvedDocument.getElementById('isochrone') ?? resolvedDocument.getElementById('map');
   const boundaryCanvas = resolvedDocument.getElementById('boundaries');
@@ -682,6 +683,9 @@ export function initializeAppShell(doc) {
   const timeLimitMinutesInput = resolvedDocument.getElementById('time-limit-minutes');
   const timeLimitMinutesValue = resolvedDocument.getElementById('time-limit-value');
 
+  if (!mapRegion || mapRegion.tagName !== 'SECTION') {
+    throw new Error('index.html is missing <section id="map-region">');
+  }
   if (!isochroneCanvas || isochroneCanvas.tagName !== 'CANVAS') {
     throw new Error('index.html is missing <canvas id="isochrone">');
   }
@@ -726,6 +730,7 @@ export function initializeAppShell(doc) {
   timeLimitMinutesValue.textContent = `${readTimeLimitMinutes(timeLimitMinutesInput)} min`;
 
   return {
+    mapRegion,
     isochroneCanvas,
     mapCanvas: isochroneCanvas,
     boundaryCanvas,
@@ -1164,7 +1169,7 @@ export async function initializeMapData(shell, options = {}) {
   try {
     const boundaryLoad = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
     const graph = await loadGraphBinary(shell, graphOptions);
-    shell.canvasStack.style.aspectRatio = `${graph.header.gridWidthPx} / ${graph.header.gridHeightPx}`;
+    layoutMapViewportToContainGraph(shell, graph.header);
     const alignedBoundarySummary = drawBoundaryBasemapAlignedToGraphGrid(
       shell.boundaryCanvas,
       boundaryLoad.boundaryPayload,
@@ -1187,6 +1192,41 @@ export async function initializeMapData(shell, options = {}) {
     showLoadingOverlay(shell, 'Initialization failed.', 0);
     throw error;
   }
+}
+
+export function layoutMapViewportToContainGraph(shell, graphHeader) {
+  if (!shell || !shell.mapRegion || !shell.canvasStack) {
+    throw new Error('shell.mapRegion and shell.canvasStack are required');
+  }
+
+  validateGraphHeaderForBoundaryAlignment(graphHeader);
+  const regionRect = shell.mapRegion.getBoundingClientRect();
+  if (!(regionRect.width > 0) || !(regionRect.height > 0)) {
+    throw new Error('map region must have positive width and height');
+  }
+
+  const graphAspect = graphHeader.gridWidthPx / graphHeader.gridHeightPx;
+  const regionAspect = regionRect.width / regionRect.height;
+
+  let layoutWidthPx = regionRect.width;
+  let layoutHeightPx = regionRect.height;
+  if (regionAspect > graphAspect) {
+    layoutWidthPx = regionRect.height * graphAspect;
+  } else {
+    layoutHeightPx = regionRect.width / graphAspect;
+  }
+
+  layoutWidthPx = Math.max(1, Math.floor(layoutWidthPx));
+  layoutHeightPx = Math.max(1, Math.floor(layoutHeightPx));
+
+  shell.canvasStack.style.aspectRatio = `${graphHeader.gridWidthPx} / ${graphHeader.gridHeightPx}`;
+  shell.canvasStack.style.width = `${layoutWidthPx}px`;
+  shell.canvasStack.style.height = `${layoutHeightPx}px`;
+
+  return {
+    layoutWidthPx,
+    layoutHeightPx,
+  };
 }
 
 export function precomputeNodePixelCoordinates(graph) {
@@ -1809,6 +1849,9 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
     const shell = initializeAppShell(globalThis.document);
     void initializeMapData(shell)
       .then((mapData) => {
+        window.addEventListener('resize', () => {
+          layoutMapViewportToContainGraph(shell, mapData.graph.header);
+        });
         bindCanvasClickRouting(shell, mapData);
       })
       .catch((error) => {
