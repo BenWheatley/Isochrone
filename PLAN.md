@@ -625,6 +625,64 @@ Tasks
 
 ---
 
+## 10.4 Post-MVP: Multimodal Road Schema + Extraction Foundation
+Estimated time: 4 hours 30 min
+
+*This phase adds the schema and extraction prerequisites for bike/car mode support and speed-aware routing. It intentionally starts at data/model level before UI and algorithm changes.*
+
+### 10.4.1 Define binary schema v2 for road-mode routing
+Estimated time: 45 min
+
+Tasks
+- [ ] Bump binary format version (`version = 2`) and document backward compatibility policy (v1 read support in tooling; web runtime can require v2 once migrated)
+- [ ] Extend edge schema to include per-mode access and speed metadata (at minimum: `mode_mask`, `maxspeed_kph`, `road_class_id`)
+- [ ] Decide and document cost storage strategy:
+  - [ ] Option A: store per-mode precomputed edge costs (`walk_s`, `bike_s`, `car_s`)
+  - [ ] Option B: store distance + speed metadata and compute mode costs at runtime
+- [ ] Reserve bits/fields for turn/access restrictions that affect car/bike legality (even if enforcement lands in a later phase)
+
+### 10.4.2 Expand OSM extraction tags for mode/speed
+Estimated time: 1 hour
+
+Tasks
+- [ ] Extend extraction tags beyond walking constraints to include bike/car legality and speed tags:
+  - [ ] `bicycle`, `cycleway`, `oneway:bicycle`
+  - [ ] `motor_vehicle`, `vehicle`, `oneway`
+  - [ ] `maxspeed`, `maxspeed:forward`, `maxspeed:backward`
+  - [ ] `junction`, `access`, `service`, `surface`, `tracktype` (for fallback speed heuristics)
+- [ ] Persist extracted tags through `WayCandidate` into adjacency/export stages (no silent dropping)
+- [ ] Add extraction summary counts for tag presence/coverage (e.g. `% edges with explicit maxspeed`)
+
+### 10.4.3 Normalize speed and access semantics
+Estimated time: 1 hour 15 min
+
+Tasks
+- [ ] Implement robust `maxspeed` parser (numeric + unit variants, e.g. `50`, `30 mph`, `walk`)
+- [ ] Add directional speed selection (`maxspeed:forward`/`backward`) on directed edges
+- [ ] Define deterministic fallback speed table by highway class + mode when explicit speed tags are absent
+- [ ] Define deterministic mode-access rules (allow/deny) from combined tags, including conflict resolution order
+
+### 10.4.4 Export and validation updates
+Estimated time: 50 min
+
+Tasks
+- [ ] Update binary writer/reader/validator for v2 edge records and mode metadata
+- [ ] Add validation checks:
+  - [ ] `mode_mask != 0` for all exported edges
+  - [ ] speed bounds sane (e.g. `0 < maxspeed_kph <= 200`)
+  - [ ] per-mode cost monotonicity/sanity where precomputed costs are stored
+- [ ] Emit export summary metrics for each mode (edge counts and coverage)
+
+### 10.4.5 Runtime read path scaffolding (no UI yet)
+Estimated time: 40 min
+
+Tasks
+- [ ] Extend JS parser TypedArray mapping to read new v2 edge fields
+- [ ] Keep routing behavior walk-only until mode-selector and mode-aware costing are implemented in follow-up phase
+- [ ] Fail fast with clear error if runtime receives unsupported schema version
+
+---
+
 # Phase 11 — Post-MVP: GTFS Transit Integration
 
 *This phase is explicitly deferred from MVP. The binary format, routing stubs, and stop-attachment flags in the graph are designed to accept transit data without schema changes. The system is designed for any GTFS feed, for any region.*
@@ -757,7 +815,10 @@ The pipeline is parameterised from Phase 3.2 onward: `--epsg`, `--input`, `--out
 
 **MVP total: ~21 hours for a junior developer**
 
-Post-MVP (Phase 11, GTFS transit) adds approximately **7–9 hours** of development, plus the variable time to obtain and verify the GTFS licence.
+Post-MVP adds approximately **11.5–13.5 hours** of development:
+- [ ] Phase 10.4 (multimodal road schema + extraction): ~4.5 hours
+- [ ] Phase 11 (GTFS transit): ~7–9 hours
+- [ ] Plus variable time to obtain and verify GTFS licence terms.
 
 ---
 
@@ -773,6 +834,8 @@ Post-MVP (Phase 11, GTFS transit) adds approximately **7–9 hours** of developm
 - `/data_pipeline/` — Python pipeline scripts
 
 ## Post-MVP additions
+- `berlin_graph.bin.gz` schema v2 with per-edge mode mask + speed metadata (bike/car/walk support)
+- Pipeline summaries for speed/access coverage and mode-specific edge counts
 - Augmented `berlin_graph.bin.gz` with transit tables populated
 - `/web/src/csa.js` — Connection Scan Algorithm module
 
