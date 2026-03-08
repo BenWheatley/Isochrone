@@ -619,9 +619,9 @@ Tasks
 Estimated time: 30 min
 
 Tasks
-- Push `/web/` static files and `berlin_graph.bin.gz` to `gh-pages` branch (or configure Pages source)
-- Verify boundary basemap loading, graph loading, and click-to-isochrone in deployed environment
-- Verify `Content-Encoding: gzip` is being served correctly (check DevTools Network tab)
+- [x] Configure GitHub Pages source via Actions workflow that publishes `/web/` static files plus `graph-walk.bin.gz`
+- [ ] Verify boundary basemap loading, graph loading, and click-to-isochrone in deployed environment
+- [ ] Verify `Content-Encoding: gzip` is being served correctly (check DevTools Network tab)
 
 ---
 

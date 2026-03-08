@@ -24,6 +24,16 @@ make review
 - The graph payload is gzip-compressed and decompressed in-browser before parsing.
 - Clicking the map computes a full travel-time field across all reachable graph nodes (no walk-time cap).
 
+## Deployment (GitHub Pages)
+- Workflow: `.github/workflows/pages.yml`
+- Trigger: push to `main` or manual dispatch (`workflow_dispatch`)
+- Published artifact includes:
+  - `web/index.html`
+  - `web/src/*`
+  - `data_pipeline/output/berlin-district-boundaries-canvas.json`
+  - `data_pipeline/output/graph-walk.bin.gz`
+- In repository settings, set Pages source to **GitHub Actions**.
+
 ## Repository structure
 - `data_pipeline/`: Graph preprocessing and binary export logic
 - `web/`: Browser app source (vanilla JS modules, no bundler)
