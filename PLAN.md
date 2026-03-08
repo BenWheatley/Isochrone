@@ -610,8 +610,8 @@ Tasks
 Estimated time: 20 min
 
 Tasks
-- Verify `index.html` loads `src/app.js` as ES module without bundling
-- Confirm static asset paths are relative and deploy-safe
+- [x] Verify `index.html` loads `src/app.js` as ES module without bundling
+- [x] Confirm static asset paths are relative and deploy-safe
 
 ---
 

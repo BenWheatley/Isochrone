@@ -19,6 +19,11 @@ def test_index_html_uses_native_module_entrypoint() -> None:
     assert 'id="canvas-stack"' in index_html
     assert "dist/app.js" not in index_html
     assert re.search(
+        r'<link[^>]*rel="stylesheet"[^>]*href="\./src/styles\.css"',
+        index_html,
+        flags=re.IGNORECASE,
+    )
+    assert re.search(
         r'<script[^>]*type="module"[^>]*src="\./src/app\.js"',
         index_html,
         flags=re.IGNORECASE,
@@ -44,6 +49,17 @@ def test_app_js_has_zero_size_canvas_guard_and_binary_loader_contract() -> None:
     assert "new DataView(buffer)" in app_js
     assert "getUint32(0, true)" in app_js
     assert "Loading graph:" in app_js
+
+
+def test_app_js_default_asset_urls_are_relative_and_deploy_safe() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "DEFAULT_BOUNDARY_BASEMAP_URL" in app_js
+    assert "DEFAULT_GRAPH_BINARY_URL" in app_js
+    assert "../data_pipeline/output/berlin-district-boundaries-canvas.json" in app_js
+    assert "../data_pipeline/output/graph-walk.bin.gz" in app_js
+    assert "http://" not in app_js
+    assert "https://" not in app_js
 
 
 def test_app_js_has_gzip_binary_loader_contract() -> None:
