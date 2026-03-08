@@ -360,6 +360,58 @@ export function mapCanvasPixelToGraphMeters(graph, xPx, yPx) {
   return { easting, northing };
 }
 
+export function findNearestNodeForCanvasPixel(mapData, xPx, yPx) {
+  if (!mapData || typeof mapData !== 'object' || !mapData.graph) {
+    throw new Error('mapData.graph is required');
+  }
+
+  const { easting, northing } = mapCanvasPixelToGraphMeters(mapData.graph, xPx, yPx);
+  const xM = easting - mapData.graph.header.originEasting;
+  const yM = northing - mapData.graph.header.originNorthing;
+  const nodeIndex = findNearestNodeIndex(mapData.graph, xM, yM);
+
+  return {
+    nodeIndex,
+    easting,
+    northing,
+    xM,
+    yM,
+  };
+}
+
+export function highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex, options = {}) {
+  if (!shell || !shell.isochroneCanvas) {
+    throw new Error('shell.isochroneCanvas is required');
+  }
+  if (!mapData || typeof mapData !== 'object') {
+    throw new Error('mapData must be an object');
+  }
+
+  validatePixelGrid(mapData.pixelGrid);
+  validateNodePixels(mapData.nodePixels);
+
+  if (!Number.isInteger(nodeIndex) || nodeIndex < 0 || nodeIndex >= mapData.nodePixels.nodePixelX.length) {
+    throw new Error(`nodeIndex out of range: ${nodeIndex}`);
+  }
+
+  const rgba = options.rgba ?? [12, 163, 242, 255];
+  if (!Array.isArray(rgba) || rgba.length < 4) {
+    throw new Error('options.rgba must be [r, g, b, a]');
+  }
+
+  const r = clampInt(Math.round(rgba[0]), 0, 255);
+  const g = clampInt(Math.round(rgba[1]), 0, 255);
+  const b = clampInt(Math.round(rgba[2]), 0, 255);
+  const alpha = clampInt(Math.round(rgba[3]), 0, 255);
+  const xPx = mapData.nodePixels.nodePixelX[nodeIndex];
+  const yPx = mapData.nodePixels.nodePixelY[nodeIndex];
+
+  setPixel(mapData.pixelGrid, xPx, yPx, r, g, b, alpha);
+  blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+
+  return { nodeIndex, xPx, yPx };
+}
+
 export async function runWalkingIsochroneFromSourceNode(
   shell,
   mapData,

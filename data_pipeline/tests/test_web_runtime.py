@@ -201,6 +201,24 @@ def test_app_js_has_canvas_pixel_to_graph_coordinate_contract() -> None:
     assert "return { easting, northing };" in app_js
 
 
+def test_app_js_has_nearest_node_and_highlight_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "export function findNearestNodeForCanvasPixel(" in app_js
+    assert (
+        "const { easting, northing } = mapCanvasPixelToGraphMeters(mapData.graph, xPx, yPx);"
+        in app_js
+    )
+    assert "const xM = easting - mapData.graph.header.originEasting;" in app_js
+    assert "const yM = northing - mapData.graph.header.originNorthing;" in app_js
+    assert "const nodeIndex = findNearestNodeIndex(mapData.graph, xM, yM);" in app_js
+    assert "export function highlightNodeIndexOnIsochroneCanvas(" in app_js
+    assert "const xPx = mapData.nodePixels.nodePixelX[nodeIndex];" in app_js
+    assert "const yPx = mapData.nodePixels.nodePixelY[nodeIndex];" in app_js
+    assert "setPixel(mapData.pixelGrid, xPx, yPx, r, g, b, alpha);" in app_js
+    assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
+
+
 def test_styles_prevent_zero_height_map_region() -> None:
     styles_css = (WEB_ROOT / "src" / "styles.css").read_text(encoding="utf-8")
 

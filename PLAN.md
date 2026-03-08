@@ -569,8 +569,8 @@ Tasks
 Estimated time: 25 min
 
 Tasks
-- MVP: linear scan over all nodes; Berlin graph post-simplification ~300 000–500 000 nodes; scan takes <5 ms — acceptable at click time
-- Returns node index; highlight corresponding canvas pixel
+- [x] MVP: linear scan over all nodes; Berlin graph post-simplification ~300 000–500 000 nodes; scan takes <5 ms — acceptable at click time
+- [x] Returns node index; highlight corresponding canvas pixel
 
 ---
 
