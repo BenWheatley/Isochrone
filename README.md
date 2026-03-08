@@ -19,6 +19,10 @@ make test
 make review
 ```
 
+## Runtime data
+- Web runtime loads `data_pipeline/output/graph-walk.bin.gz` by default.
+- The graph payload is gzip-compressed and decompressed in-browser before parsing.
+
 ## Repository structure
 - `data_pipeline/`: Graph preprocessing and binary export logic
 - `web/`: Browser app source (vanilla JS modules, no bundler)

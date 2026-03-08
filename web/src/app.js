@@ -1,6 +1,6 @@
 export const DEFAULT_BOUNDARY_BASEMAP_URL =
   '../data_pipeline/output/berlin-district-boundaries-canvas.json';
-export const DEFAULT_GRAPH_BINARY_URL = '../data_pipeline/output/graph-walk.bin';
+export const DEFAULT_GRAPH_BINARY_URL = '../data_pipeline/output/graph-walk.bin.gz';
 export const GRAPH_MAGIC = 0x49534f43;
 
 const HEADER_SIZE = 64;
@@ -1061,6 +1061,29 @@ export async function fetchBinaryWithProgress(url, options = {}) {
   return merged.buffer;
 }
 
+export async function maybeDecompressGzipBuffer(buffer) {
+  if (!(buffer instanceof ArrayBuffer)) {
+    throw new Error('maybeDecompressGzipBuffer expects an ArrayBuffer');
+  }
+
+  const bytes = new Uint8Array(buffer);
+  const isGzipMagic = bytes.length >= 3 && bytes[0] === 0x1f && bytes[1] === 0x8b && bytes[2] === 0x08;
+  if (!isGzipMagic) {
+    return buffer;
+  }
+
+  if (typeof DecompressionStream !== 'function') {
+    throw new Error(
+      'Browser does not support DecompressionStream for gzip graph payloads. ' +
+        'Use an uncompressed graph binary or a browser with gzip stream support.',
+    );
+  }
+
+  const compressedBlob = new Blob([buffer], { type: 'application/gzip' });
+  const decompressedStream = compressedBlob.stream().pipeThrough(new DecompressionStream('gzip'));
+  return new Response(decompressedStream).arrayBuffer();
+}
+
 export function parseGraphBinary(buffer) {
   if (!(buffer instanceof ArrayBuffer)) {
     throw new Error('graph binary parser expects an ArrayBuffer');
@@ -1157,7 +1180,8 @@ export async function loadGraphBinary(shell, options = {}) {
       },
     });
 
-    const graph = parseGraphBinary(buffer);
+    const binaryBuffer = await maybeDecompressGzipBuffer(buffer);
+    const graph = parseGraphBinary(binaryBuffer);
     shell.isochroneCanvas.style.pointerEvents = 'auto';
     shell.isochroneCanvas.dataset.graphLoaded = 'true';
     return graph;

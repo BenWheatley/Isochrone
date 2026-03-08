@@ -44,11 +44,22 @@ def test_app_js_has_zero_size_canvas_guard_and_binary_loader_contract() -> None:
 
     assert "if (width < 2 || height < 2)" in app_js
     assert "DEFAULT_GRAPH_BINARY_URL" in app_js
+    assert "../data_pipeline/output/graph-walk.bin.gz" in app_js
     assert "response.body.getReader()" in app_js
     assert "Content-Length" in app_js
     assert "new DataView(buffer)" in app_js
     assert "getUint32(0, true)" in app_js
     assert "Loading graph:" in app_js
+
+
+def test_app_js_has_gzip_binary_loader_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "export async function maybeDecompressGzipBuffer(" in app_js
+    assert "bytes[0] === 0x1f && bytes[1] === 0x8b && bytes[2] === 0x08" in app_js
+    assert "new DecompressionStream('gzip')" in app_js
+    assert "const binaryBuffer = await maybeDecompressGzipBuffer(buffer);" in app_js
+    assert "const graph = parseGraphBinary(binaryBuffer);" in app_js
 
 
 def test_app_js_has_pixel_grid_contract() -> None:

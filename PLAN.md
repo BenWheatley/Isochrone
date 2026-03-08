@@ -599,10 +599,10 @@ Tasks
 Estimated time: 20 min
 
 Tasks
-- Gzip the `.bin` file: `gzip -9 berlin_graph.bin` → `berlin_graph.bin.gz`
-- Expected compression: ~40–60 % reduction (coordinate deltas and repeated patterns compress well)
-- Configure web server (or GitHub Pages `_headers` file) to serve with `Content-Encoding: gzip`
-- JS loader fetches the `.gz` file; browser decompresses transparently
+- [x] Gzip the `.bin` file: `gzip -9 berlin_graph.bin` → `berlin_graph.bin.gz`
+- [x] Expected compression: ~40–60 % reduction (coordinate deltas and repeated patterns compress well). Observed for Berlin sample: ~25 MB → ~8.6 MB (~65 % reduction).
+- [x] Configure web server (or GitHub Pages `_headers` file) to serve with `Content-Encoding: gzip` if available; JS runtime also supports raw `.gz` payloads without this header.
+- [x] JS loader fetches the `.gz` file and decompresses before binary parsing.
 
 ---
 
