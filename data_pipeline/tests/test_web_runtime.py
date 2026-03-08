@@ -103,11 +103,11 @@ def test_app_js_has_time_to_colour_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
     assert "export function timeToColour(seconds)" in app_js
-    assert "const minutes = seconds / 60;" in app_js
-    assert "if (minutes <= 5)" in app_js
-    assert "if (minutes <= 15)" in app_js
-    assert "if (minutes <= 30)" in app_js
-    assert "if (minutes <= 45)" in app_js
+    assert "const minutesInHour = (seconds / 60) % 60;" in app_js
+    assert "if (minutesInHour <= 5)" in app_js
+    assert "if (minutesInHour <= 15)" in app_js
+    assert "if (minutesInHour <= 30)" in app_js
+    assert "if (minutesInHour <= 45)" in app_js
     assert "return [32, 163, 78];" in app_js
     assert "return [214, 201, 37];" in app_js
     assert "return [230, 138, 43];" in app_js

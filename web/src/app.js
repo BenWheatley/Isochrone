@@ -1210,22 +1210,22 @@ export function timeToColour(seconds) {
     throw new Error('seconds must be a non-negative finite number');
   }
 
-  const minutes = seconds / 60;
+  const minutesInHour = (seconds / 60) % 60;
 
-  if (minutes <= 5) {
+  if (minutesInHour <= 5) {
     return [32, 163, 78];
   }
-  if (minutes <= 15) {
+  if (minutesInHour <= 15) {
     return [214, 201, 37];
   }
-  if (minutes <= 30) {
+  if (minutesInHour <= 30) {
     return [230, 138, 43];
   }
-  if (minutes <= 45) {
+  if (minutesInHour <= 45) {
     return [210, 58, 54];
   }
 
-  // Clamp over-limit travel times to the outermost ramp colour.
+  // 45-60 minutes band in each hourly cycle.
   return [210, 58, 54];
 }
 
