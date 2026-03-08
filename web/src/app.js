@@ -217,6 +217,154 @@ export function runMinHeapSelfTest(seed = 0x12345678) {
   return true;
 }
 
+export function createWalkingSearchState(graph, sourceNodeIndex, timeLimitSeconds) {
+  validateGraphForRouting(graph);
+
+  if (!Number.isInteger(sourceNodeIndex) || sourceNodeIndex < 0 || sourceNodeIndex >= graph.header.nNodes) {
+    throw new Error(`sourceNodeIndex out of range: ${sourceNodeIndex}`);
+  }
+  if (!Number.isFinite(timeLimitSeconds) || timeLimitSeconds <= 0) {
+    throw new Error('timeLimitSeconds must be a positive finite number');
+  }
+
+  const distSeconds = new Float32Array(graph.header.nNodes);
+  distSeconds.fill(Infinity);
+  const settled = new Uint8Array(graph.header.nNodes);
+  const heap = new MinHeap(graph.header.nNodes);
+
+  distSeconds[sourceNodeIndex] = 0;
+  heap.push(sourceNodeIndex, 0);
+
+  let done = false;
+  let settledCount = 0;
+
+  return {
+    graph,
+    sourceNodeIndex,
+    timeLimitSeconds,
+    distSeconds,
+    settled,
+    heap,
+    get done() {
+      return done;
+    },
+    get settledCount() {
+      return settledCount;
+    },
+    isDone() {
+      return done || heap.isEmpty();
+    },
+    expandOne() {
+      if (done) {
+        return -1;
+      }
+
+      while (!heap.isEmpty()) {
+        const entry = heap.pop();
+        if (!entry) {
+          done = true;
+          return -1;
+        }
+
+        const nodeIndex = entry.nodeIndex;
+        const cost = entry.cost;
+
+        if (cost > timeLimitSeconds) {
+          done = true;
+          return -1;
+        }
+        if (settled[nodeIndex] === 1) {
+          continue;
+        }
+
+        settled[nodeIndex] = 1;
+        settledCount += 1;
+
+        const firstEdgeIndex = graph.nodeU32[nodeIndex * 4 + 2];
+        const edgeCount = graph.nodeU16[nodeIndex * 8 + 6];
+        const endEdgeIndex = firstEdgeIndex + edgeCount;
+
+        for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
+          const targetIndex = graph.edgeU32[edgeIndex * 3];
+          const edgeCostSeconds = graph.edgeU16[edgeIndex * 6 + 2];
+          const nextCost = cost + edgeCostSeconds;
+
+          if (nextCost > timeLimitSeconds) {
+            continue;
+          }
+          if (nextCost < distSeconds[targetIndex]) {
+            distSeconds[targetIndex] = nextCost;
+
+            const heapPosition = heap.positionLookup[targetIndex];
+            if (heapPosition === -1) {
+              heap.push(targetIndex, nextCost);
+            } else {
+              heap.decreaseKey(targetIndex, nextCost);
+            }
+          }
+        }
+
+        if (heap.isEmpty()) {
+          done = true;
+        }
+        return nodeIndex;
+      }
+
+      done = true;
+      return -1;
+    },
+  };
+}
+
+export function findNearestNodeIndex(graph, xM, yM) {
+  validateGraphForRouting(graph);
+
+  if (!Number.isFinite(xM) || !Number.isFinite(yM)) {
+    throw new Error('xM and yM must be finite numbers');
+  }
+
+  let nearestNodeIndex = -1;
+  let nearestDistanceSquared = Infinity;
+
+  for (let nodeIndex = 0; nodeIndex < graph.header.nNodes; nodeIndex += 1) {
+    const nodeXM = graph.nodeI32[nodeIndex * 4];
+    const nodeYM = graph.nodeI32[nodeIndex * 4 + 1];
+    const dx = nodeXM - xM;
+    const dy = nodeYM - yM;
+    const distanceSquared = dx * dx + dy * dy;
+
+    if (distanceSquared < nearestDistanceSquared) {
+      nearestDistanceSquared = distanceSquared;
+      nearestNodeIndex = nodeIndex;
+    }
+  }
+
+  if (nearestNodeIndex < 0) {
+    throw new Error('graph contains no nodes');
+  }
+  return nearestNodeIndex;
+}
+
+export async function runWalkingIsochroneFromSourceNode(
+  shell,
+  mapData,
+  sourceNodeIndex,
+  timeLimitSeconds,
+  options = {},
+) {
+  if (!mapData || typeof mapData !== 'object' || !mapData.graph) {
+    throw new Error('mapData.graph is required');
+  }
+
+  const searchState = createWalkingSearchState(mapData.graph, sourceNodeIndex, timeLimitSeconds);
+  const timeLimitMinutes = options.timeLimitMinutes ?? Math.max(1, Math.round(timeLimitSeconds / 60));
+
+  return runSearchTimeSlicedWithRendering(shell, mapData, searchState, {
+    ...options,
+    timeLimitMinutes,
+  });
+}
+
 export function minutesToSeconds(minutes) {
   if (minutes < 0) {
     throw new Error('minutes must be non-negative');
@@ -1139,6 +1287,39 @@ function validateGraphForNodePixels(graph) {
   }
   if (graph.nodeI32.length < graph.header.nNodes * 4) {
     throw new Error('graph.nodeI32 is too short for node records');
+  }
+}
+
+function validateGraphForRouting(graph) {
+  validateGraphForNodePixels(graph);
+
+  if (!Number.isInteger(graph.header.nEdges) || graph.header.nEdges < 0) {
+    throw new Error('graph.header.nEdges must be a non-negative integer');
+  }
+  if (!(graph.nodeU32 instanceof Uint32Array)) {
+    throw new Error('graph.nodeU32 must be a Uint32Array');
+  }
+  if (!(graph.nodeU16 instanceof Uint16Array)) {
+    throw new Error('graph.nodeU16 must be a Uint16Array');
+  }
+  if (!(graph.edgeU32 instanceof Uint32Array)) {
+    throw new Error('graph.edgeU32 must be a Uint32Array');
+  }
+  if (!(graph.edgeU16 instanceof Uint16Array)) {
+    throw new Error('graph.edgeU16 must be a Uint16Array');
+  }
+
+  if (graph.nodeU32.length < graph.header.nNodes * 4) {
+    throw new Error('graph.nodeU32 is too short for node records');
+  }
+  if (graph.nodeU16.length < graph.header.nNodes * 8) {
+    throw new Error('graph.nodeU16 is too short for node records');
+  }
+  if (graph.edgeU32.length < graph.header.nEdges * 3) {
+    throw new Error('graph.edgeU32 is too short for edge records');
+  }
+  if (graph.edgeU16.length < graph.header.nEdges * 6) {
+    throw new Error('graph.edgeU16 is too short for edge records');
   }
 }
 

@@ -161,6 +161,24 @@ def test_app_js_has_min_heap_contract() -> None:
     assert "for (let i = 0; i < 1000; i += 1)" in app_js
 
 
+def test_app_js_has_walking_dijkstra_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "export function createWalkingSearchState(" in app_js
+    assert "const distSeconds = new Float32Array(graph.header.nNodes);" in app_js
+    assert "distSeconds.fill(Infinity);" in app_js
+    assert "const settled = new Uint8Array(graph.header.nNodes);" in app_js
+    assert "heap.push(sourceNodeIndex, 0);" in app_js
+    assert "if (cost > timeLimitSeconds)" in app_js
+    assert "if (nextCost < distSeconds[targetIndex])" in app_js
+    assert "heap.decreaseKey(targetIndex, nextCost);" in app_js
+    assert "export function findNearestNodeIndex(" in app_js
+    assert "const dx = nodeXM - xM;" in app_js
+    assert "const dy = nodeYM - yM;" in app_js
+    assert "export async function runWalkingIsochroneFromSourceNode(" in app_js
+    assert "runSearchTimeSlicedWithRendering(" in app_js
+
+
 def test_styles_prevent_zero_height_map_region() -> None:
     styles_css = (WEB_ROOT / "src" / "styles.css").read_text(encoding="utf-8")
 

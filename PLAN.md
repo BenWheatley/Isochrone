@@ -522,25 +522,25 @@ Estimated time: 1 hour
 Estimated time: 20 min
 
 Tasks
-- `Float32Array dist[N_nodes]` initialised to `Infinity`
-- `Uint8Array settled[N_nodes]` initialised to 0
-- Find nearest node to click point (Euclidean scan; acceptable for MVP — see Phase 9.2 for spatial index)
-- Set `dist[source] = 0`; push source to heap
+- [x] `Float32Array dist[N_nodes]` initialised to `Infinity`
+- [x] `Uint8Array settled[N_nodes]` initialised to 0
+- [x] Find nearest node to click point (Euclidean scan; acceptable for MVP — see Phase 9.2 for spatial index)
+- [x] Set `dist[source] = 0`; push source to heap
 
 ### 8.2.2 Implement node expansion loop
 Estimated time: 25 min
 
 Tasks
-- Pop minimum; if settled, skip
-- For each outgoing edge: relax if `dist[source] + edge_cost < dist[target]`
-- Early termination when popped cost exceeds `time_limit_seconds`
+- [x] Pop minimum; if settled, skip
+- [x] For each outgoing edge: relax if `dist[source] + edge_cost < dist[target]`
+- [x] Early termination when popped cost exceeds `time_limit_seconds`
 
 ### 8.2.3 Integrate with time-sliced rendering
 Estimated time: 15 min
 
 Tasks
-- Wrap expansion loop in the 8 ms time-slice scheme from Phase 7.2.1
-- Pass settled node batch to pixel painter after each slice
+- [x] Wrap expansion loop in the 8 ms time-slice scheme from Phase 7.2.1
+- [x] Pass settled node batch to pixel painter after each slice
 
 ---
 
