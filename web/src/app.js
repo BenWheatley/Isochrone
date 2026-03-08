@@ -674,6 +674,7 @@ export function initializeAppShell(doc) {
   const isochroneCanvas =
     resolvedDocument.getElementById('isochrone') ?? resolvedDocument.getElementById('map');
   const boundaryCanvas = resolvedDocument.getElementById('boundaries');
+  const canvasStack = resolvedDocument.getElementById('canvas-stack');
   const loadingOverlay = resolvedDocument.getElementById('loading');
   const loadingText = resolvedDocument.getElementById('loading-text');
   const loadingProgressBar = resolvedDocument.getElementById('loading-progress-bar');
@@ -686,6 +687,9 @@ export function initializeAppShell(doc) {
   }
   if (!boundaryCanvas || boundaryCanvas.tagName !== 'CANVAS') {
     throw new Error('index.html is missing <canvas id="boundaries">');
+  }
+  if (!canvasStack || canvasStack.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="canvas-stack">');
   }
   if (!loadingOverlay || loadingOverlay.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="loading">');
@@ -725,6 +729,7 @@ export function initializeAppShell(doc) {
     isochroneCanvas,
     mapCanvas: isochroneCanvas,
     boundaryCanvas,
+    canvasStack,
     loadingOverlay,
     loadingText,
     loadingProgressBar,
@@ -1159,6 +1164,7 @@ export async function initializeMapData(shell, options = {}) {
   try {
     const boundaryLoad = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
     const graph = await loadGraphBinary(shell, graphOptions);
+    shell.canvasStack.style.aspectRatio = `${graph.header.gridWidthPx} / ${graph.header.gridHeightPx}`;
     const alignedBoundarySummary = drawBoundaryBasemapAlignedToGraphGrid(
       shell.boundaryCanvas,
       boundaryLoad.boundaryPayload,
