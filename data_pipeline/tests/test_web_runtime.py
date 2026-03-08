@@ -273,6 +273,7 @@ def test_app_js_has_boundary_graph_alignment_contract() -> None:
     assert "boundaryCanvas.height = graphHeader.gridHeightPx;" in app_js
     assert "drawBoundaryBasemapAlignedToGraphGrid(" in app_js
     assert "boundaryLoad.boundaryPayload," in app_js
+    assert "const parsed = parseBoundaryBasemapPayload(payload);" in app_js
     assert "export function layoutMapViewportToContainGraph(" in app_js
     assert "const regionRect = shell.mapRegion.getBoundingClientRect();" in app_js
     assert "const graphAspect = graphHeader.gridWidthPx / graphHeader.gridHeightPx;" in app_js

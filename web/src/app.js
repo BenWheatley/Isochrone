@@ -986,12 +986,19 @@ export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
     }
 
     const payload = await response.json();
-    const renderSummary = drawBoundaryBasemap(shell.boundaryCanvas, payload);
+    const parsed = parseBoundaryBasemapPayload(payload);
+    let pathCount = 0;
+    for (const feature of parsed.features) {
+      pathCount += feature.paths.length;
+    }
 
     showLoadingOverlay(shell, 'Loading graph: 0.00 MB', 0);
     return {
       boundaryPayload: payload,
-      renderSummary,
+      boundarySummary: {
+        featureCount: parsed.features.length,
+        pathCount,
+      },
     };
   } catch (error) {
     showLoadingOverlay(shell, 'Failed to load district boundaries.', 0);
@@ -1182,7 +1189,7 @@ export async function initializeMapData(shell, options = {}) {
     clearGrid(pixelGrid);
 
     return {
-      boundarySummary: boundaryLoad.renderSummary,
+      boundarySummary: boundaryLoad.boundarySummary,
       alignedBoundarySummary,
       graph,
       nodePixels,
