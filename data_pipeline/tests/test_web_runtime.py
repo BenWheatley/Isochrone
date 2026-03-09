@@ -187,6 +187,14 @@ def test_app_js_has_gpu_travel_time_colourization_contract() -> None:
     assert "paintAllReachableEdgeInterpolationsToTravelTimeGrid(" in app_js
     assert "paintReachableNodesTravelTimesToGrid(" in app_js
     assert "renderer.drawTravelTimeGrid(mapData.travelTimeGrid" in app_js
+    assert "drawTravelTimeEdges(edgeVertexData, options = {})" in app_js
+    assert "collectSettledBatchTravelTimeEdgeVertices(" in app_js
+    assert "collectAllReachableTravelTimeEdgeVertices(" in app_js
+    assert (
+        "const supportsGpuEdgeInterpolation = typeof renderer.drawTravelTimeEdges === 'function';"
+    ) in app_js
+    assert "renderer.drawTravelTimeEdges(batchEdgeVertices," in app_js
+    assert "renderer.drawTravelTimeEdges(allEdgeVertices," in app_js
 
 
 def test_app_js_has_cpu_interpolation_foundation_contract() -> None:

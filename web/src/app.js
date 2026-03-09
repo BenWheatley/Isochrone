@@ -2135,6 +2135,115 @@ void main(void) {
     }
   }
 
+  const edgeVertexShaderSource = isWebGl2
+    ? `#version 300 es
+in vec2 a_position_px;
+in float a_seconds;
+uniform vec2 u_viewport_px;
+out float v_seconds;
+void main(void) {
+  vec2 clip = vec2(
+    (a_position_px.x / u_viewport_px.x) * 2.0 - 1.0,
+    1.0 - (a_position_px.y / u_viewport_px.y) * 2.0
+  );
+  v_seconds = a_seconds;
+  gl_Position = vec4(clip, 0.0, 1.0);
+}`
+    : `attribute vec2 a_position_px;
+attribute float a_seconds;
+uniform vec2 u_viewport_px;
+varying float v_seconds;
+void main(void) {
+  vec2 clip = vec2(
+    (a_position_px.x / u_viewport_px.x) * 2.0 - 1.0,
+    1.0 - (a_position_px.y / u_viewport_px.y) * 2.0
+  );
+  v_seconds = a_seconds;
+  gl_Position = vec4(clip, 0.0, 1.0);
+}`;
+  const edgeFragmentShaderSource = isWebGl2
+    ? `#version 300 es
+precision highp float;
+uniform float u_cycle_minutes;
+uniform float u_alpha;
+in float v_seconds;
+out vec4 outColor;
+
+vec3 mapCycleColour(float cycleRatio) {
+  if (cycleRatio <= 5.0 / 60.0) {
+    return vec3(0.0, 255.0, 255.0);
+  }
+  if (cycleRatio <= 15.0 / 60.0) {
+    return vec3(64.0, 255.0, 64.0);
+  }
+  if (cycleRatio <= 30.0 / 60.0) {
+    return vec3(255.0, 255.0, 64.0);
+  }
+  if (cycleRatio <= 45.0 / 60.0) {
+    return vec3(255.0, 140.0, 0.0);
+  }
+  return vec3(255.0, 64.0, 160.0);
+}
+
+void main(void) {
+  if (v_seconds < 0.0) {
+    outColor = vec4(0.0, 0.0, 0.0, 0.0);
+    return;
+  }
+  float cycleMinutes = max(u_cycle_minutes, 1.0);
+  float cyclePositionMinutes = mod(v_seconds / 60.0, cycleMinutes);
+  float cycleRatio = cyclePositionMinutes / cycleMinutes;
+  vec3 rgb = mapCycleColour(cycleRatio) / 255.0;
+  outColor = vec4(rgb, u_alpha);
+}`
+    : `precision highp float;
+uniform float u_cycle_minutes;
+uniform float u_alpha;
+varying float v_seconds;
+
+vec3 mapCycleColour(float cycleRatio) {
+  if (cycleRatio <= 5.0 / 60.0) {
+    return vec3(0.0, 255.0, 255.0);
+  }
+  if (cycleRatio <= 15.0 / 60.0) {
+    return vec3(64.0, 255.0, 64.0);
+  }
+  if (cycleRatio <= 30.0 / 60.0) {
+    return vec3(255.0, 255.0, 64.0);
+  }
+  if (cycleRatio <= 45.0 / 60.0) {
+    return vec3(255.0, 140.0, 0.0);
+  }
+  return vec3(255.0, 64.0, 160.0);
+}
+
+void main(void) {
+  if (v_seconds < 0.0) {
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+    return;
+  }
+  float cycleMinutes = max(u_cycle_minutes, 1.0);
+  float cyclePositionMinutes = mod(v_seconds / 60.0, cycleMinutes);
+  float cycleRatio = cyclePositionMinutes / cycleMinutes;
+  vec3 rgb = mapCycleColour(cycleRatio) / 255.0;
+  gl_FragColor = vec4(rgb, u_alpha);
+}`;
+  const edgeProgram = createWebGlProgram(gl, edgeVertexShaderSource, edgeFragmentShaderSource);
+  const edgePositionLocation = gl.getAttribLocation(edgeProgram, 'a_position_px');
+  const edgeSecondsLocation = gl.getAttribLocation(edgeProgram, 'a_seconds');
+  if (edgePositionLocation < 0 || edgeSecondsLocation < 0) {
+    gl.deleteProgram(edgeProgram);
+    throw new Error('WebGL edge program is missing required attributes');
+  }
+  const edgeViewportLocation = gl.getUniformLocation(edgeProgram, 'u_viewport_px');
+  const edgeCycleMinutesLocation = gl.getUniformLocation(edgeProgram, 'u_cycle_minutes');
+  const edgeAlphaLocation = gl.getUniformLocation(edgeProgram, 'u_alpha');
+  const edgeVertexBuffer = gl.createBuffer();
+  if (!edgeVertexBuffer) {
+    gl.deleteProgram(edgeProgram);
+    throw new Error('failed to allocate WebGL edge vertex buffer');
+  }
+
   const renderer = {
     mode: 'webgl',
     draw(pixelGrid) {
@@ -2168,6 +2277,63 @@ void main(void) {
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       return null;
+    },
+    drawTravelTimeEdges(edgeVertexData, options = {}) {
+      if (!(edgeVertexData instanceof Float32Array)) {
+        throw new Error('edgeVertexData must be a Float32Array');
+      }
+      if (edgeVertexData.length % 6 !== 0) {
+        throw new Error('edgeVertexData length must be a multiple of 6 (x0,y0,t0,x1,y1,t1)');
+      }
+      if (edgeVertexData.length === 0) {
+        return 0;
+      }
+
+      const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+      const alpha = Number.isFinite(options.alpha) ? options.alpha : 1;
+      const clampedAlpha = Math.max(0, Math.min(1, alpha));
+      const append = options.append ?? false;
+      const targetWidthPx = options.widthPx ?? canvas.width;
+      const targetHeightPx = options.heightPx ?? canvas.height;
+      if (!Number.isFinite(targetWidthPx) || targetWidthPx <= 0) {
+        throw new Error('options.widthPx (or canvas.width) must be positive');
+      }
+      if (!Number.isFinite(targetHeightPx) || targetHeightPx <= 0) {
+        throw new Error('options.heightPx (or canvas.height) must be positive');
+      }
+
+      if (canvas.width !== targetWidthPx) {
+        canvas.width = Math.floor(targetWidthPx);
+      }
+      if (canvas.height !== targetHeightPx) {
+        canvas.height = Math.floor(targetHeightPx);
+      }
+
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      if (!append) {
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+      }
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.useProgram(edgeProgram);
+      gl.bindBuffer(gl.ARRAY_BUFFER, edgeVertexBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, edgeVertexData, gl.DYNAMIC_DRAW);
+      gl.enableVertexAttribArray(edgePositionLocation);
+      gl.vertexAttribPointer(edgePositionLocation, 2, gl.FLOAT, false, 12, 0);
+      gl.enableVertexAttribArray(edgeSecondsLocation);
+      gl.vertexAttribPointer(edgeSecondsLocation, 1, gl.FLOAT, false, 12, 8);
+      if (edgeViewportLocation) {
+        gl.uniform2f(edgeViewportLocation, canvas.width, canvas.height);
+      }
+      if (edgeCycleMinutesLocation) {
+        gl.uniform1f(edgeCycleMinutesLocation, cycleMinutes);
+      }
+      if (edgeAlphaLocation) {
+        gl.uniform1f(edgeAlphaLocation, clampedAlpha);
+      }
+      gl.drawArrays(gl.LINES, 0, edgeVertexData.length / 3);
+      return edgeVertexData.length / 6;
     },
   };
 
@@ -2634,6 +2800,142 @@ export function paintAllReachableEdgeInterpolationsToTravelTimeGrid(
   return paintedCount;
 }
 
+function collectEligibleOutgoingTravelTimeEdgeVerticesFromSourceNode(
+  graph,
+  nodePixels,
+  distSeconds,
+  sourceNodeIndex,
+  allowedModeMask,
+  edgeSlackSeconds,
+  outputVertices,
+) {
+  if (sourceNodeIndex < 0 || sourceNodeIndex >= graph.header.nNodes) {
+    return 0;
+  }
+
+  const startSeconds = distSeconds[sourceNodeIndex];
+  if (!Number.isFinite(startSeconds)) {
+    return 0;
+  }
+
+  let segmentCount = 0;
+  const x0 = nodePixels.nodePixelX[sourceNodeIndex];
+  const y0 = nodePixels.nodePixelY[sourceNodeIndex];
+  const firstEdgeIndex = graph.nodeU32[sourceNodeIndex * 4 + 2];
+  const edgeCount = graph.nodeU16[sourceNodeIndex * 8 + 6];
+  const endEdgeIndex = firstEdgeIndex + edgeCount;
+
+  for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
+    if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
+      continue;
+    }
+
+    const edgeCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+    if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
+      continue;
+    }
+
+    const targetNodeIndex = graph.edgeU32[edgeIndex * 3];
+    if (targetNodeIndex < 0 || targetNodeIndex >= graph.header.nNodes) {
+      continue;
+    }
+
+    const targetSeconds = distSeconds[targetNodeIndex];
+    if (!Number.isFinite(targetSeconds)) {
+      continue;
+    }
+
+    const expectedTargetSeconds = startSeconds + edgeCostSeconds;
+    if (expectedTargetSeconds > targetSeconds + edgeSlackSeconds) {
+      continue;
+    }
+
+    outputVertices.push(
+      x0,
+      y0,
+      startSeconds,
+      nodePixels.nodePixelX[targetNodeIndex],
+      nodePixels.nodePixelY[targetNodeIndex],
+      expectedTargetSeconds,
+    );
+    segmentCount += 1;
+  }
+
+  return segmentCount;
+}
+
+export function collectSettledBatchTravelTimeEdgeVertices(
+  graph,
+  nodePixels,
+  distSeconds,
+  settledBatch,
+  allowedModeMask,
+  options = {},
+) {
+  validateGraphForRouting(graph);
+  validateNodePixels(nodePixels);
+  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
+  validateSettledBatch(settledBatch);
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+
+  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
+  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
+    throw new Error('edgeSlackSeconds must be a non-negative finite number');
+  }
+
+  const outputVertices = [];
+  for (const sourceNodeIndex of settledBatch) {
+    collectEligibleOutgoingTravelTimeEdgeVerticesFromSourceNode(
+      graph,
+      nodePixels,
+      distSeconds,
+      sourceNodeIndex,
+      allowedModeMask,
+      edgeSlackSeconds,
+      outputVertices,
+    );
+  }
+
+  return new Float32Array(outputVertices);
+}
+
+export function collectAllReachableTravelTimeEdgeVertices(
+  graph,
+  nodePixels,
+  distSeconds,
+  allowedModeMask,
+  options = {},
+) {
+  validateGraphForRouting(graph);
+  validateNodePixels(nodePixels);
+  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+
+  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
+  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
+    throw new Error('edgeSlackSeconds must be a non-negative finite number');
+  }
+
+  const outputVertices = [];
+  for (let sourceNodeIndex = 0; sourceNodeIndex < graph.header.nNodes; sourceNodeIndex += 1) {
+    collectEligibleOutgoingTravelTimeEdgeVerticesFromSourceNode(
+      graph,
+      nodePixels,
+      distSeconds,
+      sourceNodeIndex,
+      allowedModeMask,
+      edgeSlackSeconds,
+      outputVertices,
+    );
+  }
+
+  return new Float32Array(outputVertices);
+}
+
 export async function runSearchTimeSliced(searchState, options = {}) {
   validateSearchState(searchState);
 
@@ -2716,12 +3018,16 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   }
 
   const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
+  const supportsGpuEdgeInterpolation = typeof renderer.drawTravelTimeEdges === 'function';
   const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
   if (supportsGpuTravelTimeRendering && !mapData.travelTimeGrid) {
     throw new Error('mapData.travelTimeGrid is required for GPU travel-time rendering');
   }
 
-  if (supportsGpuTravelTimeRendering) {
+  if (supportsGpuEdgeInterpolation) {
+    clearGrid(mapData.pixelGrid);
+    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+  } else if (supportsGpuTravelTimeRendering) {
     clearTravelTimeGrid(mapData.travelTimeGrid);
     renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
       cycleMinutes: getColourCycleMinutesFromShell(shell),
@@ -2747,7 +3053,22 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
     ...options,
     onSlice(settledBatch) {
       settledNodeCount += settledBatch.length;
-      if (supportsGpuTravelTimeRendering) {
+      if (supportsGpuEdgeInterpolation) {
+        const batchEdgeVertices = collectSettledBatchTravelTimeEdgeVertices(
+          searchState.graph,
+          mapData.nodePixels,
+          searchState.distSeconds,
+          settledBatch,
+          allowedModeMask,
+        );
+        paintedEdgeCount += renderer.drawTravelTimeEdges(batchEdgeVertices, {
+          cycleMinutes: colourCycleMinutes,
+          append: true,
+          widthPx: searchState.graph.header.gridWidthPx,
+          heightPx: searchState.graph.header.gridHeightPx,
+        });
+        paintedNodeCount = countFiniteTravelTimes(searchState.distSeconds);
+      } else if (supportsGpuTravelTimeRendering) {
         paintedEdgeCount += paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
           mapData.travelTimeGrid,
           searchState.graph,
@@ -2792,7 +3113,23 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   });
 
   if (!runSummary.cancelled) {
-    if (supportsGpuTravelTimeRendering) {
+    if (supportsGpuEdgeInterpolation) {
+      clearGrid(mapData.pixelGrid);
+      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+      const allEdgeVertices = collectAllReachableTravelTimeEdgeVertices(
+        searchState.graph,
+        mapData.nodePixels,
+        searchState.distSeconds,
+        allowedModeMask,
+      );
+      paintedEdgeCount = renderer.drawTravelTimeEdges(allEdgeVertices, {
+        cycleMinutes: colourCycleMinutes,
+        append: false,
+        widthPx: searchState.graph.header.gridWidthPx,
+        heightPx: searchState.graph.header.gridHeightPx,
+      });
+      paintedNodeCount = countFiniteTravelTimes(searchState.distSeconds);
+    } else if (supportsGpuTravelTimeRendering) {
       clearTravelTimeGrid(mapData.travelTimeGrid);
       paintedEdgeCount = paintAllReachableEdgeInterpolationsToTravelTimeGrid(
         mapData.travelTimeGrid,
@@ -2839,6 +3176,19 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
     paintedEdgeCount,
     paintedNodeCount,
   };
+}
+
+function countFiniteTravelTimes(distSeconds) {
+  if (!distSeconds || typeof distSeconds.length !== 'number') {
+    return 0;
+  }
+  let count = 0;
+  for (let i = 0; i < distSeconds.length; i += 1) {
+    if (distSeconds[i] < Infinity) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 export function formatRoutingStatusCalculating(settledCount) {
