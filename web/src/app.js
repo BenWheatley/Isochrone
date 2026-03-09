@@ -10,6 +10,8 @@ const BYTES_PER_MEBIBYTE = 1024 * 1024;
 const LOADING_FADE_MS = 180;
 const SUPPORTED_GRAPH_VERSIONS = new Set([2]);
 const EDGE_MODE_WALK_BIT = 1;
+const EDGE_MODE_BIKE_BIT = 1 << 1;
+const EDGE_MODE_CAR_BIT = 1 << 2;
 
 export class MinHeap {
   constructor(maxNodeCount) {
@@ -223,6 +225,7 @@ export function createWalkingSearchState(
   graph,
   sourceNodeIndex,
   timeLimitSeconds = Number.POSITIVE_INFINITY,
+  allowedModeMask = EDGE_MODE_CAR_BIT,
 ) {
   validateGraphForRouting(graph);
 
@@ -236,6 +239,9 @@ export function createWalkingSearchState(
     )
   ) {
     throw new Error('timeLimitSeconds must be a positive finite number or Infinity');
+  }
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
   }
 
   const distSeconds = new Float32Array(graph.header.nNodes);
@@ -296,7 +302,7 @@ export function createWalkingSearchState(
         const endEdgeIndex = firstEdgeIndex + edgeCount;
 
         for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
-          if ((graph.edgeModeMask[edgeIndex] & EDGE_MODE_WALK_BIT) === 0) {
+          if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
             continue;
           }
           const targetIndex = graph.edgeU32[edgeIndex * 3];
@@ -481,6 +487,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     clearGrid(mapData.pixelGrid);
     blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
     highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);
+    const allowedModeMask = getAllowedModeMaskFromShell(shell);
 
     try {
       const runSummary = await runWalkingIsochroneFromSourceNode(
@@ -490,6 +497,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
         Number.POSITIVE_INFINITY,
         {
           ...options,
+          allowedModeMask,
           isCancelled: () => runToken.cancelled,
         },
       );
@@ -562,7 +570,13 @@ export async function runWalkingIsochroneFromSourceNode(
     throw new Error('mapData.graph is required');
   }
 
-  const searchState = createWalkingSearchState(mapData.graph, sourceNodeIndex, timeLimitSeconds);
+  const allowedModeMask = options.allowedModeMask ?? EDGE_MODE_CAR_BIT;
+  const searchState = createWalkingSearchState(
+    mapData.graph,
+    sourceNodeIndex,
+    timeLimitSeconds,
+    allowedModeMask,
+  );
   const runSummary = await runSearchTimeSlicedWithRendering(shell, mapData, searchState, options);
   runPostMvpTransitStub(mapData.graph, searchState);
   return runSummary;
@@ -613,6 +627,12 @@ export function initializeAppShell(doc) {
   const loadingText = resolvedDocument.getElementById('loading-text');
   const loadingProgressBar = resolvedDocument.getElementById('loading-progress-bar');
   const routingStatus = resolvedDocument.getElementById('routing-status');
+  const modeMenuContainer = resolvedDocument.getElementById('mode-menu');
+  const modeMenuButton = resolvedDocument.getElementById('mode-menu-button');
+  const modeMenuPopup = resolvedDocument.getElementById('mode-menu-popup');
+  const modeWalkCheckbox = resolvedDocument.getElementById('mode-walk');
+  const modeBikeCheckbox = resolvedDocument.getElementById('mode-bike');
+  const modeCarCheckbox = resolvedDocument.getElementById('mode-car');
 
   if (!mapRegion || mapRegion.tagName !== 'SECTION') {
     throw new Error('index.html is missing <section id="map-region">');
@@ -638,6 +658,24 @@ export function initializeAppShell(doc) {
   if (!routingStatus || routingStatus.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="routing-status">');
   }
+  if (!modeMenuContainer || modeMenuContainer.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="mode-menu">');
+  }
+  if (!modeMenuButton || modeMenuButton.tagName !== 'BUTTON') {
+    throw new Error('index.html is missing <button id="mode-menu-button">');
+  }
+  if (!modeMenuPopup || modeMenuPopup.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="mode-menu-popup">');
+  }
+  if (!modeWalkCheckbox || modeWalkCheckbox.tagName !== 'INPUT') {
+    throw new Error('index.html is missing <input id="mode-walk">');
+  }
+  if (!modeBikeCheckbox || modeBikeCheckbox.tagName !== 'INPUT') {
+    throw new Error('index.html is missing <input id="mode-bike">');
+  }
+  if (!modeCarCheckbox || modeCarCheckbox.tagName !== 'INPUT') {
+    throw new Error('index.html is missing <input id="mode-car">');
+  }
 
   sizeCanvasToCssPixels(isochroneCanvas);
   sizeCanvasToCssPixels(boundaryCanvas);
@@ -649,6 +687,9 @@ export function initializeAppShell(doc) {
   loadingText.textContent = 'Loading district boundaries...';
   setLoadingProgressBar(loadingProgressBar, 0);
   routingStatus.textContent = 'Ready.';
+  modeMenuPopup.hidden = true;
+  modeMenuButton.setAttribute('aria-expanded', 'false');
+  modeCarCheckbox.checked = true;
 
   return {
     mapRegion,
@@ -660,7 +701,112 @@ export function initializeAppShell(doc) {
     loadingText,
     loadingProgressBar,
     routingStatus,
+    modeMenuContainer,
+    modeMenuButton,
+    modeMenuPopup,
+    modeWalkCheckbox,
+    modeBikeCheckbox,
+    modeCarCheckbox,
     loadingFadeTimeoutId: null,
+  };
+}
+
+export function getAllowedModeMaskFromShell(shell) {
+  if (!shell || typeof shell !== 'object') {
+    throw new Error('shell is required');
+  }
+
+  const modeWalk = shell.modeWalkCheckbox?.checked;
+  const modeBike = shell.modeBikeCheckbox?.checked;
+  const modeCar = shell.modeCarCheckbox?.checked;
+
+  let allowedModeMask = 0;
+  if (modeWalk) {
+    allowedModeMask |= EDGE_MODE_WALK_BIT;
+  }
+  if (modeBike) {
+    allowedModeMask |= EDGE_MODE_BIKE_BIT;
+  }
+  if (modeCar) {
+    allowedModeMask |= EDGE_MODE_CAR_BIT;
+  }
+
+  if (allowedModeMask === 0) {
+    if (shell.modeCarCheckbox) {
+      shell.modeCarCheckbox.checked = true;
+    }
+    allowedModeMask = EDGE_MODE_CAR_BIT;
+  }
+
+  return allowedModeMask;
+}
+
+export function bindModeMenuPopup(shell) {
+  if (!shell || typeof shell !== 'object') {
+    throw new Error('shell is required');
+  }
+  if (!shell.modeMenuContainer || !shell.modeMenuButton || !shell.modeMenuPopup) {
+    throw new Error('mode menu shell elements are required');
+  }
+  if (!shell.modeWalkCheckbox || !shell.modeBikeCheckbox || !shell.modeCarCheckbox) {
+    throw new Error('mode checkbox elements are required');
+  }
+
+  let isOpen = false;
+
+  const setOpenState = (nextOpen) => {
+    isOpen = Boolean(nextOpen);
+    shell.modeMenuPopup.hidden = !isOpen;
+    shell.modeMenuButton.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  };
+
+  const handleToggleClick = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setOpenState(!isOpen);
+  };
+
+  const handleCheckboxChange = () => {
+    getAllowedModeMaskFromShell(shell);
+  };
+
+  const handleDocumentClick = (event) => {
+    if (!isOpen) {
+      return;
+    }
+
+    const target = event.target;
+    if (!target || !shell.modeMenuContainer.contains(target)) {
+      setOpenState(false);
+    }
+  };
+
+  const handleDocumentKeydown = (event) => {
+    if (event.key === 'Escape') {
+      setOpenState(false);
+    }
+  };
+
+  setOpenState(false);
+  getAllowedModeMaskFromShell(shell);
+
+  shell.modeMenuButton.addEventListener('click', handleToggleClick);
+  shell.modeWalkCheckbox.addEventListener('change', handleCheckboxChange);
+  shell.modeBikeCheckbox.addEventListener('change', handleCheckboxChange);
+  shell.modeCarCheckbox.addEventListener('change', handleCheckboxChange);
+  globalThis.document.addEventListener('click', handleDocumentClick);
+  globalThis.document.addEventListener('keydown', handleDocumentKeydown);
+
+  return {
+    dispose() {
+      shell.modeMenuButton.removeEventListener('click', handleToggleClick);
+      shell.modeWalkCheckbox.removeEventListener('change', handleCheckboxChange);
+      shell.modeBikeCheckbox.removeEventListener('change', handleCheckboxChange);
+      shell.modeCarCheckbox.removeEventListener('change', handleCheckboxChange);
+      globalThis.document.removeEventListener('click', handleDocumentClick);
+      globalThis.document.removeEventListener('keydown', handleDocumentKeydown);
+      setOpenState(false);
+    },
   };
 }
 
@@ -1834,6 +1980,7 @@ function isClosedPath(path) {
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
     const shell = initializeAppShell(globalThis.document);
+    bindModeMenuPopup(shell);
     void initializeMapData(shell)
       .then((mapData) => {
         window.addEventListener('resize', () => {

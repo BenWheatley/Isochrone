@@ -10,6 +10,31 @@
     <main class="app-shell">
       <header class="app-header">
         <h1>Isochrone</h1>
+        <div id="mode-menu" class="mode-menu">
+          <button
+            id="mode-menu-button"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="mode-menu-popup"
+          >
+            Transport Modes
+          </button>
+          <div id="mode-menu-popup" role="menu" hidden>
+            <label for="mode-walk">
+              <input id="mode-walk" name="mode-walk" type="checkbox" />
+              Walk
+            </label>
+            <label for="mode-bike">
+              <input id="mode-bike" name="mode-bike" type="checkbox" />
+              Bike
+            </label>
+            <label for="mode-car">
+              <input id="mode-car" name="mode-car" type="checkbox" checked />
+              Car
+            </label>
+          </div>
+        </div>
         <label for="departure-time">Departure time</label>
         <input id="departure-time" name="departure-time" type="time" value="08:00" step="60" />
       </header>
