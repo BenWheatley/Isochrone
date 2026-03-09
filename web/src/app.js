@@ -687,8 +687,10 @@ export function initializeAppShell(doc) {
   loadingText.textContent = 'Loading district boundaries...';
   setLoadingProgressBar(loadingProgressBar, 0);
   routingStatus.textContent = 'Ready.';
-  modeMenuPopup.hidden = true;
   modeMenuButton.setAttribute('aria-expanded', 'false');
+  if ('matches' in modeMenuPopup && modeMenuPopup.matches(':popover-open')) {
+    modeMenuPopup.hidePopover();
+  }
   modeCarCheckbox.checked = true;
 
   return {
@@ -751,61 +753,69 @@ export function bindModeMenuPopup(shell) {
   if (!shell.modeWalkCheckbox || !shell.modeBikeCheckbox || !shell.modeCarCheckbox) {
     throw new Error('mode checkbox elements are required');
   }
+  if (!('showPopover' in shell.modeMenuPopup) || !('hidePopover' in shell.modeMenuPopup)) {
+    throw new Error('mode menu popup requires HTML popover support');
+  }
 
-  let isOpen = false;
+  const positionPopup = () => {
+    const buttonRect = shell.modeMenuButton.getBoundingClientRect();
+    const popupRect = shell.modeMenuPopup.getBoundingClientRect();
+    const viewportPaddingPx = 8;
+    const popupGapPx = 6;
 
-  const setOpenState = (nextOpen) => {
-    isOpen = Boolean(nextOpen);
-    shell.modeMenuPopup.hidden = !isOpen;
-    shell.modeMenuButton.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    let leftPx = buttonRect.right - popupRect.width;
+    leftPx = Math.max(
+      viewportPaddingPx,
+      Math.min(leftPx, globalThis.innerWidth - popupRect.width - viewportPaddingPx),
+    );
+
+    let topPx = buttonRect.bottom + popupGapPx;
+    if (topPx + popupRect.height > globalThis.innerHeight - viewportPaddingPx) {
+      topPx = Math.max(viewportPaddingPx, buttonRect.top - popupRect.height - popupGapPx);
+    }
+
+    shell.modeMenuPopup.style.left = `${Math.round(leftPx)}px`;
+    shell.modeMenuPopup.style.top = `${Math.round(topPx)}px`;
   };
 
-  const handleToggleClick = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setOpenState(!isOpen);
+  const handlePopupToggle = (event) => {
+    const isOpen = event.newState === 'open';
+    shell.modeMenuButton.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    if (isOpen) {
+      positionPopup();
+    }
   };
 
   const handleCheckboxChange = () => {
     getAllowedModeMaskFromShell(shell);
   };
 
-  const handleDocumentClick = (event) => {
-    if (!isOpen) {
-      return;
-    }
-
-    const target = event.target;
-    if (!target || !shell.modeMenuContainer.contains(target)) {
-      setOpenState(false);
+  const handleWindowResize = () => {
+    if (shell.modeMenuPopup.matches(':popover-open')) {
+      positionPopup();
     }
   };
 
-  const handleDocumentKeydown = (event) => {
-    if (event.key === 'Escape') {
-      setOpenState(false);
-    }
-  };
-
-  setOpenState(false);
+  shell.modeMenuButton.setAttribute('aria-expanded', 'false');
   getAllowedModeMaskFromShell(shell);
 
-  shell.modeMenuButton.addEventListener('click', handleToggleClick);
+  shell.modeMenuPopup.addEventListener('toggle', handlePopupToggle);
   shell.modeWalkCheckbox.addEventListener('change', handleCheckboxChange);
   shell.modeBikeCheckbox.addEventListener('change', handleCheckboxChange);
   shell.modeCarCheckbox.addEventListener('change', handleCheckboxChange);
-  globalThis.document.addEventListener('click', handleDocumentClick);
-  globalThis.document.addEventListener('keydown', handleDocumentKeydown);
+  globalThis.addEventListener('resize', handleWindowResize);
 
   return {
     dispose() {
-      shell.modeMenuButton.removeEventListener('click', handleToggleClick);
+      shell.modeMenuPopup.removeEventListener('toggle', handlePopupToggle);
       shell.modeWalkCheckbox.removeEventListener('change', handleCheckboxChange);
       shell.modeBikeCheckbox.removeEventListener('change', handleCheckboxChange);
       shell.modeCarCheckbox.removeEventListener('change', handleCheckboxChange);
-      globalThis.document.removeEventListener('click', handleDocumentClick);
-      globalThis.document.removeEventListener('keydown', handleDocumentKeydown);
-      setOpenState(false);
+      globalThis.removeEventListener('resize', handleWindowResize);
+      if (shell.modeMenuPopup.matches(':popover-open')) {
+        shell.modeMenuPopup.hidePopover();
+      }
+      shell.modeMenuButton.setAttribute('aria-expanded', 'false');
     },
   };
 }

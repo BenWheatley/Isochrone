@@ -14,13 +14,15 @@
           <button
             id="mode-menu-button"
             type="button"
-            aria-haspopup="true"
+            popovertarget="mode-menu-popup"
+            popovertargetaction="toggle"
+            aria-haspopup="menu"
             aria-expanded="false"
             aria-controls="mode-menu-popup"
           >
             Transport Modes
           </button>
-          <div id="mode-menu-popup" role="menu" hidden>
+          <div id="mode-menu-popup" role="menu" popover>
             <label for="mode-walk">
               <input id="mode-walk" name="mode-walk" type="checkbox" />
               Walk

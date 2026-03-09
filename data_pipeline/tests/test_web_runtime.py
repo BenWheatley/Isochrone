@@ -23,6 +23,9 @@ def test_index_html_uses_native_module_entrypoint() -> None:
     assert 'id="mode-bike"' in index_html
     assert 'id="mode-car"' in index_html
     assert 'id="mode-car" name="mode-car" type="checkbox" checked' in index_html
+    assert 'popovertarget="mode-menu-popup"' in index_html
+    assert 'popovertargetaction="toggle"' in index_html
+    assert 'id="mode-menu-popup" role="menu" popover' in index_html
     assert "dist/app.js" not in index_html
     assert re.search(
         r'<link[^>]*rel="stylesheet"[^>]*href="\./src/styles\.css"',
@@ -238,7 +241,15 @@ def test_app_js_has_mode_selector_popup_contract() -> None:
     assert "if (allowedModeMask === 0) {" in app_js
     assert "shell.modeCarCheckbox.checked = true;" in app_js
     assert "export function bindModeMenuPopup(" in app_js
-    assert "shell.modeMenuButton.addEventListener('click', handleToggleClick);" in app_js
+    assert (
+        "if (!('showPopover' in shell.modeMenuPopup) || !('hidePopover' in shell.modeMenuPopup)) {"
+    ) in app_js
+    assert "const handlePopupToggle = (event) => {" in app_js
+    assert "const isOpen = event.newState === 'open';" in app_js
+    assert (
+        "shell.modeMenuButton.setAttribute('aria-expanded', isOpen ? 'true' : 'false');"
+    ) in app_js
+    assert "shell.modeMenuPopup.addEventListener('toggle', handlePopupToggle);" in app_js
     assert "shell.modeWalkCheckbox.addEventListener('change', handleCheckboxChange);" in app_js
     assert "shell.modeBikeCheckbox.addEventListener('change', handleCheckboxChange);" in app_js
     assert "shell.modeCarCheckbox.addEventListener('change', handleCheckboxChange);" in app_js
@@ -360,3 +371,4 @@ def test_styles_prevent_zero_height_map_region() -> None:
     assert "#routing-status" in styles_css
     assert ".mode-menu" in styles_css
     assert "#mode-menu-popup" in styles_css
+    assert "#mode-menu-popup:popover-open" in styles_css

@@ -66,9 +66,9 @@ body {
 }
 
 #mode-menu-popup {
-  position: absolute;
-  top: calc(100% + 0.35rem);
-  right: 0;
+  position: fixed;
+  inset: auto;
+  margin: 0;
   min-width: 8rem;
   padding: 0.45rem 0.55rem;
   border: 1px solid #9eb0bf;
@@ -76,6 +76,10 @@ body {
   background: #ffffff;
   box-shadow: 0 8px 20px rgba(20, 40, 55, 0.2);
   z-index: 10;
+  display: none;
+}
+
+#mode-menu-popup:popover-open {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
