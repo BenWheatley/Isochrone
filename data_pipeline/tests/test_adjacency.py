@@ -246,3 +246,58 @@ def test_flags_capture_directionality_tag_presence() -> None:
         assert edge.flags & EDGE_FLAG_MODE_ONEWAY_BICYCLE_PRESENT
         assert edge.flags & EDGE_FLAG_MODE_ROUNDABOUT_PRESENT
         assert edge.flags & EDGE_FLAG_MODE_SPEED_DIRECTIONAL_PRESENT
+
+
+def test_maxspeed_parser_supports_units_and_walk_keyword() -> None:
+    extracted = WalkableGraphExtract(
+        ways=(
+            WayCandidate(
+                osm_id=700,
+                highway="residential",
+                node_ids=(1, 2),
+                constraints={"maxspeed": "50 km/h"},
+            ),
+            WayCandidate(
+                osm_id=701,
+                highway="residential",
+                node_ids=(2, 3),
+                constraints={"maxspeed": "30mph"},
+            ),
+            WayCandidate(
+                osm_id=702,
+                highway="footway",
+                node_ids=(3, 4),
+                constraints={"maxspeed": "walk"},
+            ),
+            WayCandidate(
+                osm_id=703,
+                highway="residential",
+                node_ids=(4, 5),
+                constraints={"maxspeed": "50;70"},
+            ),
+        ),
+        node_coords={
+            1: (52.5, 13.4),
+            2: (52.5001, 13.401),
+            3: (52.5002, 13.402),
+            4: (52.5003, 13.403),
+            5: (52.5004, 13.404),
+        },
+        connector_nodes={},
+        dropped_way_count=0,
+    )
+    projected = _projection({1: (0, 0), 2: (10, 0), 3: (20, 0), 4: (30, 0), 5: (40, 0)})
+
+    graph = build_adjacency_graph(extracted, projected)
+
+    maxspeed_by_road_class: dict[int, set[int]] = {}
+    for edge in graph.edges:
+        bucket = maxspeed_by_road_class.setdefault(edge.road_class_id, set())
+        bucket.add(edge.maxspeed_kph)
+
+    # residential
+    assert 50 in maxspeed_by_road_class[6]
+    assert 48 in maxspeed_by_road_class[6]
+    assert 0 not in maxspeed_by_road_class[6]
+    # footway walk keyword
+    assert maxspeed_by_road_class[1] == {5}

@@ -395,21 +395,7 @@ def _mode_mask_for_way(way: WayCandidate) -> int:
 
 
 def _maxspeed_kph_for_way(way: WayCandidate) -> int:
-    raw = way.constraints.get("maxspeed")
-    if raw is None:
-        return 0
-
-    match = re.match(r"^\s*(\d+(?:\.\d+)?)\s*(km/h|kph|mph)?\s*$", raw.lower())
-    if match is None:
-        return 0
-
-    value = float(match.group(1))
-    unit = match.group(2) or "km/h"
-    if unit == "mph":
-        value *= 1.60934
-
-    rounded = int(round(value))
-    return max(0, min(rounded, 65535))
+    return _parse_maxspeed_kph(_normalized_constraint(way, "maxspeed"))
 
 
 def _road_class_id_for_way(highway: str) -> int:
@@ -429,3 +415,38 @@ def _apply_mode_override(mask: int, mode_bits: int, value: str | None) -> int:
     if value in ALLOW_VALUES:
         return mask | mode_bits
     return mask
+
+
+def _parse_maxspeed_kph(raw: str | None) -> int:
+    if raw is None:
+        return 0
+
+    value = raw.strip().lower()
+    if value in {"walk", "walking_speed"}:
+        return 5
+
+    for candidate in re.split(r"[;|]", value):
+        parsed = _parse_maxspeed_token_kph(candidate.strip())
+        if parsed is not None:
+            return parsed
+
+    return 0
+
+
+def _parse_maxspeed_token_kph(token: str) -> int | None:
+    if token == "":
+        return None
+    if token in {"none", "signals", "variable", "national"}:
+        return 0
+
+    match = re.match(r"^(\d+(?:\.\d+)?)\s*(km/h|kmh|kph|mph)?$", token)
+    if match is None:
+        return None
+
+    value = float(match.group(1))
+    unit = match.group(2) or "km/h"
+    if unit == "mph":
+        value *= 1.60934
+
+    rounded = int(round(value))
+    return max(0, min(rounded, 65535))
