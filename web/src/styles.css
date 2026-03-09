@@ -46,6 +46,10 @@ body {
   min-width: 7.5rem;
 }
 
+#colour-cycle-minutes {
+  min-width: 5rem;
+}
+
 .mode-select {
   font-size: 0.9rem;
 }
@@ -103,6 +107,61 @@ body {
 
 #isochrone {
   z-index: 2;
+}
+
+#isochrone-legend {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 4;
+  min-width: 12rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.35rem;
+  background: rgba(4, 12, 18, 0.88);
+  border: 1px solid rgba(130, 170, 210, 0.55);
+  color: #dceaf8;
+  font-size: 0.75rem;
+  display: grid;
+  gap: 0.28rem;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.legend-swatch {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 0.2rem;
+  border: 1px solid rgba(200, 220, 235, 0.35);
+  flex: 0 0 auto;
+}
+
+#distance-scale {
+  position: absolute;
+  left: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 4;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.35rem;
+  background: rgba(4, 12, 18, 0.88);
+  border: 1px solid rgba(130, 170, 210, 0.55);
+  color: #dceaf8;
+  font-size: 0.75rem;
+  min-width: 5rem;
+}
+
+#distance-scale-line {
+  height: 0.34rem;
+  border-radius: 999px;
+  background: #f6fbff;
+}
+
+#distance-scale-label {
+  margin-top: 0.25rem;
+  text-align: center;
 }
 
 #loading {

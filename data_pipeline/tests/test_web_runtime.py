@@ -19,6 +19,11 @@ def test_index_html_uses_native_module_entrypoint() -> None:
     assert 'id="canvas-stack"' in index_html
     assert 'id="mode-select"' in index_html
     assert 'id="mode-select" name="mode-select" multiple' in index_html
+    assert 'id="colour-cycle-minutes"' in index_html
+    assert 'id="distance-scale"' in index_html
+    assert 'id="distance-scale-line"' in index_html
+    assert 'id="distance-scale-label"' in index_html
+    assert 'id="isochrone-legend"' in index_html
     assert '<option value="walk">Walk</option>' in index_html
     assert '<option value="bike">Bike</option>' in index_html
     assert '<option value="car" selected>Car</option>' in index_html
@@ -108,12 +113,14 @@ def test_app_js_has_node_pixel_index_contract() -> None:
 def test_app_js_has_time_to_colour_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
-    assert "export function timeToColour(seconds)" in app_js
-    assert "const minutesInHour = (seconds / 60) % 60;" in app_js
-    assert "if (minutesInHour <= 5)" in app_js
-    assert "if (minutesInHour <= 15)" in app_js
-    assert "if (minutesInHour <= 30)" in app_js
-    assert "if (minutesInHour <= 45)" in app_js
+    assert "export function timeToColour(seconds, options = {})" in app_js
+    assert "const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;" in app_js
+    assert "const cyclePositionMinutes = (seconds / 60) % cycleMinutes;" in app_js
+    assert "const cycleRatio = cyclePositionMinutes / cycleMinutes;" in app_js
+    assert "if (cycleRatio <= 5 / 60)" in app_js
+    assert "if (cycleRatio <= 15 / 60)" in app_js
+    assert "if (cycleRatio <= 30 / 60)" in app_js
+    assert "if (cycleRatio <= 45 / 60)" in app_js
     assert "return [0, 255, 255];" in app_js
     assert "return [64, 255, 64];" in app_js
     assert "return [255, 255, 64];" in app_js
@@ -127,7 +134,10 @@ def test_app_js_has_reachable_paint_and_blit_contract() -> None:
     assert "export function paintReachableNodesToGrid(" in app_js
     assert "const alpha = options.alpha ?? 255;" in app_js
     assert "if (distSeconds[nodeIndex] < Infinity)" in app_js
-    assert "const [r, g, b] = timeToColour(distSeconds[nodeIndex]);" in app_js
+    assert (
+        "const [r, g, b] = timeToColour("
+        "distSeconds[nodeIndex], { cycleMinutes: colourCycleMinutes });"
+    ) in app_js
     assert "setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)" in app_js
     assert "export function blitPixelGridToCanvas(" in app_js
     assert (
@@ -271,6 +281,26 @@ def test_app_js_has_mode_selector_contract() -> None:
     assert "option.selected = option.value === 'car';" in app_js
 
 
+def test_app_js_has_legend_and_scale_bar_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "const DEFAULT_COLOUR_CYCLE_MINUTES = 60;" in app_js
+    assert "getElementById('colour-cycle-minutes')" in app_js
+    assert "getElementById('distance-scale')" in app_js
+    assert "getElementById('distance-scale-line')" in app_js
+    assert "getElementById('distance-scale-label')" in app_js
+    assert "getElementById('isochrone-legend')" in app_js
+    assert "shell.isochroneCanvas.width = graph.header.gridWidthPx;" in app_js
+    assert "shell.isochroneCanvas.height = graph.header.gridHeightPx;" in app_js
+    assert "export function getColourCycleMinutesFromShell(" in app_js
+    assert "const rawCycleValue = shell.colourCycleMinutesInput?.value;" in app_js
+    assert "export function renderIsochroneLegend(" in app_js
+    assert "export function updateDistanceScaleBar(" in app_js
+    assert "const metresPerCssPixel =" in app_js
+    assert "renderIsochroneLegend(shell, getColourCycleMinutesFromShell(shell));" in app_js
+    assert "updateDistanceScaleBar(shell, graph.header);" in app_js
+
+
 def test_app_js_reads_v2_edge_mode_and_speed_metadata_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
@@ -391,3 +421,5 @@ def test_styles_prevent_zero_height_map_region() -> None:
     assert "#routing-status" in styles_css
     assert ".mode-select" in styles_css
     assert "#mode-select" in styles_css
+    assert "#distance-scale" in styles_css
+    assert "#isochrone-legend" in styles_css

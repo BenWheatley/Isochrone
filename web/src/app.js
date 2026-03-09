@@ -16,6 +16,7 @@ const WALKING_SPEED_M_S = 1.39;
 const BIKE_CRUISE_SPEED_KPH = 20;
 const CAR_FALLBACK_SPEED_KPH = 30;
 const ROAD_CLASS_MOTORWAY = 15;
+const DEFAULT_COLOUR_CYCLE_MINUTES = 60;
 
 export class MinHeap {
   constructor(maxNodeCount) {
@@ -611,6 +612,8 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
     highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);
     const allowedModeMask = modeMask ?? getAllowedModeMaskFromShell(shell);
+    renderIsochroneLegend(shell, getColourCycleMinutesFromShell(shell));
+    const colourCycleMinutes = getColourCycleMinutesFromShell(shell);
 
     try {
       const runSummary = await runWalkingIsochroneFromSourceNode(
@@ -621,6 +624,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
         {
           ...options,
           allowedModeMask,
+          colourCycleMinutes,
           isCancelled: () => runToken.cancelled,
         },
       );
@@ -754,6 +758,11 @@ export function initializeAppShell(doc) {
   const loadingProgressBar = resolvedDocument.getElementById('loading-progress-bar');
   const routingStatus = resolvedDocument.getElementById('routing-status');
   const modeSelect = resolvedDocument.getElementById('mode-select');
+  const colourCycleMinutesInput = resolvedDocument.getElementById('colour-cycle-minutes');
+  const distanceScale = resolvedDocument.getElementById('distance-scale');
+  const distanceScaleLine = resolvedDocument.getElementById('distance-scale-line');
+  const distanceScaleLabel = resolvedDocument.getElementById('distance-scale-label');
+  const isochroneLegend = resolvedDocument.getElementById('isochrone-legend');
 
   if (!mapRegion || mapRegion.tagName !== 'SECTION') {
     throw new Error('index.html is missing <section id="map-region">');
@@ -782,6 +791,21 @@ export function initializeAppShell(doc) {
   if (!modeSelect || modeSelect.tagName !== 'SELECT') {
     throw new Error('index.html is missing <select id="mode-select">');
   }
+  if (!colourCycleMinutesInput || colourCycleMinutesInput.tagName !== 'INPUT') {
+    throw new Error('index.html is missing <input id="colour-cycle-minutes">');
+  }
+  if (!distanceScale || distanceScale.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="distance-scale">');
+  }
+  if (!distanceScaleLine || distanceScaleLine.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="distance-scale-line">');
+  }
+  if (!distanceScaleLabel || distanceScaleLabel.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="distance-scale-label">');
+  }
+  if (!isochroneLegend || isochroneLegend.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="isochrone-legend">');
+  }
 
   sizeCanvasToCssPixels(isochroneCanvas);
   sizeCanvasToCssPixels(boundaryCanvas);
@@ -808,6 +832,11 @@ export function initializeAppShell(doc) {
     loadingProgressBar,
     routingStatus,
     modeSelect,
+    colourCycleMinutesInput,
+    distanceScale,
+    distanceScaleLine,
+    distanceScaleLabel,
+    isochroneLegend,
     loadingFadeTimeoutId: null,
   };
 }
@@ -845,27 +874,56 @@ export function getAllowedModeMaskFromShell(shell) {
   return allowedModeMask;
 }
 
+export function getColourCycleMinutesFromShell(shell) {
+  if (!shell || typeof shell !== 'object') {
+    throw new Error('shell is required');
+  }
+
+  const rawCycleValue = shell.colourCycleMinutesInput?.value;
+  const parsedCycleMinutes = Number.parseInt(rawCycleValue ?? '', 10);
+  if (!Number.isFinite(parsedCycleMinutes) || parsedCycleMinutes <= 0) {
+    if (shell.colourCycleMinutesInput) {
+      shell.colourCycleMinutesInput.value = String(DEFAULT_COLOUR_CYCLE_MINUTES);
+    }
+    return DEFAULT_COLOUR_CYCLE_MINUTES;
+  }
+
+  const clampedCycleMinutes = clampInt(parsedCycleMinutes, 5, 24 * 60);
+  if (shell.colourCycleMinutesInput) {
+    shell.colourCycleMinutesInput.value = String(clampedCycleMinutes);
+  }
+  return clampedCycleMinutes;
+}
+
 export function bindModeSelectControl(shell) {
   if (!shell || typeof shell !== 'object') {
     throw new Error('shell is required');
   }
-  if (!shell.modeSelect) {
-    throw new Error('mode select element is required');
+  if (!shell.modeSelect || !shell.colourCycleMinutesInput || !shell.isochroneLegend) {
+    throw new Error('mode and colour controls are required');
   }
 
   const handleSelectChange = () => {
     getAllowedModeMaskFromShell(shell);
+  };
+  const handleCycleChange = () => {
+    const cycleMinutes = getColourCycleMinutesFromShell(shell);
+    renderIsochroneLegend(shell, cycleMinutes);
   };
 
   for (const option of shell.modeSelect.options) {
     option.selected = option.value === 'car';
   }
   getAllowedModeMaskFromShell(shell);
+  getColourCycleMinutesFromShell(shell);
+  renderIsochroneLegend(shell, getColourCycleMinutesFromShell(shell));
   shell.modeSelect.addEventListener('change', handleSelectChange);
+  shell.colourCycleMinutesInput.addEventListener('change', handleCycleChange);
 
   return {
     dispose() {
       shell.modeSelect.removeEventListener('change', handleSelectChange);
+      shell.colourCycleMinutesInput.removeEventListener('change', handleCycleChange);
     },
   };
 }
@@ -1346,12 +1404,16 @@ export async function initializeMapData(shell, options = {}) {
   try {
     const boundaryLoad = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
     const graph = await loadGraphBinary(shell, graphOptions);
+    shell.isochroneCanvas.width = graph.header.gridWidthPx;
+    shell.isochroneCanvas.height = graph.header.gridHeightPx;
     layoutMapViewportToContainGraph(shell, graph.header);
     const alignedBoundarySummary = drawBoundaryBasemapAlignedToGraphGrid(
       shell.boundaryCanvas,
       boundaryLoad.boundaryPayload,
       graph.header,
     );
+    renderIsochroneLegend(shell, getColourCycleMinutesFromShell(shell));
+    updateDistanceScaleBar(shell, graph.header);
     hideLoadingOverlay(shell);
 
     const nodePixels = precomputeNodePixelCoordinates(graph);
@@ -1406,6 +1468,115 @@ export function layoutMapViewportToContainGraph(shell, graphHeader) {
   };
 }
 
+function formatLegendDuration(totalMinutes) {
+  const roundedMinutes = Math.max(0, Math.round(totalMinutes));
+  if (roundedMinutes < 60) {
+    return `${roundedMinutes}m`;
+  }
+
+  const hours = Math.floor(roundedMinutes / 60);
+  const minutes = roundedMinutes % 60;
+  if (minutes === 0) {
+    return `${hours}h`;
+  }
+  return `${hours}h ${minutes}m`;
+}
+
+function formatDistanceLabel(distanceMetres) {
+  if (distanceMetres >= 1000) {
+    const km = distanceMetres / 1000;
+    if (km >= 10) {
+      return `${Math.round(km)} km`;
+    }
+    return `${km.toFixed(1)} km`;
+  }
+  return `${Math.round(distanceMetres)} m`;
+}
+
+function pickScaleDistanceMetres(targetDistanceMetres) {
+  const safeTarget = Math.max(1, targetDistanceMetres);
+  const exponent = Math.floor(Math.log10(safeTarget));
+  const base = 10 ** exponent;
+  const multipliers = [1, 2, 5];
+
+  let chosen = base;
+  for (const multiplier of multipliers) {
+    const candidate = multiplier * base;
+    if (candidate <= safeTarget) {
+      chosen = candidate;
+    }
+  }
+
+  if (chosen > safeTarget) {
+    return chosen / 10;
+  }
+  return chosen;
+}
+
+export function renderIsochroneLegend(shell, cycleMinutes) {
+  if (!shell || typeof shell !== 'object' || !shell.isochroneLegend) {
+    throw new Error('shell.isochroneLegend is required');
+  }
+  if (!Number.isFinite(cycleMinutes) || cycleMinutes <= 0) {
+    throw new Error('cycleMinutes must be a positive finite number');
+  }
+
+  const boundaries = [0, 5 / 60, 15 / 60, 30 / 60, 45 / 60, 1];
+  const colours = [
+    [0, 255, 255],
+    [64, 255, 64],
+    [255, 255, 64],
+    [255, 140, 0],
+    [255, 64, 160],
+  ];
+
+  const legendRows = [];
+  for (let index = 0; index < colours.length; index += 1) {
+    const colour = colours[index];
+    const rangeStartMinutes = boundaries[index] * cycleMinutes;
+    const rangeEndMinutes = boundaries[index + 1] * cycleMinutes;
+    const rangeLabel =
+      index === colours.length - 1
+        ? `${formatLegendDuration(rangeStartMinutes)}+`
+        : `${formatLegendDuration(rangeStartMinutes)}-${formatLegendDuration(rangeEndMinutes)}`;
+
+    legendRows.push(
+      `<div class="legend-row"><span class="legend-swatch" style="background: rgb(${colour[0]}, ${colour[1]}, ${colour[2]});"></span><span>${rangeLabel}</span></div>`,
+    );
+  }
+
+  shell.isochroneLegend.innerHTML = legendRows.join('');
+}
+
+export function updateDistanceScaleBar(shell, graphHeader) {
+  if (
+    !shell ||
+    typeof shell !== 'object' ||
+    !shell.distanceScale ||
+    !shell.distanceScaleLine ||
+    !shell.distanceScaleLabel ||
+    !shell.isochroneCanvas
+  ) {
+    throw new Error('distance scale shell elements are required');
+  }
+
+  validateGraphHeaderForBoundaryAlignment(graphHeader);
+  const canvasRect = shell.isochroneCanvas.getBoundingClientRect();
+  if (!(canvasRect.width > 0)) {
+    return;
+  }
+
+  const metresPerCssPixel =
+    (graphHeader.gridWidthPx * graphHeader.pixelSizeM) / canvasRect.width;
+  const preferredWidthPx = 120;
+  const preferredDistanceMetres = preferredWidthPx * metresPerCssPixel;
+  const chosenDistanceMetres = pickScaleDistanceMetres(preferredDistanceMetres);
+  const lineWidthPx = Math.max(24, Math.round(chosenDistanceMetres / metresPerCssPixel));
+
+  shell.distanceScaleLine.style.width = `${lineWidthPx}px`;
+  shell.distanceScaleLabel.textContent = formatDistanceLabel(chosenDistanceMetres);
+}
+
 export function precomputeNodePixelCoordinates(graph) {
   validateGraphForNodePixels(graph);
 
@@ -1437,27 +1608,32 @@ export function precomputeNodePixelCoordinates(graph) {
   return { nodePixelX, nodePixelY };
 }
 
-export function timeToColour(seconds) {
+export function timeToColour(seconds, options = {}) {
   if (!Number.isFinite(seconds) || seconds < 0) {
     throw new Error('seconds must be a non-negative finite number');
   }
 
-  const minutesInHour = (seconds / 60) % 60;
+  const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+  if (!Number.isFinite(cycleMinutes) || cycleMinutes <= 0) {
+    throw new Error('cycleMinutes must be a positive finite number');
+  }
+  const cyclePositionMinutes = (seconds / 60) % cycleMinutes;
+  const cycleRatio = cyclePositionMinutes / cycleMinutes;
 
-  if (minutesInHour <= 5) {
+  if (cycleRatio <= 5 / 60) {
     return [0, 255, 255];
   }
-  if (minutesInHour <= 15) {
+  if (cycleRatio <= 15 / 60) {
     return [64, 255, 64];
   }
-  if (minutesInHour <= 30) {
+  if (cycleRatio <= 30 / 60) {
     return [255, 255, 64];
   }
-  if (minutesInHour <= 45) {
+  if (cycleRatio <= 45 / 60) {
     return [255, 140, 0];
   }
 
-  // 45-60 minutes band in each hourly cycle.
+  // Last quarter band in each cycle.
   return [255, 64, 160];
 }
 
@@ -1504,11 +1680,12 @@ export function paintReachableNodesToGrid(pixelGrid, nodePixels, distSeconds, op
   validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
 
   const alpha = options.alpha ?? 255;
+  const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   let paintedCount = 0;
 
   for (let nodeIndex = 0; nodeIndex < nodePixels.nodePixelX.length; nodeIndex += 1) {
     if (distSeconds[nodeIndex] < Infinity) {
-      const [r, g, b] = timeToColour(distSeconds[nodeIndex]);
+      const [r, g, b] = timeToColour(distSeconds[nodeIndex], { cycleMinutes: colourCycleMinutes });
       const xPx = nodePixels.nodePixelX[nodeIndex];
       const yPx = nodePixels.nodePixelY[nodeIndex];
       if (setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)) {
@@ -1567,6 +1744,7 @@ export function paintSettledBatchToGrid(pixelGrid, nodePixels, distSeconds, sett
   validateSettledBatch(settledBatch);
 
   const alpha = options.alpha ?? 255;
+  const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   let paintedCount = 0;
 
   for (const nodeIndex of settledBatch) {
@@ -1577,7 +1755,7 @@ export function paintSettledBatchToGrid(pixelGrid, nodePixels, distSeconds, sett
       continue;
     }
 
-    const [r, g, b] = timeToColour(distSeconds[nodeIndex]);
+    const [r, g, b] = timeToColour(distSeconds[nodeIndex], { cycleMinutes: colourCycleMinutes });
     const xPx = nodePixels.nodePixelX[nodeIndex];
     const yPx = nodePixels.nodePixelY[nodeIndex];
     if (setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)) {
@@ -1674,6 +1852,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   setRoutingStatus(shell, formatRoutingStatusCalculating(0));
 
   const alpha = options.alpha ?? 255;
+  const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   const onSliceExternal = options.onSlice;
   let paintedNodeCount = 0;
   let settledNodeCount = 0;
@@ -1687,7 +1866,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
         mapData.nodePixels,
         searchState.distSeconds,
         settledBatch,
-        { alpha },
+        { alpha, colourCycleMinutes },
       );
       blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
       setRoutingStatus(shell, formatRoutingStatusCalculating(settledNodeCount));
@@ -2049,6 +2228,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
       .then((mapData) => {
         window.addEventListener('resize', () => {
           layoutMapViewportToContainGraph(shell, mapData.graph.header);
+          updateDistanceScaleBar(shell, mapData.graph.header);
         });
         bindCanvasClickRouting(shell, mapData);
       })

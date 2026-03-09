@@ -16,6 +16,15 @@
           <option value="bike">Bike</option>
           <option value="car" selected>Car</option>
         </select>
+        <label for="colour-cycle-minutes">Colour cycle (min)</label>
+        <input
+          id="colour-cycle-minutes"
+          name="colour-cycle-minutes"
+          type="number"
+          min="5"
+          step="5"
+          value="60"
+        />
         <label for="departure-time">Departure time</label>
         <input id="departure-time" name="departure-time" type="time" value="08:00" step="60" />
       </header>
@@ -35,6 +44,11 @@
           <div id="loading-progress" aria-hidden="true">
             <div id="loading-progress-bar"></div>
           </div>
+        </div>
+        <div id="isochrone-legend" aria-live="polite"></div>
+        <div id="distance-scale" aria-label="Distance scale bar">
+          <div id="distance-scale-line"></div>
+          <div id="distance-scale-label">1 km</div>
         </div>
       </section>
       <div id="routing-status" role="status" aria-live="polite">Ready.</div>
