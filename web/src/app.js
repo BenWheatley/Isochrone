@@ -995,8 +995,8 @@ export function drawBoundaryBasemap(boundaryCanvas, payload) {
   );
 
   context.clearRect(0, 0, boundaryCanvas.width, boundaryCanvas.height);
-  context.fillStyle = 'rgba(19, 94, 137, 0.10)';
-  context.strokeStyle = 'rgba(19, 94, 137, 0.85)';
+  context.fillStyle = 'rgba(0, 0, 0, 0)';
+  context.strokeStyle = 'rgba(125, 175, 220, 0.55)';
   context.lineWidth = 1.2;
   context.lineJoin = 'round';
   context.lineCap = 'round';
@@ -1048,8 +1048,8 @@ export function drawBoundaryBasemapAlignedToGraphGrid(boundaryCanvas, payload, g
   boundaryCanvas.height = graphHeader.gridHeightPx;
 
   context.clearRect(0, 0, boundaryCanvas.width, boundaryCanvas.height);
-  context.fillStyle = 'rgba(19, 94, 137, 0.10)';
-  context.strokeStyle = 'rgba(19, 94, 137, 0.85)';
+  context.fillStyle = 'rgba(0, 0, 0, 0)';
+  context.strokeStyle = 'rgba(125, 175, 220, 0.55)';
   context.lineWidth = 1.2;
   context.lineJoin = 'round';
   context.lineCap = 'round';
@@ -1445,20 +1445,20 @@ export function timeToColour(seconds) {
   const minutesInHour = (seconds / 60) % 60;
 
   if (minutesInHour <= 5) {
-    return [32, 163, 78];
+    return [0, 255, 255];
   }
   if (minutesInHour <= 15) {
-    return [214, 201, 37];
+    return [64, 255, 64];
   }
   if (minutesInHour <= 30) {
-    return [230, 138, 43];
+    return [255, 255, 64];
   }
   if (minutesInHour <= 45) {
-    return [210, 58, 54];
+    return [255, 140, 0];
   }
 
   // 45-60 minutes band in each hourly cycle.
-  return [210, 58, 54];
+  return [255, 64, 160];
 }
 
 export function createPixelGrid(widthPx, heightPx) {
@@ -1503,7 +1503,7 @@ export function paintReachableNodesToGrid(pixelGrid, nodePixels, distSeconds, op
   validateNodePixels(nodePixels);
   validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
 
-  const alpha = options.alpha ?? 180;
+  const alpha = options.alpha ?? 255;
   let paintedCount = 0;
 
   for (let nodeIndex = 0; nodeIndex < nodePixels.nodePixelX.length; nodeIndex += 1) {
@@ -1566,7 +1566,7 @@ export function paintSettledBatchToGrid(pixelGrid, nodePixels, distSeconds, sett
   validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
   validateSettledBatch(settledBatch);
 
-  const alpha = options.alpha ?? 180;
+  const alpha = options.alpha ?? 255;
   let paintedCount = 0;
 
   for (const nodeIndex of settledBatch) {
@@ -1673,7 +1673,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
   setRoutingStatus(shell, formatRoutingStatusCalculating(0));
 
-  const alpha = options.alpha ?? 180;
+  const alpha = options.alpha ?? 255;
   const onSliceExternal = options.onSlice;
   let paintedNodeCount = 0;
   let settledNodeCount = 0;

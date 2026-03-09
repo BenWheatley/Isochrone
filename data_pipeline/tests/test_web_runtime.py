@@ -114,17 +114,18 @@ def test_app_js_has_time_to_colour_contract() -> None:
     assert "if (minutesInHour <= 15)" in app_js
     assert "if (minutesInHour <= 30)" in app_js
     assert "if (minutesInHour <= 45)" in app_js
-    assert "return [32, 163, 78];" in app_js
-    assert "return [214, 201, 37];" in app_js
-    assert "return [230, 138, 43];" in app_js
-    assert "return [210, 58, 54];" in app_js
+    assert "return [0, 255, 255];" in app_js
+    assert "return [64, 255, 64];" in app_js
+    assert "return [255, 255, 64];" in app_js
+    assert "return [255, 140, 0];" in app_js
+    assert "return [255, 64, 160];" in app_js
 
 
 def test_app_js_has_reachable_paint_and_blit_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
     assert "export function paintReachableNodesToGrid(" in app_js
-    assert "const alpha = options.alpha ?? 180;" in app_js
+    assert "const alpha = options.alpha ?? 255;" in app_js
     assert "if (distSeconds[nodeIndex] < Infinity)" in app_js
     assert "const [r, g, b] = timeToColour(distSeconds[nodeIndex]);" in app_js
     assert "setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)" in app_js
