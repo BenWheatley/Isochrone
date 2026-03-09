@@ -205,10 +205,26 @@ body {
   transition: width 120ms linear;
 }
 
-#routing-status {
+#info-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
   padding: 0.5rem 0.75rem;
   border-top: 1px solid #cad2da;
   background: #ffffff;
+}
+
+#routing-status {
   color: #304454;
   font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+#routing-disclaimer {
+  margin-left: auto;
+  color: #5b6c79;
+  font-size: 0.74rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

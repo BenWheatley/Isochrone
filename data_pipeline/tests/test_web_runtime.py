@@ -15,6 +15,8 @@ def test_index_html_uses_native_module_entrypoint() -> None:
     assert 'id="loading-progress"' in index_html
     assert 'id="loading-progress-bar"' in index_html
     assert 'id="routing-status"' in index_html
+    assert 'id="routing-disclaimer"' in index_html
+    assert "OSM data can include isolated disconnected route segments." in index_html
     assert 'id="map-region"' in index_html
     assert 'id="canvas-stack"' in index_html
     assert 'id="mode-select"' in index_html
