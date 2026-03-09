@@ -167,6 +167,20 @@ def test_app_js_has_cpu_interpolation_foundation_contract() -> None:
     )
 
 
+def test_app_js_paints_interpolated_edges_during_search_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;" in app_js
+    assert "allowedModeMask," in app_js
+    assert "export function paintSettledBatchEdgeInterpolationsToGrid(" in app_js
+    assert "const expectedTargetSeconds = startSeconds + edgeCostSeconds;" in app_js
+    assert "if (expectedTargetSeconds > targetSeconds + edgeSlackSeconds)" in app_js
+    assert "paintInterpolatedEdgeToGrid(" in app_js
+    assert "const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;" in app_js
+    assert "paintedEdgeCount += paintSettledBatchEdgeInterpolationsToGrid(" in app_js
+    assert "paintedEdgeCount," in app_js
+
+
 def test_app_js_uses_isochrone_canvas_layer() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 

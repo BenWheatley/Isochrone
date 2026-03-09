@@ -17,6 +17,7 @@ const BIKE_CRUISE_SPEED_KPH = 20;
 const CAR_FALLBACK_SPEED_KPH = 30;
 const ROAD_CLASS_MOTORWAY = 15;
 const DEFAULT_COLOUR_CYCLE_MINUTES = 60;
+const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;
 
 export class MinHeap {
   constructor(maxNodeCount) {
@@ -264,6 +265,7 @@ export function createWalkingSearchState(
     graph,
     sourceNodeIndex,
     timeLimitSeconds,
+    allowedModeMask,
     distSeconds,
     settled,
     heap,
@@ -1752,17 +1754,15 @@ export function paintInterpolatedEdgeToGrid(
 
   const alpha = clampInt(Math.round(options.alpha ?? 255), 0, 255);
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
-  const linePixels = [];
+  const startX = Math.round(x0);
+  const startY = Math.round(y0);
+  const endX = Math.round(x1);
+  const endY = Math.round(y1);
+  const totalSteps = Math.max(Math.abs(endX - startX), Math.abs(endY - startY));
+  let paintedCount = 0;
+  let stepIndex = 0;
 
   rasterizeLinePixels(x0, y0, x1, y1, (xPx, yPx) => {
-    linePixels.push([xPx, yPx]);
-  });
-
-  const totalSteps = Math.max(0, linePixels.length - 1);
-  let paintedCount = 0;
-
-  for (let stepIndex = 0; stepIndex < linePixels.length; stepIndex += 1) {
-    const [xPx, yPx] = linePixels[stepIndex];
     const seconds = interpolateEdgeTravelSeconds(
       startSeconds,
       endSeconds,
@@ -1773,7 +1773,8 @@ export function paintInterpolatedEdgeToGrid(
     if (setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)) {
       paintedCount += 1;
     }
-  }
+    stepIndex += 1;
+  });
 
   return paintedCount;
 }
@@ -1870,6 +1871,92 @@ export function paintSettledBatchToGrid(pixelGrid, nodePixels, distSeconds, sett
   return paintedCount;
 }
 
+export function paintSettledBatchEdgeInterpolationsToGrid(
+  pixelGrid,
+  graph,
+  nodePixels,
+  distSeconds,
+  settledBatch,
+  allowedModeMask,
+  options = {},
+) {
+  validatePixelGrid(pixelGrid);
+  validateGraphForRouting(graph);
+  validateNodePixels(nodePixels);
+  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
+  validateSettledBatch(settledBatch);
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+
+  const alpha = options.alpha ?? 255;
+  const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
+  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
+    throw new Error('edgeSlackSeconds must be a non-negative finite number');
+  }
+
+  let paintedCount = 0;
+
+  for (const sourceNodeIndex of settledBatch) {
+    if (sourceNodeIndex < 0 || sourceNodeIndex >= graph.header.nNodes) {
+      continue;
+    }
+
+    const startSeconds = distSeconds[sourceNodeIndex];
+    if (!Number.isFinite(startSeconds)) {
+      continue;
+    }
+
+    const x0 = nodePixels.nodePixelX[sourceNodeIndex];
+    const y0 = nodePixels.nodePixelY[sourceNodeIndex];
+    const firstEdgeIndex = graph.nodeU32[sourceNodeIndex * 4 + 2];
+    const edgeCount = graph.nodeU16[sourceNodeIndex * 8 + 6];
+    const endEdgeIndex = firstEdgeIndex + edgeCount;
+
+    for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
+      if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
+        continue;
+      }
+
+      const edgeCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+      if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
+        continue;
+      }
+
+      const targetNodeIndex = graph.edgeU32[edgeIndex * 3];
+      if (targetNodeIndex < 0 || targetNodeIndex >= graph.header.nNodes) {
+        continue;
+      }
+
+      const targetSeconds = distSeconds[targetNodeIndex];
+      if (!Number.isFinite(targetSeconds)) {
+        continue;
+      }
+
+      const expectedTargetSeconds = startSeconds + edgeCostSeconds;
+      if (expectedTargetSeconds > targetSeconds + edgeSlackSeconds) {
+        continue;
+      }
+
+      const x1 = nodePixels.nodePixelX[targetNodeIndex];
+      const y1 = nodePixels.nodePixelY[targetNodeIndex];
+      paintedCount += paintInterpolatedEdgeToGrid(
+        pixelGrid,
+        x0,
+        y0,
+        startSeconds,
+        x1,
+        y1,
+        expectedTargetSeconds,
+        { alpha, colourCycleMinutes },
+      );
+    }
+  }
+
+  return paintedCount;
+}
+
 export async function runSearchTimeSliced(searchState, options = {}) {
   validateSearchState(searchState);
 
@@ -1957,14 +2044,25 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
 
   const alpha = options.alpha ?? 255;
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+  const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;
   const onSliceExternal = options.onSlice;
   let paintedNodeCount = 0;
+  let paintedEdgeCount = 0;
   let settledNodeCount = 0;
 
   const runSummary = await runSearchTimeSliced(searchState, {
     ...options,
     onSlice(settledBatch) {
       settledNodeCount += settledBatch.length;
+      paintedEdgeCount += paintSettledBatchEdgeInterpolationsToGrid(
+        mapData.pixelGrid,
+        searchState.graph,
+        mapData.nodePixels,
+        searchState.distSeconds,
+        settledBatch,
+        allowedModeMask,
+        { alpha, colourCycleMinutes },
+      );
       paintedNodeCount += paintSettledBatchToGrid(
         mapData.pixelGrid,
         mapData.nodePixels,
@@ -1991,6 +2089,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
 
   return {
     ...runSummary,
+    paintedEdgeCount,
     paintedNodeCount,
   };
 }
