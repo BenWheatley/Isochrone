@@ -210,6 +210,8 @@ def test_app_js_has_walking_dijkstra_contract() -> None:
     assert "heap.push(sourceNodeIndex, 0);" in app_js
     assert "if (Number.isFinite(timeLimitSeconds) && cost > timeLimitSeconds)" in app_js
     assert "if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0)" in app_js
+    assert "const edgeCostSeconds = computeEdgeTraversalCostSeconds(" in app_js
+    assert "if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0)" in app_js
     assert "if (nextCost < distSeconds[targetIndex])" in app_js
     assert "heap.decreaseKey(targetIndex, nextCost);" in app_js
     assert "export function findNearestNodeIndex(" in app_js
@@ -218,6 +220,37 @@ def test_app_js_has_walking_dijkstra_contract() -> None:
     assert "export async function runWalkingIsochroneFromSourceNode(" in app_js
     assert "const allowedModeMask = options.allowedModeMask ?? EDGE_MODE_CAR_BIT;" in app_js
     assert "runSearchTimeSlicedWithRendering(" in app_js
+
+
+def test_app_js_has_mode_aware_edge_cost_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "const WALKING_SPEED_M_S = 1.39;" in app_js
+    assert "const BIKE_CRUISE_SPEED_KPH = 20;" in app_js
+    assert "const ROAD_CLASS_MOTORWAY = 15;" in app_js
+    assert "export function computeEdgeTraversalCostSeconds(" in app_js
+    assert "const edgeModeMask = graph.edgeModeMask[edgeIndex];" in app_js
+    assert "const walkingCostSeconds = graph.edgeU16[edgeIndex * 6 + 2];" in app_js
+    assert "const distanceMeters = Math.max(1, walkingCostSeconds * WALKING_SPEED_M_S);" in app_js
+    assert (
+        "if ((allowedModeMask & EDGE_MODE_WALK_BIT) !== 0 && "
+        "(edgeModeMask & EDGE_MODE_WALK_BIT) !== 0)"
+    ) in app_js
+    assert "const isMotorway = graph.edgeRoadClassId[edgeIndex] === ROAD_CLASS_MOTORWAY;" in app_js
+    assert "if (!isMotorway) {" in app_js
+    assert (
+        "if ((allowedModeMask & EDGE_MODE_BIKE_BIT) !== 0 && "
+        "(edgeModeMask & EDGE_MODE_BIKE_BIT) !== 0)"
+    ) in app_js
+    assert "const bikeSpeedKph = Math.min(BIKE_CRUISE_SPEED_KPH, edgeMaxspeedKph);" in app_js
+    assert (
+        "if ((allowedModeMask & EDGE_MODE_CAR_BIT) !== 0 && "
+        "(edgeModeMask & EDGE_MODE_CAR_BIT) !== 0)"
+    ) in app_js
+    assert (
+        "const carSpeedKph = edgeMaxspeedKph > 0 ? edgeMaxspeedKph : CAR_FALLBACK_SPEED_KPH;"
+    ) in app_js
+    assert "return Number.isFinite(bestCostSeconds) ? bestCostSeconds : Infinity;" in app_js
 
 
 def test_app_js_has_mode_selector_contract() -> None:

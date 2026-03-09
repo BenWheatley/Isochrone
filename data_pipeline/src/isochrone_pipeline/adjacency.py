@@ -34,6 +34,21 @@ MODE_MASK_CAR = 1 << 2
 ALLOW_VALUES = {"yes", "designated", "permissive", "official", "destination"}
 DENY_VALUES = {"no", "private"}
 
+WALK_DEFAULT_HIGHWAYS = {
+    "footway",
+    "path",
+    "pedestrian",
+    "steps",
+    "cycleway",
+    "track",
+    "living_street",
+    "residential",
+    "service",
+    "unclassified",
+    "tertiary",
+    "secondary",
+    "primary",
+}
 BIKE_DEFAULT_HIGHWAYS = {
     "cycleway",
     "path",
@@ -173,6 +188,9 @@ class _AdjacencyBuilder:
             oneway_foot = way.constraints.get("oneway:foot") == "yes"
             edge_flags = _edge_flags(way)
             edge_mode_mask = _mode_mask_for_way(way)
+            if edge_mode_mask == 0:
+                self._skipped_constraint_way_count += 1
+                continue
             edge_maxspeed_kph_forward = _maxspeed_kph_for_way_direction(way, is_forward=True)
             edge_maxspeed_kph_backward = _maxspeed_kph_for_way_direction(way, is_forward=False)
             edge_road_class_id = _road_class_id_for_way(way.highway)
@@ -394,8 +412,10 @@ def _connector_flags(extracted: WalkableGraphExtract, osm_id: int) -> int:
 
 
 def _mode_mask_for_way(way: WayCandidate) -> int:
-    mask = MODE_MASK_WALK
+    mask = 0
 
+    if way.highway in WALK_DEFAULT_HIGHWAYS:
+        mask |= MODE_MASK_WALK
     if way.highway in BIKE_DEFAULT_HIGHWAYS:
         mask |= MODE_MASK_BIKE
     if way.highway in CAR_DEFAULT_HIGHWAYS:
@@ -421,11 +441,6 @@ def _mode_mask_for_way(way: WayCandidate) -> int:
         MODE_MASK_CAR,
         _normalized_constraint(way, "motor_vehicle"),
     )
-
-    if mask == 0:
-        # This pipeline still builds a walk graph in current runtime; hard-denied ways
-        # are already filtered by _is_way_disallowed before edge creation.
-        return MODE_MASK_WALK
 
     return mask
 

@@ -422,3 +422,52 @@ def test_mode_access_conflict_resolution_order_is_deterministic() -> None:
     # then motor_vehicle=no removes car.
     assert edge_modes[(1, 2)] == (MODE_MASK_WALK | MODE_MASK_BIKE)
     assert edge_modes[(2, 1)] == (MODE_MASK_WALK | MODE_MASK_BIKE)
+
+
+def test_motorway_defaults_do_not_enable_walk_mode() -> None:
+    extracted = WalkableGraphExtract(
+        ways=(
+            WayCandidate(
+                osm_id=740,
+                highway="motorway",
+                node_ids=(1, 2),
+                constraints={},
+            ),
+        ),
+        node_coords={1: (52.5, 13.4), 2: (52.5001, 13.401)},
+        connector_nodes={},
+        dropped_way_count=0,
+    )
+    projected = _projection({1: (0, 0), 2: (10, 0)})
+
+    graph = build_adjacency_graph(extracted, projected)
+
+    assert len(graph.edges) == 2
+    for edge in graph.edges:
+        assert (edge.mode_mask & MODE_MASK_WALK) == 0
+        assert (edge.mode_mask & MODE_MASK_BIKE) == 0
+        assert (edge.mode_mask & MODE_MASK_CAR) == MODE_MASK_CAR
+
+
+def test_motorway_foot_yes_reenables_walk_mode() -> None:
+    extracted = WalkableGraphExtract(
+        ways=(
+            WayCandidate(
+                osm_id=741,
+                highway="motorway",
+                node_ids=(1, 2),
+                constraints={"foot": "yes"},
+            ),
+        ),
+        node_coords={1: (52.5, 13.4), 2: (52.5001, 13.401)},
+        connector_nodes={},
+        dropped_way_count=0,
+    )
+    projected = _projection({1: (0, 0), 2: (10, 0)})
+
+    graph = build_adjacency_graph(extracted, projected)
+
+    assert len(graph.edges) == 2
+    for edge in graph.edges:
+        assert (edge.mode_mask & MODE_MASK_WALK) == MODE_MASK_WALK
+        assert (edge.mode_mask & MODE_MASK_CAR) == MODE_MASK_CAR

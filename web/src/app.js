@@ -12,6 +12,10 @@ const SUPPORTED_GRAPH_VERSIONS = new Set([2]);
 const EDGE_MODE_WALK_BIT = 1;
 const EDGE_MODE_BIKE_BIT = 1 << 1;
 const EDGE_MODE_CAR_BIT = 1 << 2;
+const WALKING_SPEED_M_S = 1.39;
+const BIKE_CRUISE_SPEED_KPH = 20;
+const CAR_FALLBACK_SPEED_KPH = 30;
+const ROAD_CLASS_MOTORWAY = 15;
 
 export class MinHeap {
   constructor(maxNodeCount) {
@@ -306,7 +310,10 @@ export function createWalkingSearchState(
             continue;
           }
           const targetIndex = graph.edgeU32[edgeIndex * 3];
-          const edgeCostSeconds = graph.edgeU16[edgeIndex * 6 + 2];
+          const edgeCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+          if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
+            continue;
+          }
           const nextCost = cost + edgeCostSeconds;
 
           if (Number.isFinite(timeLimitSeconds) && nextCost > timeLimitSeconds) {
@@ -334,6 +341,50 @@ export function createWalkingSearchState(
       return -1;
     },
   };
+}
+
+export function computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask) {
+  const edgeModeMask = graph.edgeModeMask[edgeIndex];
+  if ((edgeModeMask & allowedModeMask) === 0) {
+    return Infinity;
+  }
+
+  const walkingCostSeconds = graph.edgeU16[edgeIndex * 6 + 2];
+  if (walkingCostSeconds <= 0) {
+    return Infinity;
+  }
+
+  const distanceMeters = Math.max(1, walkingCostSeconds * WALKING_SPEED_M_S);
+  const edgeMaxspeedKph = graph.edgeMaxspeedKph[edgeIndex];
+  let bestCostSeconds = Infinity;
+
+  if ((allowedModeMask & EDGE_MODE_WALK_BIT) !== 0 && (edgeModeMask & EDGE_MODE_WALK_BIT) !== 0) {
+    const isMotorway = graph.edgeRoadClassId[edgeIndex] === ROAD_CLASS_MOTORWAY;
+    if (!isMotorway) {
+      bestCostSeconds = Math.min(bestCostSeconds, walkingCostSeconds);
+    }
+  }
+
+  if ((allowedModeMask & EDGE_MODE_BIKE_BIT) !== 0 && (edgeModeMask & EDGE_MODE_BIKE_BIT) !== 0) {
+    const isMotorway = graph.edgeRoadClassId[edgeIndex] === ROAD_CLASS_MOTORWAY;
+    if (!isMotorway) {
+      const bikeSpeedKph = Math.min(BIKE_CRUISE_SPEED_KPH, edgeMaxspeedKph);
+      if (bikeSpeedKph > 0) {
+        const bikeMetersPerSecond = (bikeSpeedKph * 1000) / 3600;
+        bestCostSeconds = Math.min(bestCostSeconds, distanceMeters / bikeMetersPerSecond);
+      }
+    }
+  }
+
+  if ((allowedModeMask & EDGE_MODE_CAR_BIT) !== 0 && (edgeModeMask & EDGE_MODE_CAR_BIT) !== 0) {
+    const carSpeedKph = edgeMaxspeedKph > 0 ? edgeMaxspeedKph : CAR_FALLBACK_SPEED_KPH;
+    if (carSpeedKph > 0) {
+      const carMetersPerSecond = (carSpeedKph * 1000) / 3600;
+      bestCostSeconds = Math.min(bestCostSeconds, distanceMeters / carMetersPerSecond);
+    }
+  }
+
+  return Number.isFinite(bestCostSeconds) ? bestCostSeconds : Infinity;
 }
 
 export function findNearestNodeIndex(graph, xM, yM) {
