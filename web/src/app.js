@@ -1422,7 +1422,9 @@ export async function initializeMapData(shell, options = {}) {
 
     const nodePixels = precomputeNodePixelCoordinates(graph);
     const pixelGrid = createPixelGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
+    const travelTimeGrid = createTravelTimeGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
     clearGrid(pixelGrid);
+    clearTravelTimeGrid(travelTimeGrid);
 
     return {
       boundarySummary: boundaryLoad.boundarySummary,
@@ -1430,6 +1432,7 @@ export async function initializeMapData(shell, options = {}) {
       graph,
       nodePixels,
       pixelGrid,
+      travelTimeGrid,
     };
   } catch (error) {
     showLoadingOverlay(shell, 'Initialization failed.', 0);
@@ -1678,6 +1681,44 @@ export function setPixel(pixelGrid, xPx, yPx, r, g, b, a) {
   return true;
 }
 
+export function createTravelTimeGrid(widthPx, heightPx) {
+  if (!Number.isInteger(widthPx) || widthPx <= 0) {
+    throw new Error('travel time grid width must be a positive integer');
+  }
+  if (!Number.isInteger(heightPx) || heightPx <= 0) {
+    throw new Error('travel time grid height must be a positive integer');
+  }
+
+  return {
+    widthPx,
+    heightPx,
+    seconds: new Float32Array(widthPx * heightPx),
+  };
+}
+
+export function clearTravelTimeGrid(travelTimeGrid) {
+  validateTravelTimeGrid(travelTimeGrid);
+  travelTimeGrid.seconds.fill(-1);
+}
+
+export function setTravelTimePixelMin(travelTimeGrid, xPx, yPx, seconds) {
+  validateTravelTimeGrid(travelTimeGrid);
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return false;
+  }
+  if (xPx < 0 || yPx < 0 || xPx >= travelTimeGrid.widthPx || yPx >= travelTimeGrid.heightPx) {
+    return false;
+  }
+
+  const offset = yPx * travelTimeGrid.widthPx + xPx;
+  const currentSeconds = travelTimeGrid.seconds[offset];
+  if (currentSeconds < 0 || seconds < currentSeconds) {
+    travelTimeGrid.seconds[offset] = seconds;
+    return true;
+  }
+  return false;
+}
+
 export function rasterizeLinePixels(x0, y0, x1, y1, visitPixel) {
   if (!Number.isFinite(x0) || !Number.isFinite(y0) || !Number.isFinite(x1) || !Number.isFinite(y1)) {
     throw new Error('line endpoints must be finite numbers');
@@ -1789,6 +1830,50 @@ export function paintInterpolatedEdgeToGrid(
   return paintedCount;
 }
 
+export function paintInterpolatedEdgeTravelTimesToGrid(
+  travelTimeGrid,
+  x0,
+  y0,
+  startSeconds,
+  x1,
+  y1,
+  endSeconds,
+  options = {},
+) {
+  validateTravelTimeGrid(travelTimeGrid);
+
+  const stepStride = options.stepStride ?? 1;
+  if (!Number.isInteger(stepStride) || stepStride <= 0) {
+    throw new Error('stepStride must be a positive integer');
+  }
+  const startX = Math.round(x0);
+  const startY = Math.round(y0);
+  const endX = Math.round(x1);
+  const endY = Math.round(y1);
+  const totalSteps = Math.max(Math.abs(endX - startX), Math.abs(endY - startY));
+  let paintedCount = 0;
+  let stepIndex = 0;
+
+  rasterizeLinePixels(x0, y0, x1, y1, (xPx, yPx) => {
+    if (stepIndex % stepStride !== 0 && stepIndex !== totalSteps) {
+      stepIndex += 1;
+      return;
+    }
+    const seconds = interpolateEdgeTravelSeconds(
+      startSeconds,
+      endSeconds,
+      stepIndex,
+      totalSteps,
+    );
+    if (setTravelTimePixelMin(travelTimeGrid, xPx, yPx, seconds)) {
+      paintedCount += 1;
+    }
+    stepIndex += 1;
+  });
+
+  return paintedCount;
+}
+
 export function paintReachableNodesToGrid(pixelGrid, nodePixels, distSeconds, options = {}) {
   validatePixelGrid(pixelGrid);
   validateNodePixels(nodePixels);
@@ -1804,6 +1889,25 @@ export function paintReachableNodesToGrid(pixelGrid, nodePixels, distSeconds, op
       const xPx = nodePixels.nodePixelX[nodeIndex];
       const yPx = nodePixels.nodePixelY[nodeIndex];
       if (setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)) {
+        paintedCount += 1;
+      }
+    }
+  }
+
+  return paintedCount;
+}
+
+export function paintReachableNodesTravelTimesToGrid(travelTimeGrid, nodePixels, distSeconds) {
+  validateTravelTimeGrid(travelTimeGrid);
+  validateNodePixels(nodePixels);
+  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
+
+  let paintedCount = 0;
+  for (let nodeIndex = 0; nodeIndex < nodePixels.nodePixelX.length; nodeIndex += 1) {
+    if (distSeconds[nodeIndex] < Infinity) {
+      const xPx = nodePixels.nodePixelX[nodeIndex];
+      const yPx = nodePixels.nodePixelY[nodeIndex];
+      if (setTravelTimePixelMin(travelTimeGrid, xPx, yPx, distSeconds[nodeIndex])) {
         paintedCount += 1;
       }
     }
@@ -1892,7 +1996,7 @@ export function createWebGlIsochroneRenderer(canvas, options = {}) {
   };
   const contextWebGl2 = canvas.getContext('webgl2', contextAttributes);
   const contextWebGl = canvas.getContext('webgl', contextAttributes);
-  const gl = contextWebGl ?? contextWebGl2;
+  const gl = contextWebGl2 ?? contextWebGl;
   if (!gl) {
     return null;
   }
@@ -1957,18 +2061,84 @@ void main(void) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 
-  gl.useProgram(program);
-  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-  gl.enableVertexAttribArray(positionLocation);
-  gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
   const textureLocation = gl.getUniformLocation(program, 'u_texture');
-  if (textureLocation) {
-    gl.uniform1i(textureLocation, 0);
+  const bindQuadToProgram = (programToBind, positionLocationToBind) => {
+    gl.useProgram(programToBind);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+    gl.enableVertexAttribArray(positionLocationToBind);
+    gl.vertexAttribPointer(positionLocationToBind, 2, gl.FLOAT, false, 0, 0);
+  };
+
+  let travelTimeProgram = null;
+  let travelTimePositionLocation = -1;
+  let travelTimeTexture = null;
+  let travelTimeTextureLocation = null;
+  let travelTimeCycleMinutesLocation = null;
+
+  if (isWebGl2) {
+    const travelTimeFragmentSource = `#version 300 es
+precision highp float;
+uniform sampler2D u_time_texture;
+uniform float u_cycle_minutes;
+in vec2 v_uv;
+out vec4 outColor;
+
+vec3 mapCycleColour(float cycleRatio) {
+  if (cycleRatio <= 5.0 / 60.0) {
+    return vec3(0.0, 255.0, 255.0);
+  }
+  if (cycleRatio <= 15.0 / 60.0) {
+    return vec3(64.0, 255.0, 64.0);
+  }
+  if (cycleRatio <= 30.0 / 60.0) {
+    return vec3(255.0, 255.0, 64.0);
+  }
+  if (cycleRatio <= 45.0 / 60.0) {
+    return vec3(255.0, 140.0, 0.0);
+  }
+  return vec3(255.0, 64.0, 160.0);
+}
+
+void main(void) {
+  float seconds = texture(u_time_texture, vec2(v_uv.x, 1.0 - v_uv.y)).r;
+  if (seconds < 0.0) {
+    outColor = vec4(0.0, 0.0, 0.0, 0.0);
+    return;
+  }
+  float cycleMinutes = max(u_cycle_minutes, 1.0);
+  float cyclePositionMinutes = mod(seconds / 60.0, cycleMinutes);
+  float cycleRatio = cyclePositionMinutes / cycleMinutes;
+  vec3 rgb = mapCycleColour(cycleRatio) / 255.0;
+  outColor = vec4(rgb, 1.0);
+}`;
+
+    travelTimeProgram = createWebGlProgram(gl, vertexShaderSource, travelTimeFragmentSource);
+    travelTimePositionLocation = gl.getAttribLocation(travelTimeProgram, 'a_position');
+    if (travelTimePositionLocation < 0) {
+      gl.deleteProgram(travelTimeProgram);
+      travelTimeProgram = null;
+    } else {
+      travelTimeTexture = gl.createTexture();
+      if (!travelTimeTexture) {
+        gl.deleteProgram(travelTimeProgram);
+        travelTimeProgram = null;
+      } else {
+        gl.bindTexture(gl.TEXTURE_2D, travelTimeTexture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+        travelTimeTextureLocation = gl.getUniformLocation(travelTimeProgram, 'u_time_texture');
+        travelTimeCycleMinutesLocation = gl.getUniformLocation(travelTimeProgram, 'u_cycle_minutes');
+      }
+    }
   }
 
-  return {
+  const renderer = {
     mode: 'webgl',
     draw(pixelGrid) {
+      validatePixelGrid(pixelGrid);
       if (canvas.width !== pixelGrid.widthPx) {
         canvas.width = pixelGrid.widthPx;
       }
@@ -1977,7 +2147,7 @@ void main(void) {
       }
 
       gl.viewport(0, 0, canvas.width, canvas.height);
-      gl.useProgram(program);
+      bindQuadToProgram(program, positionLocation);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.texImage2D(
@@ -1991,12 +2161,57 @@ void main(void) {
         gl.UNSIGNED_BYTE,
         pixelGrid.rgba,
       );
+      if (textureLocation) {
+        gl.uniform1i(textureLocation, 0);
+      }
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       return null;
     },
   };
+
+  if (travelTimeProgram && travelTimeTexture && isWebGl2) {
+    renderer.drawTravelTimeGrid = function drawTravelTimeGrid(travelTimeGrid, options = {}) {
+      validateTravelTimeGrid(travelTimeGrid);
+
+      if (canvas.width !== travelTimeGrid.widthPx) {
+        canvas.width = travelTimeGrid.widthPx;
+      }
+      if (canvas.height !== travelTimeGrid.heightPx) {
+        canvas.height = travelTimeGrid.heightPx;
+      }
+
+      const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      bindQuadToProgram(travelTimeProgram, travelTimePositionLocation);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, travelTimeTexture);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.R32F,
+        travelTimeGrid.widthPx,
+        travelTimeGrid.heightPx,
+        0,
+        gl.RED,
+        gl.FLOAT,
+        travelTimeGrid.seconds,
+      );
+      if (travelTimeTextureLocation) {
+        gl.uniform1i(travelTimeTextureLocation, 0);
+      }
+      if (travelTimeCycleMinutesLocation) {
+        gl.uniform1f(travelTimeCycleMinutesLocation, cycleMinutes);
+      }
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      return null;
+    };
+  }
+
+  return renderer;
 }
 
 export function createIsochroneRenderer(canvas, options = {}) {
@@ -2239,6 +2454,186 @@ export function paintAllReachableEdgeInterpolationsToGrid(
   return paintedCount;
 }
 
+export function paintSettledBatchTravelTimesToGrid(
+  travelTimeGrid,
+  nodePixels,
+  distSeconds,
+  settledBatch,
+) {
+  validateTravelTimeGrid(travelTimeGrid);
+  validateNodePixels(nodePixels);
+  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
+  validateSettledBatch(settledBatch);
+
+  let paintedCount = 0;
+  for (const nodeIndex of settledBatch) {
+    if (nodeIndex < 0 || nodeIndex >= nodePixels.nodePixelX.length) {
+      continue;
+    }
+    if (!(distSeconds[nodeIndex] < Infinity)) {
+      continue;
+    }
+    const xPx = nodePixels.nodePixelX[nodeIndex];
+    const yPx = nodePixels.nodePixelY[nodeIndex];
+    if (setTravelTimePixelMin(travelTimeGrid, xPx, yPx, distSeconds[nodeIndex])) {
+      paintedCount += 1;
+    }
+  }
+  return paintedCount;
+}
+
+function paintEligibleOutgoingEdgesFromSourceNodeToTravelTimeGrid(
+  travelTimeGrid,
+  graph,
+  nodePixels,
+  distSeconds,
+  sourceNodeIndex,
+  allowedModeMask,
+  edgeSlackSeconds,
+  stepStride,
+) {
+  if (sourceNodeIndex < 0 || sourceNodeIndex >= graph.header.nNodes) {
+    return 0;
+  }
+
+  const startSeconds = distSeconds[sourceNodeIndex];
+  if (!Number.isFinite(startSeconds)) {
+    return 0;
+  }
+
+  let paintedCount = 0;
+  const x0 = nodePixels.nodePixelX[sourceNodeIndex];
+  const y0 = nodePixels.nodePixelY[sourceNodeIndex];
+  const firstEdgeIndex = graph.nodeU32[sourceNodeIndex * 4 + 2];
+  const edgeCount = graph.nodeU16[sourceNodeIndex * 8 + 6];
+  const endEdgeIndex = firstEdgeIndex + edgeCount;
+
+  for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
+    if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
+      continue;
+    }
+
+    const edgeCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+    if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
+      continue;
+    }
+
+    const targetNodeIndex = graph.edgeU32[edgeIndex * 3];
+    if (targetNodeIndex < 0 || targetNodeIndex >= graph.header.nNodes) {
+      continue;
+    }
+
+    const targetSeconds = distSeconds[targetNodeIndex];
+    if (!Number.isFinite(targetSeconds)) {
+      continue;
+    }
+
+    const expectedTargetSeconds = startSeconds + edgeCostSeconds;
+    if (expectedTargetSeconds > targetSeconds + edgeSlackSeconds) {
+      continue;
+    }
+
+    const x1 = nodePixels.nodePixelX[targetNodeIndex];
+    const y1 = nodePixels.nodePixelY[targetNodeIndex];
+    paintedCount += paintInterpolatedEdgeTravelTimesToGrid(
+      travelTimeGrid,
+      x0,
+      y0,
+      startSeconds,
+      x1,
+      y1,
+      expectedTargetSeconds,
+      { stepStride },
+    );
+  }
+
+  return paintedCount;
+}
+
+export function paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
+  travelTimeGrid,
+  graph,
+  nodePixels,
+  distSeconds,
+  settledBatch,
+  allowedModeMask,
+  options = {},
+) {
+  validateTravelTimeGrid(travelTimeGrid);
+  validateGraphForRouting(graph);
+  validateNodePixels(nodePixels);
+  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
+  validateSettledBatch(settledBatch);
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+
+  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
+  const stepStride = options.stepStride ?? 1;
+  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
+    throw new Error('edgeSlackSeconds must be a non-negative finite number');
+  }
+  if (!Number.isInteger(stepStride) || stepStride <= 0) {
+    throw new Error('stepStride must be a positive integer');
+  }
+
+  let paintedCount = 0;
+  for (const sourceNodeIndex of settledBatch) {
+    paintedCount += paintEligibleOutgoingEdgesFromSourceNodeToTravelTimeGrid(
+      travelTimeGrid,
+      graph,
+      nodePixels,
+      distSeconds,
+      sourceNodeIndex,
+      allowedModeMask,
+      edgeSlackSeconds,
+      stepStride,
+    );
+  }
+  return paintedCount;
+}
+
+export function paintAllReachableEdgeInterpolationsToTravelTimeGrid(
+  travelTimeGrid,
+  graph,
+  nodePixels,
+  distSeconds,
+  allowedModeMask,
+  options = {},
+) {
+  validateTravelTimeGrid(travelTimeGrid);
+  validateGraphForRouting(graph);
+  validateNodePixels(nodePixels);
+  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+
+  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
+  const stepStride = options.stepStride ?? 1;
+  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
+    throw new Error('edgeSlackSeconds must be a non-negative finite number');
+  }
+  if (!Number.isInteger(stepStride) || stepStride <= 0) {
+    throw new Error('stepStride must be a positive integer');
+  }
+
+  let paintedCount = 0;
+  for (let sourceNodeIndex = 0; sourceNodeIndex < graph.header.nNodes; sourceNodeIndex += 1) {
+    paintedCount += paintEligibleOutgoingEdgesFromSourceNodeToTravelTimeGrid(
+      travelTimeGrid,
+      graph,
+      nodePixels,
+      distSeconds,
+      sourceNodeIndex,
+      allowedModeMask,
+      edgeSlackSeconds,
+      stepStride,
+    );
+  }
+  return paintedCount;
+}
+
 export async function runSearchTimeSliced(searchState, options = {}) {
   validateSearchState(searchState);
 
@@ -2320,8 +2715,21 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
     throw new Error('mapData must be an object');
   }
 
-  clearGrid(mapData.pixelGrid);
-  blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+  const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
+  const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
+  if (supportsGpuTravelTimeRendering && !mapData.travelTimeGrid) {
+    throw new Error('mapData.travelTimeGrid is required for GPU travel-time rendering');
+  }
+
+  if (supportsGpuTravelTimeRendering) {
+    clearTravelTimeGrid(mapData.travelTimeGrid);
+    renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
+      cycleMinutes: getColourCycleMinutesFromShell(shell),
+    });
+  } else {
+    clearGrid(mapData.pixelGrid);
+    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+  }
   setRoutingStatus(shell, formatRoutingStatusCalculating(0));
 
   const alpha = options.alpha ?? 255;
@@ -2339,23 +2747,42 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
     ...options,
     onSlice(settledBatch) {
       settledNodeCount += settledBatch.length;
-      paintedEdgeCount += paintSettledBatchEdgeInterpolationsToGrid(
-        mapData.pixelGrid,
-        searchState.graph,
-        mapData.nodePixels,
-        searchState.distSeconds,
-        settledBatch,
-        allowedModeMask,
-        { alpha, colourCycleMinutes, stepStride: interactiveEdgeStepStride },
-      );
-      paintedNodeCount += paintSettledBatchToGrid(
-        mapData.pixelGrid,
-        mapData.nodePixels,
-        searchState.distSeconds,
-        settledBatch,
-        { alpha, colourCycleMinutes },
-      );
-      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+      if (supportsGpuTravelTimeRendering) {
+        paintedEdgeCount += paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
+          mapData.travelTimeGrid,
+          searchState.graph,
+          mapData.nodePixels,
+          searchState.distSeconds,
+          settledBatch,
+          allowedModeMask,
+          { stepStride: interactiveEdgeStepStride },
+        );
+        paintedNodeCount += paintSettledBatchTravelTimesToGrid(
+          mapData.travelTimeGrid,
+          mapData.nodePixels,
+          searchState.distSeconds,
+          settledBatch,
+        );
+        renderer.drawTravelTimeGrid(mapData.travelTimeGrid, { cycleMinutes: colourCycleMinutes });
+      } else {
+        paintedEdgeCount += paintSettledBatchEdgeInterpolationsToGrid(
+          mapData.pixelGrid,
+          searchState.graph,
+          mapData.nodePixels,
+          searchState.distSeconds,
+          settledBatch,
+          allowedModeMask,
+          { alpha, colourCycleMinutes, stepStride: interactiveEdgeStepStride },
+        );
+        paintedNodeCount += paintSettledBatchToGrid(
+          mapData.pixelGrid,
+          mapData.nodePixels,
+          searchState.distSeconds,
+          settledBatch,
+          { alpha, colourCycleMinutes },
+        );
+        blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+      }
       setRoutingStatus(shell, formatRoutingStatusCalculating(settledNodeCount));
 
       if (typeof onSliceExternal === 'function') {
@@ -2365,22 +2792,40 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   });
 
   if (!runSummary.cancelled) {
-    clearGrid(mapData.pixelGrid);
-    paintedEdgeCount = paintAllReachableEdgeInterpolationsToGrid(
-      mapData.pixelGrid,
-      searchState.graph,
-      mapData.nodePixels,
-      searchState.distSeconds,
-      allowedModeMask,
-      { alpha, colourCycleMinutes, stepStride: finalEdgeStepStride },
-    );
-    paintedNodeCount = paintReachableNodesToGrid(
-      mapData.pixelGrid,
-      mapData.nodePixels,
-      searchState.distSeconds,
-      { alpha, colourCycleMinutes },
-    );
-    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+    if (supportsGpuTravelTimeRendering) {
+      clearTravelTimeGrid(mapData.travelTimeGrid);
+      paintedEdgeCount = paintAllReachableEdgeInterpolationsToTravelTimeGrid(
+        mapData.travelTimeGrid,
+        searchState.graph,
+        mapData.nodePixels,
+        searchState.distSeconds,
+        allowedModeMask,
+        { stepStride: finalEdgeStepStride },
+      );
+      paintedNodeCount = paintReachableNodesTravelTimesToGrid(
+        mapData.travelTimeGrid,
+        mapData.nodePixels,
+        searchState.distSeconds,
+      );
+      renderer.drawTravelTimeGrid(mapData.travelTimeGrid, { cycleMinutes: colourCycleMinutes });
+    } else {
+      clearGrid(mapData.pixelGrid);
+      paintedEdgeCount = paintAllReachableEdgeInterpolationsToGrid(
+        mapData.pixelGrid,
+        searchState.graph,
+        mapData.nodePixels,
+        searchState.distSeconds,
+        allowedModeMask,
+        { alpha, colourCycleMinutes, stepStride: finalEdgeStepStride },
+      );
+      paintedNodeCount = paintReachableNodesToGrid(
+        mapData.pixelGrid,
+        mapData.nodePixels,
+        searchState.distSeconds,
+        { alpha, colourCycleMinutes },
+      );
+      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+    }
 
     if (paintedNodeCount <= 1) {
       setRoutingStatus(shell, 'Done - no reachable network for selected mode at this start point.');
@@ -2516,6 +2961,27 @@ function validatePixelGrid(pixelGrid) {
   if (pixelGrid.rgba.length !== expectedLength) {
     throw new Error(
       `pixelGrid.rgba length mismatch: got ${pixelGrid.rgba.length}, expected ${expectedLength}`,
+    );
+  }
+}
+
+function validateTravelTimeGrid(travelTimeGrid) {
+  if (!travelTimeGrid || typeof travelTimeGrid !== 'object') {
+    throw new Error('travelTimeGrid must be an object');
+  }
+  if (!Number.isInteger(travelTimeGrid.widthPx) || travelTimeGrid.widthPx <= 0) {
+    throw new Error('travelTimeGrid.widthPx must be a positive integer');
+  }
+  if (!Number.isInteger(travelTimeGrid.heightPx) || travelTimeGrid.heightPx <= 0) {
+    throw new Error('travelTimeGrid.heightPx must be a positive integer');
+  }
+  if (!(travelTimeGrid.seconds instanceof Float32Array)) {
+    throw new Error('travelTimeGrid.seconds must be a Float32Array');
+  }
+  const expectedLength = travelTimeGrid.widthPx * travelTimeGrid.heightPx;
+  if (travelTimeGrid.seconds.length !== expectedLength) {
+    throw new Error(
+      `travelTimeGrid.seconds length mismatch: got ${travelTimeGrid.seconds.length}, expected ${expectedLength}`,
     );
   }
 }

@@ -170,6 +170,25 @@ def test_app_js_has_webgl_blit_renderer_contract() -> None:
     assert "renderer.draw(pixelGrid);" in app_js
 
 
+def test_app_js_has_gpu_travel_time_colourization_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "export function createTravelTimeGrid(" in app_js
+    assert "seconds: new Float32Array(widthPx * heightPx)" in app_js
+    assert "export function clearTravelTimeGrid(" in app_js
+    assert "travelTimeGrid.seconds.fill(-1);" in app_js
+    assert "export function setTravelTimePixelMin(" in app_js
+    assert "if (currentSeconds < 0 || seconds < currentSeconds)" in app_js
+    assert "drawTravelTimeGrid(travelTimeGrid, options = {})" in app_js
+    assert "const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;" in app_js
+    assert "supportsGpuTravelTimeRendering" in app_js
+    assert "paintSettledBatchEdgeInterpolationsToTravelTimeGrid(" in app_js
+    assert "paintSettledBatchTravelTimesToGrid(" in app_js
+    assert "paintAllReachableEdgeInterpolationsToTravelTimeGrid(" in app_js
+    assert "paintReachableNodesTravelTimesToGrid(" in app_js
+    assert "renderer.drawTravelTimeGrid(mapData.travelTimeGrid" in app_js
+
+
 def test_app_js_has_cpu_interpolation_foundation_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
