@@ -149,6 +149,24 @@ def test_app_js_has_reachable_paint_and_blit_contract() -> None:
     assert "context.putImageData(imageData, 0, 0);" in app_js
 
 
+def test_app_js_has_cpu_interpolation_foundation_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "export function rasterizeLinePixels(" in app_js
+    assert "const startX = Math.round(x0);" in app_js
+    assert "const endX = Math.round(x1);" in app_js
+    assert "visitPixel(x, y);" in app_js
+    assert "export function interpolateEdgeTravelSeconds(" in app_js
+    assert "const ratio = stepIndex / totalSteps;" in app_js
+    assert "return startSeconds + (endSeconds - startSeconds) * ratio;" in app_js
+    assert "export function paintInterpolatedEdgeToGrid(" in app_js
+    assert "rasterizeLinePixels(x0, y0, x1, y1," in app_js
+    assert "const seconds = interpolateEdgeTravelSeconds(" in app_js
+    assert (
+        "const [r, g, b] = timeToColour(seconds, { cycleMinutes: colourCycleMinutes });" in app_js
+    )
+
+
 def test_app_js_uses_isochrone_canvas_layer() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 

@@ -1674,6 +1674,110 @@ export function setPixel(pixelGrid, xPx, yPx, r, g, b, a) {
   return true;
 }
 
+export function rasterizeLinePixels(x0, y0, x1, y1, visitPixel) {
+  if (!Number.isFinite(x0) || !Number.isFinite(y0) || !Number.isFinite(x1) || !Number.isFinite(y1)) {
+    throw new Error('line endpoints must be finite numbers');
+  }
+  if (typeof visitPixel !== 'function') {
+    throw new Error('visitPixel must be a function');
+  }
+
+  const startX = Math.round(x0);
+  const startY = Math.round(y0);
+  const endX = Math.round(x1);
+  const endY = Math.round(y1);
+
+  let x = startX;
+  let y = startY;
+  const dx = Math.abs(endX - startX);
+  const sx = startX < endX ? 1 : -1;
+  const dy = -Math.abs(endY - startY);
+  const sy = startY < endY ? 1 : -1;
+  let err = dx + dy;
+
+  while (true) {
+    visitPixel(x, y);
+    if (x === endX && y === endY) {
+      break;
+    }
+
+    const twiceErr = err * 2;
+    if (twiceErr >= dy) {
+      err += dy;
+      x += sx;
+    }
+    if (twiceErr <= dx) {
+      err += dx;
+      y += sy;
+    }
+  }
+}
+
+export function interpolateEdgeTravelSeconds(startSeconds, endSeconds, stepIndex, totalSteps) {
+  if (!Number.isFinite(startSeconds) || startSeconds < 0) {
+    throw new Error('startSeconds must be a non-negative finite number');
+  }
+  if (!Number.isFinite(endSeconds) || endSeconds < 0) {
+    throw new Error('endSeconds must be a non-negative finite number');
+  }
+  if (!Number.isInteger(stepIndex) || stepIndex < 0) {
+    throw new Error('stepIndex must be a non-negative integer');
+  }
+  if (!Number.isInteger(totalSteps) || totalSteps < 0) {
+    throw new Error('totalSteps must be a non-negative integer');
+  }
+  if (stepIndex > totalSteps && totalSteps > 0) {
+    throw new Error('stepIndex must be <= totalSteps');
+  }
+
+  if (totalSteps === 0) {
+    return startSeconds;
+  }
+
+  const ratio = stepIndex / totalSteps;
+  return startSeconds + (endSeconds - startSeconds) * ratio;
+}
+
+export function paintInterpolatedEdgeToGrid(
+  pixelGrid,
+  x0,
+  y0,
+  startSeconds,
+  x1,
+  y1,
+  endSeconds,
+  options = {},
+) {
+  validatePixelGrid(pixelGrid);
+
+  const alpha = clampInt(Math.round(options.alpha ?? 255), 0, 255);
+  const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+  const linePixels = [];
+
+  rasterizeLinePixels(x0, y0, x1, y1, (xPx, yPx) => {
+    linePixels.push([xPx, yPx]);
+  });
+
+  const totalSteps = Math.max(0, linePixels.length - 1);
+  let paintedCount = 0;
+
+  for (let stepIndex = 0; stepIndex < linePixels.length; stepIndex += 1) {
+    const [xPx, yPx] = linePixels[stepIndex];
+    const seconds = interpolateEdgeTravelSeconds(
+      startSeconds,
+      endSeconds,
+      stepIndex,
+      totalSteps,
+    );
+    const [r, g, b] = timeToColour(seconds, { cycleMinutes: colourCycleMinutes });
+    if (setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)) {
+      paintedCount += 1;
+    }
+  }
+
+  return paintedCount;
+}
+
 export function paintReachableNodesToGrid(pixelGrid, nodePixels, distSeconds, options = {}) {
   validatePixelGrid(pixelGrid);
   validateNodePixels(nodePixels);
