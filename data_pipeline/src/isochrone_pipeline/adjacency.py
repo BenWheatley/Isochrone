@@ -140,7 +140,8 @@ class _AdjacencyBuilder:
             oneway_foot = way.constraints.get("oneway:foot") == "yes"
             edge_flags = _edge_flags(way)
             edge_mode_mask = _mode_mask_for_way(way)
-            edge_maxspeed_kph = _maxspeed_kph_for_way(way)
+            edge_maxspeed_kph_forward = _maxspeed_kph_for_way_direction(way, is_forward=True)
+            edge_maxspeed_kph_backward = _maxspeed_kph_for_way_direction(way, is_forward=False)
             edge_road_class_id = _road_class_id_for_way(way.highway)
 
             for src_osm_id, dst_osm_id in zip(way.node_ids, way.node_ids[1:], strict=False):
@@ -152,7 +153,7 @@ class _AdjacencyBuilder:
                     dst_index,
                     edge_flags,
                     edge_mode_mask,
-                    edge_maxspeed_kph,
+                    edge_maxspeed_kph_forward,
                     edge_road_class_id,
                 )
                 if not oneway_foot:
@@ -161,7 +162,7 @@ class _AdjacencyBuilder:
                         src_index,
                         edge_flags,
                         edge_mode_mask,
-                        edge_maxspeed_kph,
+                        edge_maxspeed_kph_backward,
                         edge_road_class_id,
                     )
 
@@ -394,8 +395,13 @@ def _mode_mask_for_way(way: WayCandidate) -> int:
     return mask
 
 
-def _maxspeed_kph_for_way(way: WayCandidate) -> int:
-    return _parse_maxspeed_kph(_normalized_constraint(way, "maxspeed"))
+def _maxspeed_kph_for_way_direction(way: WayCandidate, *, is_forward: bool) -> int:
+    base_speed = _parse_maxspeed_kph(_normalized_constraint(way, "maxspeed"))
+    directional_key = "maxspeed:forward" if is_forward else "maxspeed:backward"
+    directional_value = _normalized_constraint(way, directional_key)
+    if directional_value is None:
+        return base_speed
+    return _parse_maxspeed_kph(directional_value)
 
 
 def _road_class_id_for_way(highway: str) -> int:

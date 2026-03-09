@@ -301,3 +301,36 @@ def test_maxspeed_parser_supports_units_and_walk_keyword() -> None:
     assert 0 not in maxspeed_by_road_class[6]
     # footway walk keyword
     assert maxspeed_by_road_class[1] == {5}
+
+
+def test_directional_maxspeed_tags_apply_to_forward_and_backward_edges() -> None:
+    extracted = WalkableGraphExtract(
+        ways=(
+            WayCandidate(
+                osm_id=710,
+                highway="residential",
+                node_ids=(1, 2),
+                constraints={
+                    "maxspeed": "50",
+                    "maxspeed:forward": "30",
+                    "maxspeed:backward": "20",
+                },
+            ),
+        ),
+        node_coords={1: (52.5, 13.4), 2: (52.5001, 13.401)},
+        connector_nodes={},
+        dropped_way_count=0,
+    )
+    projected = _projection({1: (0, 0), 2: (10, 0)})
+
+    graph = build_adjacency_graph(extracted, projected)
+
+    assert len(graph.edges) == 2
+    forward = next(
+        edge for edge in graph.edges if edge.source_index == 0 and edge.target_index == 1
+    )
+    backward = next(
+        edge for edge in graph.edges if edge.source_index == 1 and edge.target_index == 0
+    )
+    assert forward.maxspeed_kph == 30
+    assert backward.maxspeed_kph == 20

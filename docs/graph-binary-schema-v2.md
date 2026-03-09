@@ -26,7 +26,10 @@ The record size is unchanged from v1; metadata is packed into the final `uint32`
 
 ## Current extraction defaults (v2 foundation)
 - `mode_mask`: currently `walk` bit only.
-- `maxspeed_kph`: parsed from `maxspeed` tag when present; otherwise `0`.
+- `maxspeed_kph`: parsed from `maxspeed`, with directional override:
+  - forward edge prefers `maxspeed:forward` when present
+  - backward edge prefers `maxspeed:backward` when present
+  - otherwise falls back to `maxspeed` or `0`
 - `road_class_id`: deterministic ID derived from `highway=*`.
 
 ## Cost strategy decision
