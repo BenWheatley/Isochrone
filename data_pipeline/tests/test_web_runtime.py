@@ -47,6 +47,7 @@ def test_app_js_has_zero_size_canvas_guard_and_binary_loader_contract() -> None:
     assert "response.body.getReader()" in app_js
     assert "Content-Length" in app_js
     assert "new DataView(buffer)" in app_js
+    assert "supported graph binary versions" in app_js
     assert "getUint32(0, true)" in app_js
     assert "Loading graph:" in app_js
 
@@ -204,6 +205,7 @@ def test_app_js_has_walking_dijkstra_contract() -> None:
     assert "const settled = new Uint8Array(graph.header.nNodes);" in app_js
     assert "heap.push(sourceNodeIndex, 0);" in app_js
     assert "if (Number.isFinite(timeLimitSeconds) && cost > timeLimitSeconds)" in app_js
+    assert "if ((graph.edgeModeMask[edgeIndex] & EDGE_MODE_WALK_BIT) === 0)" in app_js
     assert "if (nextCost < distSeconds[targetIndex])" in app_js
     assert "heap.decreaseKey(targetIndex, nextCost);" in app_js
     assert "export function findNearestNodeIndex(" in app_js
@@ -211,6 +213,21 @@ def test_app_js_has_walking_dijkstra_contract() -> None:
     assert "const dy = nodeYM - yM;" in app_js
     assert "export async function runWalkingIsochroneFromSourceNode(" in app_js
     assert "runSearchTimeSlicedWithRendering(" in app_js
+
+
+def test_app_js_reads_v2_edge_mode_and_speed_metadata_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "const edgeModeMask = new Uint8Array(nEdges);" in app_js
+    assert "const edgeRoadClassId = new Uint8Array(nEdges);" in app_js
+    assert "const edgeMaxspeedKph = new Uint16Array(nEdges);" in app_js
+    assert "const packedMetadata = edgeU32[edgeIndex * 3 + 2];" in app_js
+    assert "edgeModeMask[edgeIndex] = packedMetadata & 0xff;" in app_js
+    assert "edgeRoadClassId[edgeIndex] = (packedMetadata >>> 8) & 0xff;" in app_js
+    assert "edgeMaxspeedKph[edgeIndex] = (packedMetadata >>> 16) & 0xffff;" in app_js
+    assert "edgeModeMask," in app_js
+    assert "edgeRoadClassId," in app_js
+    assert "edgeMaxspeedKph," in app_js
 
 
 def test_app_js_has_post_mvp_transit_stub_contract() -> None:

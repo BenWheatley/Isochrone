@@ -679,9 +679,9 @@ Tasks
 Estimated time: 40 min
 
 Tasks
-- [ ] Extend JS parser TypedArray mapping to read new v2 edge fields
-- [ ] Keep routing behavior walk-only until mode-selector and mode-aware costing are implemented in follow-up phase
-- [ ] Fail fast with clear error if runtime receives unsupported schema version
+- [x] Extend JS parser TypedArray mapping to read new v2 edge fields
+- [x] Keep routing behavior walk-only until mode-selector and mode-aware costing are implemented in follow-up phase
+- [x] Fail fast with clear error if runtime receives unsupported schema version
 
 ---
 

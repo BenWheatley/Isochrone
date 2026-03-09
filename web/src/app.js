@@ -8,6 +8,8 @@ const NODE_RECORD_SIZE = 16;
 const EDGE_RECORD_SIZE = 12;
 const BYTES_PER_MEBIBYTE = 1024 * 1024;
 const LOADING_FADE_MS = 180;
+const SUPPORTED_GRAPH_VERSIONS = new Set([2]);
+const EDGE_MODE_WALK_BIT = 1;
 
 export class MinHeap {
   constructor(maxNodeCount) {
@@ -294,6 +296,9 @@ export function createWalkingSearchState(
         const endEdgeIndex = firstEdgeIndex + edgeCount;
 
         for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
+          if ((graph.edgeModeMask[edgeIndex] & EDGE_MODE_WALK_BIT) === 0) {
+            continue;
+          }
           const targetIndex = graph.edgeU32[edgeIndex * 3];
           const edgeCostSeconds = graph.edgeU16[edgeIndex * 6 + 2];
           const nextCost = cost + edgeCostSeconds;
@@ -1013,6 +1018,14 @@ export function parseGraphBinary(buffer) {
       `Invalid graph magic 0x${magic.toString(16).padStart(8, '0')}; expected 0x${GRAPH_MAGIC.toString(16)}`,
     );
   }
+  const version = view.getUint8(4);
+  if (!SUPPORTED_GRAPH_VERSIONS.has(version)) {
+    throw new Error(
+      `unsupported graph binary version ${version}; supported graph binary versions: ${[
+        ...SUPPORTED_GRAPH_VERSIONS,
+      ].join(', ')}`,
+    );
+  }
 
   const nNodes = view.getUint32(8, true);
   const nEdges = view.getUint32(12, true);
@@ -1047,7 +1060,7 @@ export function parseGraphBinary(buffer) {
 
   const header = {
     magic,
-    version: view.getUint8(4),
+    version,
     flags: view.getUint8(5),
     nNodes,
     nEdges,
@@ -1069,6 +1082,16 @@ export function parseGraphBinary(buffer) {
   const nodeU16 = new Uint16Array(buffer, nodeTableOffset, nNodes * 8);
   const edgeU32 = new Uint32Array(buffer, edgeTableOffset, nEdges * 3);
   const edgeU16 = new Uint16Array(buffer, edgeTableOffset, nEdges * 6);
+  const edgeModeMask = new Uint8Array(nEdges);
+  const edgeRoadClassId = new Uint8Array(nEdges);
+  const edgeMaxspeedKph = new Uint16Array(nEdges);
+
+  for (let edgeIndex = 0; edgeIndex < nEdges; edgeIndex += 1) {
+    const packedMetadata = edgeU32[edgeIndex * 3 + 2];
+    edgeModeMask[edgeIndex] = packedMetadata & 0xff;
+    edgeRoadClassId[edgeIndex] = (packedMetadata >>> 8) & 0xff;
+    edgeMaxspeedKph[edgeIndex] = (packedMetadata >>> 16) & 0xffff;
+  }
 
   return {
     header,
@@ -1077,6 +1100,9 @@ export function parseGraphBinary(buffer) {
     nodeU16,
     edgeU32,
     edgeU16,
+    edgeModeMask,
+    edgeRoadClassId,
+    edgeMaxspeedKph,
   };
 }
 
@@ -1714,6 +1740,15 @@ function validateGraphForRouting(graph) {
   if (!(graph.edgeU16 instanceof Uint16Array)) {
     throw new Error('graph.edgeU16 must be a Uint16Array');
   }
+  if (!(graph.edgeModeMask instanceof Uint8Array)) {
+    throw new Error('graph.edgeModeMask must be a Uint8Array');
+  }
+  if (!(graph.edgeRoadClassId instanceof Uint8Array)) {
+    throw new Error('graph.edgeRoadClassId must be a Uint8Array');
+  }
+  if (!(graph.edgeMaxspeedKph instanceof Uint16Array)) {
+    throw new Error('graph.edgeMaxspeedKph must be a Uint16Array');
+  }
 
   if (graph.nodeU32.length < graph.header.nNodes * 4) {
     throw new Error('graph.nodeU32 is too short for node records');
@@ -1726,6 +1761,15 @@ function validateGraphForRouting(graph) {
   }
   if (graph.edgeU16.length < graph.header.nEdges * 6) {
     throw new Error('graph.edgeU16 is too short for edge records');
+  }
+  if (graph.edgeModeMask.length < graph.header.nEdges) {
+    throw new Error('graph.edgeModeMask is too short for edge records');
+  }
+  if (graph.edgeRoadClassId.length < graph.header.nEdges) {
+    throw new Error('graph.edgeRoadClassId is too short for edge records');
+  }
+  if (graph.edgeMaxspeedKph.length < graph.header.nEdges) {
+    throw new Error('graph.edgeMaxspeedKph is too short for edge records');
   }
 }
 
