@@ -442,6 +442,81 @@ function nodeHasAllowedModeOutgoingEdge(graph, nodeIndex, allowedModeMask) {
   return false;
 }
 
+export function precomputeNodeModeMask(graph) {
+  validateGraphForRouting(graph);
+
+  const nodeModeMask = new Uint8Array(graph.header.nNodes);
+  const supportedModeMask = EDGE_MODE_WALK_BIT | EDGE_MODE_BIKE_BIT | EDGE_MODE_CAR_BIT;
+
+  for (let nodeIndex = 0; nodeIndex < graph.header.nNodes; nodeIndex += 1) {
+    const firstEdgeIndex = graph.nodeU32[nodeIndex * 4 + 2];
+    const edgeCount = graph.nodeU16[nodeIndex * 8 + 6];
+    const endEdgeIndex = firstEdgeIndex + edgeCount;
+    let mask = 0;
+
+    for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
+      mask |= graph.edgeModeMask[edgeIndex] & supportedModeMask;
+      if (mask === supportedModeMask) {
+        break;
+      }
+    }
+
+    nodeModeMask[nodeIndex] = mask;
+  }
+
+  return nodeModeMask;
+}
+
+export function createNodeSpatialIndex(graph, nodePixels) {
+  validateGraphForRouting(graph);
+  validateNodePixels(nodePixels);
+  if (nodePixels.nodePixelX.length < graph.header.nNodes || nodePixels.nodePixelY.length < graph.header.nNodes) {
+    throw new Error('node pixel arrays are too short for graph.header.nNodes');
+  }
+
+  const widthPx = graph.header.gridWidthPx;
+  const heightPx = graph.header.gridHeightPx;
+  const cellCount = widthPx * heightPx;
+  const cellNodeHead = new Int32Array(cellCount);
+  cellNodeHead.fill(-1);
+  const nextNodeInCell = new Int32Array(graph.header.nNodes);
+  nextNodeInCell.fill(-1);
+
+  for (let nodeIndex = 0; nodeIndex < graph.header.nNodes; nodeIndex += 1) {
+    const xPx = nodePixels.nodePixelX[nodeIndex];
+    const yPx = nodePixels.nodePixelY[nodeIndex];
+    const cellIndex = yPx * widthPx + xPx;
+    nextNodeInCell[nodeIndex] = cellNodeHead[cellIndex];
+    cellNodeHead[cellIndex] = nodeIndex;
+  }
+
+  return {
+    widthPx,
+    heightPx,
+    cellNodeHead,
+    nextNodeInCell,
+  };
+}
+
+function validateNodeSpatialIndex(spatialIndex, nodeCount, widthPx, heightPx) {
+  if (!spatialIndex || typeof spatialIndex !== 'object') {
+    throw new Error('spatialIndex must be an object');
+  }
+  if (!(spatialIndex.cellNodeHead instanceof Int32Array)) {
+    throw new Error('spatialIndex.cellNodeHead must be an Int32Array');
+  }
+  if (!(spatialIndex.nextNodeInCell instanceof Int32Array)) {
+    throw new Error('spatialIndex.nextNodeInCell must be an Int32Array');
+  }
+  const expectedCellCount = widthPx * heightPx;
+  if (spatialIndex.cellNodeHead.length < expectedCellCount) {
+    throw new Error('spatialIndex.cellNodeHead is too short');
+  }
+  if (spatialIndex.nextNodeInCell.length < nodeCount) {
+    throw new Error('spatialIndex.nextNodeInCell is too short');
+  }
+}
+
 export function findNearestNodeIndexForMode(
   graph,
   xM,
@@ -480,6 +555,100 @@ export function findNearestNodeIndexForMode(
     if (distanceSquared < nearestModeDistanceSquared) {
       nearestModeDistanceSquared = distanceSquared;
       nearestModeNodeIndex = nodeIndex;
+    }
+  }
+
+  if (nearestModeNodeIndex >= 0) {
+    return nearestModeNodeIndex;
+  }
+  if (nearestAnyNodeIndex >= 0) {
+    return nearestAnyNodeIndex;
+  }
+  throw new Error('graph contains no nodes');
+}
+
+export function findNearestNodeIndexForModeFromSpatialIndex(
+  spatialIndex,
+  nodePixels,
+  nodeModeMask,
+  xPx,
+  yPx,
+  allowedModeMask = EDGE_MODE_CAR_BIT,
+) {
+  validateNodePixels(nodePixels);
+  if (!(nodeModeMask instanceof Uint8Array)) {
+    throw new Error('nodeModeMask must be a Uint8Array');
+  }
+  if (nodeModeMask.length < nodePixels.nodePixelX.length) {
+    throw new Error('nodeModeMask is too short for nodePixels');
+  }
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+
+  const widthPx = Math.max(1, Number(spatialIndex?.widthPx ?? 0));
+  const heightPx = Math.max(1, Number(spatialIndex?.heightPx ?? 0));
+  validateNodeSpatialIndex(spatialIndex, nodePixels.nodePixelX.length, widthPx, heightPx);
+
+  const clampedXPx = clampInt(Math.round(xPx), 0, widthPx - 1);
+  const clampedYPx = clampInt(Math.round(yPx), 0, heightPx - 1);
+
+  let nearestAnyNodeIndex = -1;
+  let nearestAnyDistanceSquared = Infinity;
+  let nearestModeNodeIndex = -1;
+  let nearestModeDistanceSquared = Infinity;
+
+  const visitCell = (cellXPx, cellYPx) => {
+    const cellIndex = cellYPx * widthPx + cellXPx;
+    let nodeIndex = spatialIndex.cellNodeHead[cellIndex];
+
+    while (nodeIndex >= 0) {
+      const dx = nodePixels.nodePixelX[nodeIndex] - clampedXPx;
+      const dy = nodePixels.nodePixelY[nodeIndex] - clampedYPx;
+      const distanceSquared = dx * dx + dy * dy;
+
+      if (distanceSquared < nearestAnyDistanceSquared) {
+        nearestAnyDistanceSquared = distanceSquared;
+        nearestAnyNodeIndex = nodeIndex;
+      }
+      if (nodeModeMask[nodeIndex] & allowedModeMask) {
+        if (distanceSquared < nearestModeDistanceSquared) {
+          nearestModeDistanceSquared = distanceSquared;
+          nearestModeNodeIndex = nodeIndex;
+        }
+      }
+
+      nodeIndex = spatialIndex.nextNodeInCell[nodeIndex];
+    }
+  };
+
+  const maxRadius = Math.max(widthPx, heightPx);
+  for (let radius = 0; radius <= maxRadius; radius += 1) {
+    const minX = Math.max(0, clampedXPx - radius);
+    const maxX = Math.min(widthPx - 1, clampedXPx + radius);
+    const minY = Math.max(0, clampedYPx - radius);
+    const maxY = Math.min(heightPx - 1, clampedYPx + radius);
+
+    if (radius === 0) {
+      visitCell(clampedXPx, clampedYPx);
+    } else {
+      for (let scanX = minX; scanX <= maxX; scanX += 1) {
+        visitCell(scanX, minY);
+        if (maxY !== minY) {
+          visitCell(scanX, maxY);
+        }
+      }
+      for (let scanY = minY + 1; scanY < maxY; scanY += 1) {
+        visitCell(minX, scanY);
+        if (maxX !== minX) {
+          visitCell(maxX, scanY);
+        }
+      }
+    }
+
+    const radiusSquared = radius * radius;
+    if (nearestModeNodeIndex >= 0 && nearestModeDistanceSquared <= radiusSquared) {
+      break;
     }
   }
 
@@ -542,7 +711,22 @@ export function findNearestNodeForCanvasPixel(mapData, xPx, yPx, options = {}) {
   const xM = easting - mapData.graph.header.originEasting;
   const yM = northing - mapData.graph.header.originNorthing;
   const allowedModeMask = options.allowedModeMask ?? EDGE_MODE_CAR_BIT;
-  const nodeIndex = findNearestNodeIndexForMode(mapData.graph, xM, yM, allowedModeMask);
+  const nodeModeMask = mapData.nodeModeMask ?? null;
+  const nodeSpatialIndex = mapData.nodeSpatialIndex ?? null;
+  let nodeIndex;
+  if (nodeModeMask && nodeSpatialIndex) {
+    const nodeIndexPx = findNearestNodeIndexForModeFromSpatialIndex(
+      nodeSpatialIndex,
+      mapData.nodePixels,
+      nodeModeMask,
+      xPx,
+      yPx,
+      allowedModeMask,
+    );
+    nodeIndex = nodeIndexPx;
+  } else {
+    nodeIndex = findNearestNodeIndexForMode(mapData.graph, xM, yM, allowedModeMask);
+  }
 
   return {
     nodeIndex,
@@ -613,6 +797,10 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
   let dragRunInFlight = false;
   let lastPointerInteractionPoint = null;
   let lastDragRunRequestMs = Number.NEGATIVE_INFINITY;
+  let activeRunNodeIndex = -1;
+  let activeRunModeMask = 0;
+  let lastCompletedNodeIndex = -1;
+  let lastCompletedModeMask = 0;
 
   const runFromNodeIndex = async (nodeIndex, modeMask = null) => {
     if (isDisposed) {
@@ -628,10 +816,12 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
 
     const runToken = { cancelled: false };
     activeRunToken = runToken;
+    activeRunNodeIndex = nodeIndex;
+    activeRunModeMask = modeMask ?? getAllowedModeMaskFromShell(shell);
 
     clearGrid(mapData.pixelGrid);
     highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);
-    const allowedModeMask = modeMask ?? getAllowedModeMaskFromShell(shell);
+    const allowedModeMask = activeRunModeMask;
     const colourCycleMinutes = getColourCycleMinutesFromShell(shell);
     renderIsochroneLegendIfNeeded(shell, colourCycleMinutes);
 
@@ -651,6 +841,12 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
 
       if (activeRunToken === runToken) {
         activeRunToken = null;
+        activeRunNodeIndex = -1;
+        activeRunModeMask = 0;
+      }
+      if (!runSummary.cancelled) {
+        lastCompletedNodeIndex = nodeIndex;
+        lastCompletedModeMask = allowedModeMask;
       }
 
       return {
@@ -660,6 +856,8 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     } catch (error) {
       if (activeRunToken === runToken) {
         activeRunToken = null;
+        activeRunNodeIndex = -1;
+        activeRunModeMask = 0;
       }
       throw error;
     }
@@ -687,7 +885,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
         const nextPoint = queuedDragPoint;
         queuedDragPoint = null;
         try {
-          await runFromCanvasPixel(nextPoint.xPx, nextPoint.yPx);
+          await runFromNodeIndex(nextPoint.nodeIndex, nextPoint.allowedModeMask);
         } catch (error) {
           setRoutingStatus(shell, 'Routing failed.');
           console.error(error);
@@ -709,13 +907,43 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     if (isDisposed) {
       return;
     }
-    if (pointsMatch(queuedDragPoint, xPx, yPx)) {
+    const allowedModeMask = getAllowedModeMaskFromShell(shell);
+    const nearest = findNearestNodeForCanvasPixel(mapData, xPx, yPx, { allowedModeMask });
+    if (
+      queuedDragPoint !== null
+      && queuedDragPoint.nodeIndex === nearest.nodeIndex
+      && queuedDragPoint.allowedModeMask === allowedModeMask
+    ) {
       return;
     }
-    if (queueOptions.cancelInFlight === true && activeRunToken !== null) {
+    if (
+      activeRunToken !== null
+      && activeRunNodeIndex === nearest.nodeIndex
+      && activeRunModeMask === allowedModeMask
+      && queueOptions.cancelInFlight !== true
+    ) {
+      return;
+    }
+    if (
+      activeRunToken === null
+      && lastCompletedNodeIndex === nearest.nodeIndex
+      && lastCompletedModeMask === allowedModeMask
+    ) {
+      return;
+    }
+    if (
+      queueOptions.cancelInFlight === true
+      && activeRunToken !== null
+      && (activeRunNodeIndex !== nearest.nodeIndex || activeRunModeMask !== allowedModeMask)
+    ) {
       activeRunToken.cancelled = true;
     }
-    queuedDragPoint = { xPx, yPx };
+    queuedDragPoint = {
+      xPx,
+      yPx,
+      nodeIndex: nearest.nodeIndex,
+      allowedModeMask,
+    };
     void drainQueuedRuns();
   };
 
@@ -879,6 +1107,10 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
       activeRunToken.cancelled = true;
       activeRunToken = null;
     }
+    activeRunNodeIndex = -1;
+    activeRunModeMask = 0;
+    lastCompletedNodeIndex = -1;
+    lastCompletedModeMask = 0;
     clearDragDebounceTimer();
     isPointerDown = false;
     pendingDebouncePoint = null;
@@ -1626,6 +1858,8 @@ export async function initializeMapData(shell, options = {}) {
     hideLoadingOverlay(shell);
 
     const nodePixels = precomputeNodePixelCoordinates(graph);
+    const nodeModeMask = precomputeNodeModeMask(graph);
+    const nodeSpatialIndex = createNodeSpatialIndex(graph, nodePixels);
     const pixelGrid = createPixelGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
     const travelTimeGrid = createTravelTimeGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
     clearGrid(pixelGrid);
@@ -1636,6 +1870,8 @@ export async function initializeMapData(shell, options = {}) {
       alignedBoundarySummary,
       graph,
       nodePixels,
+      nodeModeMask,
+      nodeSpatialIndex,
       pixelGrid,
       travelTimeGrid,
     };

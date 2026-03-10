@@ -109,7 +109,14 @@ def test_app_js_has_node_pixel_index_contract() -> None:
     assert "const pxX = Math.floor(xM / pixelSizeM);" in app_js
     assert "const yCellsFromSouth = Math.floor(yM / pixelSizeM);" in app_js
     assert "const pxY = maxY - yCellsFromSouth;" in app_js
+    assert "export function precomputeNodeModeMask(" in app_js
+    assert "const nodeModeMask = new Uint8Array(graph.header.nNodes);" in app_js
+    assert "export function createNodeSpatialIndex(" in app_js
+    assert "const cellNodeHead = new Int32Array(cellCount);" in app_js
+    assert "const nextNodeInCell = new Int32Array(graph.header.nNodes);" in app_js
     assert "const nodePixels = precomputeNodePixelCoordinates(graph);" in app_js
+    assert "const nodeModeMask = precomputeNodeModeMask(graph);" in app_js
+    assert "const nodeSpatialIndex = createNodeSpatialIndex(graph, nodePixels);" in app_js
 
 
 def test_app_js_has_time_to_colour_contract() -> None:
@@ -457,9 +464,16 @@ def test_app_js_has_nearest_node_and_highlight_contract() -> None:
     )
     assert "const xM = easting - mapData.graph.header.originEasting;" in app_js
     assert "const yM = northing - mapData.graph.header.originNorthing;" in app_js
+    assert "const nodeModeMask = mapData.nodeModeMask ?? null;" in app_js
+    assert "const nodeSpatialIndex = mapData.nodeSpatialIndex ?? null;" in app_js
+    assert "export function findNearestNodeIndexForModeFromSpatialIndex(" in app_js
+    assert "let nearestModeNodeIndex = -1;" in app_js
+    assert "for (let radius = 0; radius <= maxRadius; radius += 1)" in app_js
+    assert "if (nodeModeMask[nodeIndex] & allowedModeMask)" in app_js
+    assert "const nodeIndexPx = findNearestNodeIndexForModeFromSpatialIndex(" in app_js
     assert (
-        "const nodeIndex = findNearestNodeIndexForMode(mapData.graph, xM, yM, allowedModeMask);"
-    ) in app_js
+        "nodeIndex = findNearestNodeIndexForMode(mapData.graph, xM, yM, allowedModeMask);" in app_js
+    )
     assert "export function highlightNodeIndexOnIsochroneCanvas(" in app_js
     assert "const xPx = mapData.nodePixels.nodePixelX[nodeIndex];" in app_js
     assert "const yPx = mapData.nodePixels.nodePixelY[nodeIndex];" in app_js
