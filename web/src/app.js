@@ -630,11 +630,10 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     activeRunToken = runToken;
 
     clearGrid(mapData.pixelGrid);
-    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
     highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);
     const allowedModeMask = modeMask ?? getAllowedModeMaskFromShell(shell);
-    renderIsochroneLegend(shell, getColourCycleMinutesFromShell(shell));
     const colourCycleMinutes = getColourCycleMinutesFromShell(shell);
+    renderIsochroneLegend(shell, colourCycleMinutes);
 
     try {
       const runSummary = await runWalkingIsochroneFromSourceNode(
@@ -3271,6 +3270,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;
   const nowImpl = options.nowImpl ?? defaultNowMs;
+  const statusUpdateIntervalMs = options.statusUpdateIntervalMs ?? 120;
   const interactiveEdgeStepStride =
     options.interactiveEdgeStepStride ?? INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE;
   const finalEdgeStepStride = options.finalEdgeStepStride ?? FINAL_EDGE_INTERPOLATION_STEP_STRIDE;
@@ -3282,7 +3282,12 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   if (typeof nowImpl !== 'function') {
     throw new Error('nowImpl must be a function');
   }
+  if (!Number.isFinite(statusUpdateIntervalMs) || statusUpdateIntervalMs < 0) {
+    throw new Error('statusUpdateIntervalMs must be a non-negative finite number');
+  }
+  const normalizedStatusUpdateIntervalMs = Math.round(statusUpdateIntervalMs);
   const routeStartMs = nowImpl();
+  let lastStatusUpdateMs = routeStartMs;
 
   const runSummary = await runSearchTimeSliced(searchState, {
     ...options,
@@ -3302,7 +3307,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
           widthPx: searchState.graph.header.gridWidthPx,
           heightPx: searchState.graph.header.gridHeightPx,
         });
-        paintedNodeCount = countFiniteTravelTimes(searchState.distSeconds);
+        paintedNodeCount = settledNodeCount;
       } else if (supportsGpuTravelTimeRendering) {
         paintedEdgeCount += paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
           mapData.travelTimeGrid,
@@ -3339,7 +3344,16 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
         );
         blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
       }
-      setRoutingStatus(shell, formatRoutingStatusCalculating(settledNodeCount));
+      if (normalizedStatusUpdateIntervalMs <= 0) {
+        setRoutingStatus(shell, formatRoutingStatusCalculating(settledNodeCount));
+        lastStatusUpdateMs = nowImpl();
+      } else {
+        const nowMs = nowImpl();
+        if (nowMs - lastStatusUpdateMs >= statusUpdateIntervalMs) {
+          setRoutingStatus(shell, formatRoutingStatusCalculating(settledNodeCount));
+          lastStatusUpdateMs = nowMs;
+        }
+      }
 
       if (typeof onSliceExternal === 'function') {
         onSliceExternal(settledBatch);

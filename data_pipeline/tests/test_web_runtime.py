@@ -280,6 +280,10 @@ def test_app_js_has_time_sliced_search_contract() -> None:
     assert "onSlice(settledBatch);" in app_js
     assert "await waitForAnimationFrame(requestAnimationFrameImpl);" in app_js
     assert "export async function runSearchTimeSlicedWithRendering(" in app_js
+    assert "const statusUpdateIntervalMs = options.statusUpdateIntervalMs ?? 120;" in app_js
+    assert "let lastStatusUpdateMs = routeStartMs;" in app_js
+    assert "if (nowMs - lastStatusUpdateMs >= statusUpdateIntervalMs) {" in app_js
+    assert "paintedNodeCount = settledNodeCount;" in app_js
     assert "paintSettledBatchToGrid(" in app_js
     assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
 
@@ -486,6 +490,10 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
     assert "activeRunToken.cancelled = true;" in app_js
     assert "const runToken = { cancelled: false };" in app_js
     assert "clearGrid(mapData.pixelGrid);" in app_js
+    assert (
+        "clearGrid(mapData.pixelGrid);\n"
+        "    highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);"
+    ) in app_js
     assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
     assert "findNearestNodeForCanvasPixel(mapData, xPx, yPx, { allowedModeMask });" in app_js
     assert "highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);" in app_js
