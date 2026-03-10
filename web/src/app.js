@@ -2335,6 +2335,30 @@ void main(void) {
       gl.drawArrays(gl.LINES, 0, edgeVertexData.length / 3);
       return edgeVertexData.length / 6;
     },
+    readPixelsRgba(samplePixels) {
+      if (!Array.isArray(samplePixels)) {
+        throw new Error('samplePixels must be an array of [x, y] pairs');
+      }
+
+      const sampledRgba = new Uint8Array(samplePixels.length * 4);
+      const onePixel = new Uint8Array(4);
+      for (let sampleIndex = 0; sampleIndex < samplePixels.length; sampleIndex += 1) {
+        const sample = samplePixels[sampleIndex];
+        if (!Array.isArray(sample) || sample.length < 2) {
+          throw new Error('samplePixels must contain [x, y] pairs');
+        }
+        const xPx = clampInt(Math.round(sample[0]), 0, canvas.width - 1);
+        const yPx = clampInt(Math.round(sample[1]), 0, canvas.height - 1);
+        const yReadPx = canvas.height - 1 - yPx;
+        gl.readPixels(xPx, yReadPx, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, onePixel);
+        sampledRgba[sampleIndex * 4] = onePixel[0];
+        sampledRgba[sampleIndex * 4 + 1] = onePixel[1];
+        sampledRgba[sampleIndex * 4 + 2] = onePixel[2];
+        sampledRgba[sampleIndex * 4 + 3] = onePixel[3];
+      }
+
+      return sampledRgba;
+    },
   };
 
   if (travelTimeProgram && travelTimeTexture && isWebGl2) {
@@ -3044,6 +3068,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   const interactiveEdgeStepStride =
     options.interactiveEdgeStepStride ?? INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE;
   const finalEdgeStepStride = options.finalEdgeStepStride ?? FINAL_EDGE_INTERPOLATION_STEP_STRIDE;
+  const paritySampleCount = options.gpuParitySampleCount ?? 0;
   const onSliceExternal = options.onSlice;
   let paintedNodeCount = 0;
   let paintedEdgeCount = 0;
@@ -3164,6 +3189,24 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
       blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
     }
 
+    if (supportsGpuEdgeInterpolation && paritySampleCount > 0) {
+      const parityResult = runGpuCpuParityDiagnostic(
+        renderer,
+        mapData,
+        searchState,
+        {
+          allowedModeMask,
+          cycleMinutes: colourCycleMinutes,
+          alpha,
+          stepStride: finalEdgeStepStride,
+          sampleCount: paritySampleCount,
+          sampleSeed: options.gpuParitySampleSeed,
+          perChannelThreshold: options.gpuParityPerChannelThreshold,
+        },
+      );
+      console.info('GPU/CPU parity diagnostic', parityResult);
+    }
+
     if (paintedNodeCount <= 1) {
       setRoutingStatus(shell, 'Done - no reachable network for selected mode at this start point.');
     } else {
@@ -3189,6 +3232,144 @@ function countFiniteTravelTimes(distSeconds) {
     }
   }
   return count;
+}
+
+function createDeterministicSamplePixels(widthPx, heightPx, sampleCount, seed = 0x5f3759df) {
+  if (!Number.isInteger(widthPx) || widthPx <= 0) {
+    throw new Error('widthPx must be a positive integer');
+  }
+  if (!Number.isInteger(heightPx) || heightPx <= 0) {
+    throw new Error('heightPx must be a positive integer');
+  }
+  if (!Number.isInteger(sampleCount) || sampleCount <= 0) {
+    throw new Error('sampleCount must be a positive integer');
+  }
+
+  let randomState = seed >>> 0;
+  const nextRandom = () => {
+    randomState = (1664525 * randomState + 1013904223) >>> 0;
+    return randomState / 4294967296;
+  };
+
+  const samples = [];
+  for (let index = 0; index < sampleCount; index += 1) {
+    const xPx = Math.floor(nextRandom() * widthPx);
+    const yPx = Math.floor(nextRandom() * heightPx);
+    samples.push([xPx, yPx]);
+  }
+
+  return samples;
+}
+
+function samplePixelGridRgba(pixelGrid, samplePixels) {
+  validatePixelGrid(pixelGrid);
+  if (!Array.isArray(samplePixels)) {
+    throw new Error('samplePixels must be an array of [x, y] pairs');
+  }
+
+  const sampledRgba = new Uint8Array(samplePixels.length * 4);
+  for (let sampleIndex = 0; sampleIndex < samplePixels.length; sampleIndex += 1) {
+    const sample = samplePixels[sampleIndex];
+    if (!Array.isArray(sample) || sample.length < 2) {
+      throw new Error('samplePixels must contain [x, y] pairs');
+    }
+    const xPx = clampInt(Math.round(sample[0]), 0, pixelGrid.widthPx - 1);
+    const yPx = clampInt(Math.round(sample[1]), 0, pixelGrid.heightPx - 1);
+    const offset = (yPx * pixelGrid.widthPx + xPx) * 4;
+    sampledRgba[sampleIndex * 4] = pixelGrid.rgba[offset];
+    sampledRgba[sampleIndex * 4 + 1] = pixelGrid.rgba[offset + 1];
+    sampledRgba[sampleIndex * 4 + 2] = pixelGrid.rgba[offset + 2];
+    sampledRgba[sampleIndex * 4 + 3] = pixelGrid.rgba[offset + 3];
+  }
+
+  return sampledRgba;
+}
+
+export function runGpuCpuParityDiagnostic(renderer, mapData, searchState, options = {}) {
+  if (!renderer || typeof renderer.readPixelsRgba !== 'function') {
+    throw new Error('renderer.readPixelsRgba(samplePixels) is required');
+  }
+  if (!mapData || typeof mapData !== 'object') {
+    throw new Error('mapData must be an object');
+  }
+  if (!mapData.graph || !mapData.nodePixels || !mapData.pixelGrid) {
+    throw new Error('mapData.graph, mapData.nodePixels, and mapData.pixelGrid are required');
+  }
+  if (!searchState || typeof searchState !== 'object') {
+    throw new Error('searchState must be an object');
+  }
+  if (!searchState.graph || !searchState.distSeconds) {
+    throw new Error('searchState.graph and searchState.distSeconds are required');
+  }
+
+  validateGraphForRouting(mapData.graph);
+  validateNodePixels(mapData.nodePixels);
+  validateDistSeconds(searchState.distSeconds, mapData.nodePixels.nodePixelX.length);
+  validatePixelGrid(mapData.pixelGrid);
+
+  const allowedModeMask = options.allowedModeMask ?? EDGE_MODE_CAR_BIT;
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+
+  const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+  const alpha = clampInt(Math.round(options.alpha ?? 255), 0, 255);
+  const stepStride = options.stepStride ?? FINAL_EDGE_INTERPOLATION_STEP_STRIDE;
+  const rawSampleCount = options.sampleCount ?? 256;
+  const sampleCount = clampInt(Math.floor(rawSampleCount), 1, 10000);
+  const sampleSeed = options.sampleSeed ?? 0x5f3759df;
+  const perChannelThreshold = clampInt(Math.round(options.perChannelThreshold ?? 64), 0, 255);
+
+  const referenceGrid = createPixelGrid(mapData.pixelGrid.widthPx, mapData.pixelGrid.heightPx);
+  clearGrid(referenceGrid);
+  paintAllReachableEdgeInterpolationsToGrid(
+    referenceGrid,
+    searchState.graph,
+    mapData.nodePixels,
+    searchState.distSeconds,
+    allowedModeMask,
+    { alpha, colourCycleMinutes: cycleMinutes, stepStride },
+  );
+  paintReachableNodesToGrid(
+    referenceGrid,
+    mapData.nodePixels,
+    searchState.distSeconds,
+    { alpha, colourCycleMinutes: cycleMinutes },
+  );
+
+  const samplePixels = createDeterministicSamplePixels(
+    referenceGrid.widthPx,
+    referenceGrid.heightPx,
+    sampleCount,
+    sampleSeed,
+  );
+  const cpuRgba = samplePixelGridRgba(referenceGrid, samplePixels);
+  const gpuRgba = renderer.readPixelsRgba(samplePixels);
+  if (!(gpuRgba instanceof Uint8Array) || gpuRgba.length !== cpuRgba.length) {
+    throw new Error('renderer.readPixelsRgba(samplePixels) returned unexpected byte length');
+  }
+
+  let sumAbsDelta = 0;
+  let maxAbsDelta = 0;
+  let aboveThresholdChannels = 0;
+  for (let i = 0; i < cpuRgba.length; i += 1) {
+    const absDelta = Math.abs(cpuRgba[i] - gpuRgba[i]);
+    sumAbsDelta += absDelta;
+    if (absDelta > maxAbsDelta) {
+      maxAbsDelta = absDelta;
+    }
+    if (absDelta > perChannelThreshold) {
+      aboveThresholdChannels += 1;
+    }
+  }
+
+  return {
+    sampleCount,
+    meanAbsDelta: sumAbsDelta / cpuRgba.length,
+    maxAbsDelta,
+    aboveThresholdChannels,
+    perChannelThreshold,
+  };
 }
 
 export function formatRoutingStatusCalculating(settledCount) {

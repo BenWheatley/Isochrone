@@ -195,6 +195,11 @@ def test_app_js_has_gpu_travel_time_colourization_contract() -> None:
     ) in app_js
     assert "renderer.drawTravelTimeEdges(batchEdgeVertices," in app_js
     assert "renderer.drawTravelTimeEdges(allEdgeVertices," in app_js
+    assert "readPixelsRgba(samplePixels)" in app_js
+    assert "export function runGpuCpuParityDiagnostic(" in app_js
+    assert "const paritySampleCount = options.gpuParitySampleCount ?? 0;" in app_js
+    assert "if (supportsGpuEdgeInterpolation && paritySampleCount > 0)" in app_js
+    assert "const parityResult = runGpuCpuParityDiagnostic(" in app_js
 
 
 def test_app_js_has_cpu_interpolation_foundation_contract() -> None:
