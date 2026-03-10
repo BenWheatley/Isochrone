@@ -883,8 +883,16 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     activeRunModeMask = modeMask ?? getAllowedModeMaskFromShell(shell);
     activeRunSkipFinalFullPass = runOptions.skipFinalFullPass === true;
 
-    clearGrid(mapData.pixelGrid);
-    highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);
+    const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
+    if (renderer.mode === 'webgl') {
+      renderer.clear({
+        widthPx: mapData.graph.header.gridWidthPx,
+        heightPx: mapData.graph.header.gridHeightPx,
+      });
+    } else {
+      clearGrid(mapData.pixelGrid);
+      highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);
+    }
     const allowedModeMask = activeRunModeMask;
     const colourCycleMinutes = getColourCycleMinutesFromShell(shell);
     renderIsochroneLegendIfNeeded(shell, colourCycleMinutes);
@@ -2804,6 +2812,26 @@ void main(void) {
     gl.deleteProgram(edgeProgram);
     throw new Error('failed to allocate WebGL edge vertex buffer');
   }
+  let edgeVertexBufferCapacityFloats = 0;
+  const ensureEdgeVertexBufferCapacity = (requiredFloats) => {
+    if (!Number.isInteger(requiredFloats) || requiredFloats <= 0) {
+      throw new Error('requiredFloats must be a positive integer');
+    }
+    if (edgeVertexBufferCapacityFloats >= requiredFloats) {
+      return;
+    }
+    let nextCapacityFloats = Math.max(1024, edgeVertexBufferCapacityFloats || 1024);
+    while (nextCapacityFloats < requiredFloats) {
+      nextCapacityFloats *= 2;
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, edgeVertexBuffer);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      nextCapacityFloats * Float32Array.BYTES_PER_ELEMENT,
+      gl.DYNAMIC_DRAW,
+    );
+    edgeVertexBufferCapacityFloats = nextCapacityFloats;
+  };
 
   const renderer = {
     mode: 'webgl',
@@ -2902,7 +2930,8 @@ void main(void) {
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.useProgram(edgeProgram);
       gl.bindBuffer(gl.ARRAY_BUFFER, edgeVertexBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, edgeVertexData, gl.DYNAMIC_DRAW);
+      ensureEdgeVertexBufferCapacity(edgeVertexData.length);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, edgeVertexData);
       gl.enableVertexAttribArray(edgePositionLocation);
       gl.vertexAttribPointer(edgePositionLocation, 2, gl.FLOAT, false, 12, 0);
       gl.enableVertexAttribArray(edgeSecondsLocation);

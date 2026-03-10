@@ -169,6 +169,9 @@ def test_app_js_has_webgl_blit_renderer_contract() -> None:
     assert "pixelGrid.rgba" in app_js
     assert "gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);" in app_js
     assert "clear(options = {}) {" in app_js
+    assert "let edgeVertexBufferCapacityFloats = 0;" in app_js
+    assert "gl.bufferSubData(gl.ARRAY_BUFFER, 0, edgeVertexData);" in app_js
+    assert "Float32Array.BYTES_PER_ELEMENT" in app_js
     assert "function createCanvas2dIsochroneRenderer(" in app_js
     assert "export function createIsochroneRenderer(" in app_js
     assert "const webglRenderer = createWebGlIsochroneRenderer(canvas, options);" in app_js
@@ -559,10 +562,8 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
     assert "activeRunToken.cancelled = true;" in app_js
     assert "const runToken = { cancelled: false };" in app_js
     assert "clearGrid(mapData.pixelGrid);" in app_js
-    assert (
-        "clearGrid(mapData.pixelGrid);\n"
-        "    highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);"
-    ) in app_js
+    assert "if (renderer.mode === 'webgl') {" in app_js
+    assert "highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);" in app_js
     assert "renderIsochroneLegendIfNeeded(shell, colourCycleMinutes);" in app_js
     assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
     assert "findNearestNodeForCanvasPixel(mapData, xPx, yPx, { allowedModeMask });" in app_js
