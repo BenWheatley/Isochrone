@@ -295,8 +295,10 @@ def test_app_js_has_routing_status_text_contract() -> None:
     assert "nodes settled" in app_js
     assert "export function formatRoutingStatusDone(" in app_js
     assert "Done - full travel-time field ready" in app_js
+    assert "function formatRoutingDurationSuffix(" in app_js
+    assert "return ` (${roundedDurationMs} ms)`;" in app_js
     assert "setRoutingStatus(shell, formatRoutingStatusCalculating(0));" in app_js
-    assert "setRoutingStatus(shell, formatRoutingStatusDone());" in app_js
+    assert "setRoutingStatus(shell, formatRoutingStatusDone(routeElapsedMs));" in app_js
 
 
 def test_app_js_has_min_heap_contract() -> None:
@@ -463,7 +465,15 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
     assert "export function bindCanvasClickRouting(" in app_js
-    assert "shell.isochroneCanvas.addEventListener('click', handleCanvasClick);" in app_js
+    assert "let isPointerDown = false;" in app_js
+    assert "let queuedDragPoint = null;" in app_js
+    assert "let dragRunInFlight = false;" in app_js
+    assert "shell.isochroneCanvas.addEventListener('pointerdown', handlePointerDown);" in app_js
+    assert "shell.isochroneCanvas.addEventListener('pointermove', handlePointerMove);" in app_js
+    assert "shell.isochroneCanvas.addEventListener('pointerup', handlePointerUp);" in app_js
+    assert "shell.isochroneCanvas.addEventListener('pointercancel', handlePointerCancel);" in app_js
+    assert "queueRunFromCanvasPixel(xPx, yPx);" in app_js
+    assert "if (!isPointerDown) {" in app_js
     assert "if (activeRunToken !== null) {" in app_js
     assert "activeRunToken.cancelled = true;" in app_js
     assert "const runToken = { cancelled: false };" in app_js

@@ -596,6 +596,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
 
   let activeRunToken = null;
   let isDisposed = false;
+  let isPointerDown = false;
+  let queuedDragPoint = null;
+  let dragRunInFlight = false;
 
   const runFromNodeIndex = async (nodeIndex, modeMask = null) => {
     if (isDisposed) {
@@ -660,19 +663,127 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     };
   };
 
-  const handleCanvasClick = (event) => {
+  const drainQueuedRuns = async () => {
+    if (dragRunInFlight || isDisposed) {
+      return;
+    }
+    dragRunInFlight = true;
+
+    try {
+      while (queuedDragPoint !== null && !isDisposed) {
+        const nextPoint = queuedDragPoint;
+        queuedDragPoint = null;
+        try {
+          await runFromCanvasPixel(nextPoint.xPx, nextPoint.yPx);
+        } catch (error) {
+          setRoutingStatus(shell, 'Routing failed.');
+          console.error(error);
+        }
+      }
+    } finally {
+      dragRunInFlight = false;
+      if (!isDisposed && queuedDragPoint !== null) {
+        void drainQueuedRuns();
+      }
+    }
+  };
+
+  const queueRunFromCanvasPixel = (xPx, yPx) => {
+    if (isDisposed) {
+      return;
+    }
+    if (queuedDragPoint !== null && queuedDragPoint.xPx === xPx && queuedDragPoint.yPx === yPx) {
+      return;
+    }
+    queuedDragPoint = { xPx, yPx };
+    void drainQueuedRuns();
+  };
+
+  const releasePointerCaptureIfHeld = (event) => {
+    if (
+      typeof shell.isochroneCanvas.hasPointerCapture !== 'function'
+      || typeof shell.isochroneCanvas.releasePointerCapture !== 'function'
+      || !Number.isInteger(event.pointerId)
+    ) {
+      return;
+    }
+    if (shell.isochroneCanvas.hasPointerCapture(event.pointerId)) {
+      shell.isochroneCanvas.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const isPrimaryPointerEvent = (event) => {
+    if (Number.isInteger(event.button) && event.button !== 0) {
+      return false;
+    }
+    if (Number.isInteger(event.buttons) && event.buttons !== 0 && (event.buttons & 1) === 0) {
+      return false;
+    }
+    return true;
+  };
+
+  const handlePointerDown = (event) => {
+    if (!isPrimaryPointerEvent(event)) {
+      return;
+    }
+    isPointerDown = true;
+    if (
+      typeof shell.isochroneCanvas.setPointerCapture === 'function'
+      && Number.isInteger(event.pointerId)
+    ) {
+      shell.isochroneCanvas.setPointerCapture(event.pointerId);
+    }
     const { xPx, yPx } = mapClientPointToCanvasPixel(
       shell.isochroneCanvas,
       event.clientX,
       event.clientY,
     );
-    void runFromCanvasPixel(xPx, yPx).catch((error) => {
-      setRoutingStatus(shell, 'Routing failed.');
-      console.error(error);
-    });
+    queueRunFromCanvasPixel(xPx, yPx);
   };
 
-  shell.isochroneCanvas.addEventListener('click', handleCanvasClick);
+  const handlePointerMove = (event) => {
+    if (!isPointerDown) {
+      return;
+    }
+    if (Number.isInteger(event.buttons) && (event.buttons & 1) === 0) {
+      isPointerDown = false;
+      releasePointerCaptureIfHeld(event);
+      return;
+    }
+    const { xPx, yPx } = mapClientPointToCanvasPixel(
+      shell.isochroneCanvas,
+      event.clientX,
+      event.clientY,
+    );
+    queueRunFromCanvasPixel(xPx, yPx);
+  };
+
+  const handlePointerUp = (event) => {
+    if (!isPrimaryPointerEvent(event)) {
+      return;
+    }
+    if (!isPointerDown) {
+      return;
+    }
+    const { xPx, yPx } = mapClientPointToCanvasPixel(
+      shell.isochroneCanvas,
+      event.clientX,
+      event.clientY,
+    );
+    queueRunFromCanvasPixel(xPx, yPx);
+    isPointerDown = false;
+    releasePointerCaptureIfHeld(event);
+  };
+
+  const handlePointerCancel = (event) => {
+    isPointerDown = false;
+    releasePointerCaptureIfHeld(event);
+  };
+
+  shell.isochroneCanvas.addEventListener('pointerdown', handlePointerDown);
+  shell.isochroneCanvas.addEventListener('pointermove', handlePointerMove);
+  shell.isochroneCanvas.addEventListener('pointerup', handlePointerUp);
+  shell.isochroneCanvas.addEventListener('pointercancel', handlePointerCancel);
 
   const dispose = () => {
     if (isDisposed) {
@@ -684,8 +795,14 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
       activeRunToken.cancelled = true;
       activeRunToken = null;
     }
+    isPointerDown = false;
+    queuedDragPoint = null;
+    dragRunInFlight = false;
 
-    shell.isochroneCanvas.removeEventListener('click', handleCanvasClick);
+    shell.isochroneCanvas.removeEventListener('pointerdown', handlePointerDown);
+    shell.isochroneCanvas.removeEventListener('pointermove', handlePointerMove);
+    shell.isochroneCanvas.removeEventListener('pointerup', handlePointerUp);
+    shell.isochroneCanvas.removeEventListener('pointercancel', handlePointerCancel);
   };
 
   return { dispose, runFromCanvasPixel };
@@ -3065,6 +3182,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   const alpha = options.alpha ?? 255;
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;
+  const nowImpl = options.nowImpl ?? defaultNowMs;
   const interactiveEdgeStepStride =
     options.interactiveEdgeStepStride ?? INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE;
   const finalEdgeStepStride = options.finalEdgeStepStride ?? FINAL_EDGE_INTERPOLATION_STEP_STRIDE;
@@ -3073,6 +3191,10 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   let paintedNodeCount = 0;
   let paintedEdgeCount = 0;
   let settledNodeCount = 0;
+  if (typeof nowImpl !== 'function') {
+    throw new Error('nowImpl must be a function');
+  }
+  const routeStartMs = nowImpl();
 
   const runSummary = await runSearchTimeSliced(searchState, {
     ...options,
@@ -3136,6 +3258,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
       }
     },
   });
+  const routeElapsedMs = Math.max(0, Math.round(nowImpl() - routeStartMs));
 
   if (!runSummary.cancelled) {
     if (supportsGpuEdgeInterpolation) {
@@ -3208,14 +3331,15 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
     }
 
     if (paintedNodeCount <= 1) {
-      setRoutingStatus(shell, 'Done - no reachable network for selected mode at this start point.');
+      setRoutingStatus(shell, formatRoutingStatusNoReachable(routeElapsedMs));
     } else {
-      setRoutingStatus(shell, formatRoutingStatusDone());
+      setRoutingStatus(shell, formatRoutingStatusDone(routeElapsedMs));
     }
   }
 
   return {
     ...runSummary,
+    elapsedMs: routeElapsedMs,
     paintedEdgeCount,
     paintedNodeCount,
   };
@@ -3377,8 +3501,20 @@ export function formatRoutingStatusCalculating(settledCount) {
   return `Calculating... (${safeCount} nodes settled)`;
 }
 
-export function formatRoutingStatusDone() {
-  return 'Done - full travel-time field ready';
+function formatRoutingDurationSuffix(durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs < 0) {
+    return '';
+  }
+  const roundedDurationMs = Math.max(0, Math.round(durationMs));
+  return ` (${roundedDurationMs} ms)`;
+}
+
+export function formatRoutingStatusDone(durationMs = null) {
+  return `Done - full travel-time field ready${formatRoutingDurationSuffix(durationMs)}`;
+}
+
+export function formatRoutingStatusNoReachable(durationMs = null) {
+  return `Done - no reachable network for selected mode at this start point${formatRoutingDurationSuffix(durationMs)}`;
 }
 
 function setRoutingStatus(shell, text) {
