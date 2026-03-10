@@ -1017,6 +1017,18 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     }, remainingDebounceMs);
   };
 
+  const queueFullPassAtClientPoint = (clientX, clientY) => {
+    const { xPx, yPx } = mapClientPointToCanvasPixel(
+      shell.isochroneCanvas,
+      clientX,
+      clientY,
+    );
+    clearDragDebounceTimer();
+    pendingDebouncePoint = null;
+    queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true, skipFinalFullPass: false });
+    lastPointerInteractionPoint = null;
+  };
+
   const releasePointerCaptureIfHeld = (event) => {
     if (
       typeof shell.isochroneCanvas.hasPointerCapture !== 'function'
@@ -1061,6 +1073,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
       return;
     }
     if (Number.isInteger(event.buttons) && (event.buttons & 1) === 0) {
+      queueFullPassAtClientPoint(event.clientX, event.clientY);
       isPointerDown = false;
       releasePointerCaptureIfHeld(event);
       return;
@@ -1084,16 +1097,8 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     if (!isPointerDown) {
       return;
     }
-    const { xPx, yPx } = mapClientPointToCanvasPixel(
-      shell.isochroneCanvas,
-      event.clientX,
-      event.clientY,
-    );
-    clearDragDebounceTimer();
-    pendingDebouncePoint = null;
-    queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true, skipFinalFullPass: false });
+    queueFullPassAtClientPoint(event.clientX, event.clientY);
     isPointerDown = false;
-    lastPointerInteractionPoint = null;
     releasePointerCaptureIfHeld(event);
   };
 

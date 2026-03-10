@@ -512,6 +512,7 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
     assert "const clearDragDebounceTimer = () => {" in app_js
     assert "const flushPendingDebouncedDragRun = () => {" in app_js
     assert "const scheduleDebouncedDragRun = (xPx, yPx) => {" in app_js
+    assert "const queueFullPassAtClientPoint = (clientX, clientY) => {" in app_js
     assert "shell.isochroneCanvas.addEventListener('pointerdown', handlePointerDown);" in app_js
     assert "shell.isochroneCanvas.addEventListener('pointermove', handlePointerMove);" in app_js
     assert "shell.isochroneCanvas.addEventListener('pointerup', handlePointerUp);" in app_js
@@ -528,6 +529,7 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
         "queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true, skipFinalFullPass: false });"
         in app_js
     )
+    assert "queueFullPassAtClientPoint(event.clientX, event.clientY);" in app_js
     assert "if (hadPendingDebouncedPoint || !wasSameAsLastMove) {" not in app_js
     assert "if (!isPointerDown) {" in app_js
     assert "if (activeRunToken !== null) {" in app_js
