@@ -402,9 +402,11 @@ def test_app_js_has_legend_and_scale_bar_contract() -> None:
     assert "export function getColourCycleMinutesFromShell(" in app_js
     assert "const rawCycleValue = shell.colourCycleMinutesInput?.value;" in app_js
     assert "export function renderIsochroneLegend(" in app_js
+    assert "export function renderIsochroneLegendIfNeeded(" in app_js
+    assert "shell.lastRenderedLegendCycleMinutes = cycleMinutes;" in app_js
     assert "export function updateDistanceScaleBar(" in app_js
     assert "const metresPerCssPixel =" in app_js
-    assert "renderIsochroneLegend(shell, getColourCycleMinutesFromShell(shell));" in app_js
+    assert "renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));" in app_js
     assert "updateDistanceScaleBar(shell, graph.header);" in app_js
 
 
@@ -494,6 +496,7 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
         "clearGrid(mapData.pixelGrid);\n"
         "    highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);"
     ) in app_js
+    assert "renderIsochroneLegendIfNeeded(shell, colourCycleMinutes);" in app_js
     assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
     assert "findNearestNodeForCanvasPixel(mapData, xPx, yPx, { allowedModeMask });" in app_js
     assert "highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);" in app_js

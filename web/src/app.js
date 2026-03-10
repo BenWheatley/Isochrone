@@ -633,7 +633,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);
     const allowedModeMask = modeMask ?? getAllowedModeMaskFromShell(shell);
     const colourCycleMinutes = getColourCycleMinutesFromShell(shell);
-    renderIsochroneLegend(shell, colourCycleMinutes);
+    renderIsochroneLegendIfNeeded(shell, colourCycleMinutes);
 
     try {
       const runSummary = await runWalkingIsochroneFromSourceNode(
@@ -1046,6 +1046,7 @@ export function initializeAppShell(doc) {
     distanceScaleLabel,
     isochroneLegend,
     loadingFadeTimeoutId: null,
+    lastRenderedLegendCycleMinutes: null,
   };
 }
 
@@ -1116,7 +1117,7 @@ export function bindModeSelectControl(shell) {
   };
   const handleCycleChange = () => {
     const cycleMinutes = getColourCycleMinutesFromShell(shell);
-    renderIsochroneLegend(shell, cycleMinutes);
+    renderIsochroneLegendIfNeeded(shell, cycleMinutes);
   };
 
   for (const option of shell.modeSelect.options) {
@@ -1124,7 +1125,7 @@ export function bindModeSelectControl(shell) {
   }
   getAllowedModeMaskFromShell(shell);
   getColourCycleMinutesFromShell(shell);
-  renderIsochroneLegend(shell, getColourCycleMinutesFromShell(shell));
+  renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));
   shell.modeSelect.addEventListener('change', handleSelectChange);
   shell.colourCycleMinutesInput.addEventListener('change', handleCycleChange);
 
@@ -1620,7 +1621,7 @@ export async function initializeMapData(shell, options = {}) {
       boundaryLoad.boundaryPayload,
       graph.header,
     );
-    renderIsochroneLegend(shell, getColourCycleMinutesFromShell(shell));
+    renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));
     updateDistanceScaleBar(shell, graph.header);
     hideLoadingOverlay(shell);
 
@@ -1757,6 +1758,23 @@ export function renderIsochroneLegend(shell, cycleMinutes) {
   }
 
   shell.isochroneLegend.innerHTML = legendRows.join('');
+}
+
+export function renderIsochroneLegendIfNeeded(shell, cycleMinutes) {
+  if (!shell || typeof shell !== 'object' || !shell.isochroneLegend) {
+    throw new Error('shell.isochroneLegend is required');
+  }
+  if (!Number.isFinite(cycleMinutes) || cycleMinutes <= 0) {
+    throw new Error('cycleMinutes must be a positive finite number');
+  }
+
+  if (shell.lastRenderedLegendCycleMinutes === cycleMinutes) {
+    return false;
+  }
+
+  renderIsochroneLegend(shell, cycleMinutes);
+  shell.lastRenderedLegendCycleMinutes = cycleMinutes;
+  return true;
 }
 
 export function updateDistanceScaleBar(shell, graphHeader) {
