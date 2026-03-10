@@ -202,6 +202,10 @@ def test_app_js_has_gpu_travel_time_colourization_contract() -> None:
     assert "drawTravelTimeEdges(edgeVertexData, options = {})" in app_js
     assert "collectSettledBatchTravelTimeEdgeVertices(" in app_js
     assert "collectAllReachableTravelTimeEdgeVertices(" in app_js
+    assert "function createEdgeVertexBufferBuilder(" in app_js
+    assert "function appendEdgeVertexSegment(" in app_js
+    assert "const edgeVertexBuilder = createEdgeVertexBufferBuilder();" in app_js
+    assert "builder: edgeVertexBuilder" in app_js
     assert (
         "const supportsGpuEdgeInterpolation = typeof renderer.drawTravelTimeEdges === 'function';"
     ) in app_js
@@ -210,7 +214,9 @@ def test_app_js_has_gpu_travel_time_colourization_contract() -> None:
     assert "readPixelsRgba(samplePixels)" in app_js
     assert "export function runGpuCpuParityDiagnostic(" in app_js
     assert "const paritySampleCount = options.gpuParitySampleCount ?? 0;" in app_js
-    assert "if (supportsGpuEdgeInterpolation && paritySampleCount > 0)" in app_js
+    assert (
+        "if (!skipFinalFullPass && supportsGpuEdgeInterpolation && paritySampleCount > 0)" in app_js
+    )
     assert "const parityResult = runGpuCpuParityDiagnostic(" in app_js
 
 
@@ -293,9 +299,12 @@ def test_app_js_has_time_sliced_search_contract() -> None:
     assert "await waitForAnimationFrame(requestAnimationFrameImpl);" in app_js
     assert "export async function runSearchTimeSlicedWithRendering(" in app_js
     assert "const statusUpdateIntervalMs = options.statusUpdateIntervalMs ?? 120;" in app_js
+    assert "const skipFinalFullPass = options.skipFinalFullPass ?? false;" in app_js
     assert "let lastStatusUpdateMs = routeStartMs;" in app_js
     assert "if (nowMs - lastStatusUpdateMs >= statusUpdateIntervalMs) {" in app_js
     assert "paintedNodeCount = settledNodeCount;" in app_js
+    assert "if (!skipFinalFullPass) {" in app_js
+    assert "setRoutingStatus(shell, formatRoutingStatusPreview(routeElapsedMs));" in app_js
     assert "paintSettledBatchToGrid(" in app_js
     assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
 
@@ -312,6 +321,8 @@ def test_app_js_has_routing_status_text_contract() -> None:
     assert "nodes settled" in app_js
     assert "export function formatRoutingStatusDone(" in app_js
     assert "Done - full travel-time field ready" in app_js
+    assert "export function formatRoutingStatusPreview(" in app_js
+    assert "Done - preview updated" in app_js
     assert "function formatRoutingDurationSuffix(" in app_js
     assert "return ` (${roundedDurationMs} ms)`;" in app_js
     assert "setRoutingStatus(shell, formatRoutingStatusCalculating(0));" in app_js
@@ -507,7 +518,12 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
     assert "shell.isochroneCanvas.addEventListener('pointercancel', handlePointerCancel);" in app_js
     assert "scheduleDebouncedDragRun(xPx, yPx);" in app_js
     assert "flushPendingDebouncedDragRun();" in app_js
-    assert "queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true });" in app_js
+    assert "skipFinalFullPass: true" in app_js
+    assert "skipFinalFullPass: false" in app_js
+    assert (
+        "queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true, skipFinalFullPass: true });"
+        in app_js
+    )
     assert "if (!isPointerDown) {" in app_js
     assert "if (activeRunToken !== null) {" in app_js
     assert "activeRunToken.cancelled = true;" in app_js
