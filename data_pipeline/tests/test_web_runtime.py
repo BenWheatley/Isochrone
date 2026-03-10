@@ -223,7 +223,7 @@ def test_app_js_has_gpu_travel_time_colourization_contract() -> None:
     assert (
         "if (!skipFinalFullPass && supportsGpuEdgeInterpolation && paritySampleCount > 0)" in app_js
     )
-    assert "const parityResult = runGpuCpuParityDiagnostic(" in app_js
+    assert "const parityResult = profileMs('parityDiagnosticMs', () =>" in app_js
 
 
 def test_app_js_has_cpu_interpolation_foundation_contract() -> None:
@@ -267,8 +267,8 @@ def test_app_js_paints_interpolated_edges_during_search_contract() -> None:
         "const finalEdgeStepStride = "
         "options.finalEdgeStepStride ?? FINAL_EDGE_INTERPOLATION_STEP_STRIDE;"
     ) in app_js
-    assert "paintedEdgeCount += paintSettledBatchEdgeInterpolationsToGrid(" in app_js
-    assert "paintedEdgeCount = paintAllReachableEdgeInterpolationsToGrid(" in app_js
+    assert "paintedEdgeCount += profileMs('onSlicePaintMs', () =>" in app_js
+    assert "paintedEdgeCount = profileMs('finalPaintMs', () =>" in app_js
     assert "paintedEdgeCount," in app_js
 
 
@@ -313,6 +313,9 @@ def test_app_js_has_time_sliced_search_contract() -> None:
     assert "setRoutingStatus(shell, formatRoutingStatusPreview(routeElapsedMs));" in app_js
     assert "paintSettledBatchToGrid(" in app_js
     assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
+    assert "const routingProfileEnabled = isRoutingProfilingEnabled(options.profile);" in app_js
+    assert "const profileMs = (field, callback) => {" in app_js
+    assert "console.info('Routing profile', buildRoutingProfileSummary(" in app_js
     assert app_js.count("renderer.clear({") >= 2
     assert (
         "if (supportsGpuEdgeInterpolation) {\n"
@@ -326,6 +329,18 @@ def test_app_js_has_time_sliced_search_contract() -> None:
         "        blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);\n"
         "        const allEdgeVertices = collectAllReachableTravelTimeEdgeVertices("
     ) not in app_js
+
+
+def test_app_js_has_routing_profile_flag_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "function isRoutingProfilingEnabled(profileOption)" in app_js
+    assert "if (profileOption === true || profileOption === false)" in app_js
+    assert "const locationSearch = globalThis.location?.search;" in app_js
+    assert "const params = new URLSearchParams(locationSearch);" in app_js
+    assert "const profileParam = params.get('profile');" in app_js
+    assert "function buildRoutingProfileSummary(" in app_js
+    assert "roundedProfileMs" in app_js
 
 
 def test_app_js_has_routing_status_text_contract() -> None:
