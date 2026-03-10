@@ -220,6 +220,29 @@ body {
   white-space: nowrap;
 }
 
+#render-backend-badge {
+  color: #174769;
+  font-size: 0.76rem;
+  font-weight: 600;
+  white-space: nowrap;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid #b8c9d8;
+  border-radius: 999px;
+  background: #edf4fb;
+}
+
+#render-backend-badge[data-backend='webgl'] {
+  color: #0d5f30;
+  border-color: #8cc7a8;
+  background: #e8f7ef;
+}
+
+#render-backend-badge[data-backend='cpu'] {
+  color: #7a4b00;
+  border-color: #e0c58d;
+  background: #fff5e6;
+}
+
 #routing-disclaimer {
   margin-left: auto;
   color: #5b6c79;

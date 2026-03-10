@@ -1197,6 +1197,7 @@ export function initializeAppShell(doc) {
   const loadingText = resolvedDocument.getElementById('loading-text');
   const loadingProgressBar = resolvedDocument.getElementById('loading-progress-bar');
   const routingStatus = resolvedDocument.getElementById('routing-status');
+  const renderBackendBadge = resolvedDocument.getElementById('render-backend-badge');
   const modeSelect = resolvedDocument.getElementById('mode-select');
   const colourCycleMinutesInput = resolvedDocument.getElementById('colour-cycle-minutes');
   const distanceScale = resolvedDocument.getElementById('distance-scale');
@@ -1228,6 +1229,9 @@ export function initializeAppShell(doc) {
   if (!routingStatus || routingStatus.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="routing-status">');
   }
+  if (!renderBackendBadge || renderBackendBadge.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="render-backend-badge">');
+  }
   if (!modeSelect || modeSelect.tagName !== 'SELECT') {
     throw new Error('index.html is missing <select id="mode-select">');
   }
@@ -1257,6 +1261,7 @@ export function initializeAppShell(doc) {
   loadingText.textContent = 'Loading district boundaries...';
   setLoadingProgressBar(loadingProgressBar, 0);
   routingStatus.textContent = 'Ready.';
+  renderBackendBadge.textContent = 'Renderer: Detecting...';
   for (const option of modeSelect.options) {
     option.selected = option.value === 'car';
   }
@@ -1271,6 +1276,7 @@ export function initializeAppShell(doc) {
     loadingText,
     loadingProgressBar,
     routingStatus,
+    renderBackendBadge,
     modeSelect,
     colourCycleMinutesInput,
     distanceScale,
@@ -1847,6 +1853,8 @@ export async function initializeMapData(shell, options = {}) {
     const graph = await loadGraphBinary(shell, graphOptions);
     shell.isochroneCanvas.width = graph.header.gridWidthPx;
     shell.isochroneCanvas.height = graph.header.gridHeightPx;
+    const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
+    updateRenderBackendBadge(shell, renderer);
     layoutMapViewportToContainGraph(shell, graph.header);
     const alignedBoundarySummary = drawBoundaryBasemapAlignedToGraphGrid(
       shell.boundaryCanvas,
@@ -2872,6 +2880,26 @@ export function createIsochroneRenderer(canvas, options = {}) {
   }
 }
 
+export function formatRenderBackendBadgeText(rendererMode) {
+  if (rendererMode === 'webgl') {
+    return 'Renderer: WebGL';
+  }
+  return 'Renderer: CPU';
+}
+
+function updateRenderBackendBadge(shell, renderer) {
+  if (!shell || typeof shell !== 'object' || !shell.renderBackendBadge) {
+    return;
+  }
+
+  const rendererMode = renderer?.mode === 'webgl' ? 'webgl' : 'cpu';
+  const nextText = formatRenderBackendBadgeText(rendererMode);
+  if (shell.renderBackendBadge.textContent !== nextText) {
+    shell.renderBackendBadge.textContent = nextText;
+  }
+  shell.renderBackendBadge.dataset.backend = rendererMode;
+}
+
 function getOrCreateIsochroneRenderer(canvas) {
   const cached = canvas.__isochroneRenderer;
   if (cached && typeof cached.draw === 'function') {
@@ -3500,6 +3528,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   }
 
   const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
+  updateRenderBackendBadge(shell, renderer);
   const supportsGpuEdgeInterpolation = typeof renderer.drawTravelTimeEdges === 'function';
   const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
   if (supportsGpuTravelTimeRendering && !mapData.travelTimeGrid) {

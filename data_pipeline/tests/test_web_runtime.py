@@ -15,6 +15,7 @@ def test_index_html_uses_native_module_entrypoint() -> None:
     assert 'id="loading-progress"' in index_html
     assert 'id="loading-progress-bar"' in index_html
     assert 'id="routing-status"' in index_html
+    assert 'id="render-backend-badge"' in index_html
     assert 'id="routing-disclaimer"' in index_html
     assert "OSM data can include isolated disconnected route segments." in index_html
     assert 'id="map-region"' in index_html
@@ -173,6 +174,10 @@ def test_app_js_has_webgl_blit_renderer_contract() -> None:
     assert "return webglRenderer ?? createCanvas2dIsochroneRenderer(canvas);" in app_js
     assert "function getOrCreateIsochroneRenderer(canvas)" in app_js
     assert "canvas.__isochroneRenderer = renderer;" in app_js
+    assert "export function formatRenderBackendBadgeText(" in app_js
+    assert "return 'Renderer: WebGL';" in app_js
+    assert "return 'Renderer: CPU';" in app_js
+    assert "function updateRenderBackendBadge(shell, renderer)" in app_js
     assert "const renderer = getOrCreateIsochroneRenderer(canvas);" in app_js
     assert "renderer.draw(pixelGrid);" in app_js
 
@@ -299,6 +304,7 @@ def test_app_js_has_routing_status_text_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
     assert "getElementById('routing-status')" in app_js
+    assert "getElementById('render-backend-badge')" in app_js
     assert "getElementById('map-region')" in app_js
     assert "getElementById('canvas-stack')" in app_js
     assert "export function formatRoutingStatusCalculating(" in app_js
@@ -414,6 +420,7 @@ def test_app_js_has_legend_and_scale_bar_contract() -> None:
     assert "export function updateDistanceScaleBar(" in app_js
     assert "const metresPerCssPixel =" in app_js
     assert "renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));" in app_js
+    assert "updateRenderBackendBadge(shell, renderer);" in app_js
     assert "updateDistanceScaleBar(shell, graph.header);" in app_js
 
 
@@ -563,6 +570,7 @@ def test_styles_prevent_zero_height_map_region() -> None:
     assert "#loading.is-fading" in styles_css
     assert "#loading[hidden]" in styles_css
     assert "#routing-status" in styles_css
+    assert "#render-backend-badge" in styles_css
     assert ".mode-select" in styles_css
     assert "#mode-select" in styles_css
     assert "#distance-scale" in styles_css
