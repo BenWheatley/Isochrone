@@ -594,11 +594,25 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     throw new Error('mapData.graph is required');
   }
 
+  const dragDebounceMs = options.dragDebounceMs ?? 60;
+  const nowImpl = options.nowImpl ?? defaultNowMs;
+  if (!Number.isFinite(dragDebounceMs) || dragDebounceMs < 0) {
+    throw new Error('options.dragDebounceMs must be a non-negative finite number');
+  }
+  if (typeof nowImpl !== 'function') {
+    throw new Error('options.nowImpl must be a function when provided');
+  }
+  const normalizedDragDebounceMs = Math.round(dragDebounceMs);
+
   let activeRunToken = null;
   let isDisposed = false;
   let isPointerDown = false;
+  let dragDebounceTimerId = null;
+  let pendingDebouncePoint = null;
   let queuedDragPoint = null;
   let dragRunInFlight = false;
+  let lastPointerInteractionPoint = null;
+  let lastDragRunRequestMs = Number.NEGATIVE_INFINITY;
 
   const runFromNodeIndex = async (nodeIndex, modeMask = null) => {
     if (isDisposed) {
@@ -688,15 +702,75 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     }
   };
 
-  const queueRunFromCanvasPixel = (xPx, yPx) => {
+  const pointsMatch = (point, xPx, yPx) => {
+    return point !== null && point.xPx === xPx && point.yPx === yPx;
+  };
+
+  const queueRunFromCanvasPixel = (xPx, yPx, queueOptions = {}) => {
     if (isDisposed) {
       return;
     }
-    if (queuedDragPoint !== null && queuedDragPoint.xPx === xPx && queuedDragPoint.yPx === yPx) {
+    if (pointsMatch(queuedDragPoint, xPx, yPx)) {
       return;
+    }
+    if (queueOptions.cancelInFlight === true && activeRunToken !== null) {
+      activeRunToken.cancelled = true;
     }
     queuedDragPoint = { xPx, yPx };
     void drainQueuedRuns();
+  };
+
+  const clearDragDebounceTimer = () => {
+    if (dragDebounceTimerId !== null) {
+      clearTimeout(dragDebounceTimerId);
+      dragDebounceTimerId = null;
+    }
+  };
+
+  const flushPendingDebouncedDragRun = () => {
+    if (pendingDebouncePoint === null) {
+      return;
+    }
+    const { xPx, yPx } = pendingDebouncePoint;
+    pendingDebouncePoint = null;
+    lastDragRunRequestMs = nowImpl();
+    queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true });
+  };
+
+  const scheduleDebouncedDragRun = (xPx, yPx) => {
+    if (isDisposed) {
+      return;
+    }
+    if (pointsMatch(pendingDebouncePoint, xPx, yPx)) {
+      return;
+    }
+
+    pendingDebouncePoint = { xPx, yPx };
+    if (normalizedDragDebounceMs <= 0) {
+      clearDragDebounceTimer();
+      flushPendingDebouncedDragRun();
+      return;
+    }
+
+    const elapsedSinceLastRequestMs = nowImpl() - lastDragRunRequestMs;
+    if (
+      !Number.isFinite(elapsedSinceLastRequestMs)
+      || elapsedSinceLastRequestMs >= normalizedDragDebounceMs
+    ) {
+      clearDragDebounceTimer();
+      flushPendingDebouncedDragRun();
+      return;
+    }
+
+    if (dragDebounceTimerId !== null) {
+      return;
+    }
+
+    const remainingDebounceMs = Math.max(0, normalizedDragDebounceMs - elapsedSinceLastRequestMs);
+    dragDebounceTimerId = setTimeout(() => {
+      dragDebounceTimerId = null;
+      flushPendingDebouncedDragRun();
+    }, remainingDebounceMs);
   };
 
   const releasePointerCaptureIfHeld = (event) => {
@@ -733,12 +807,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     ) {
       shell.isochroneCanvas.setPointerCapture(event.pointerId);
     }
-    const { xPx, yPx } = mapClientPointToCanvasPixel(
-      shell.isochroneCanvas,
-      event.clientX,
-      event.clientY,
-    );
-    queueRunFromCanvasPixel(xPx, yPx);
+    clearDragDebounceTimer();
+    pendingDebouncePoint = null;
+    lastPointerInteractionPoint = null;
   };
 
   const handlePointerMove = (event) => {
@@ -755,7 +826,11 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
       event.clientX,
       event.clientY,
     );
-    queueRunFromCanvasPixel(xPx, yPx);
+    if (pointsMatch(lastPointerInteractionPoint, xPx, yPx)) {
+      return;
+    }
+    lastPointerInteractionPoint = { xPx, yPx };
+    scheduleDebouncedDragRun(xPx, yPx);
   };
 
   const handlePointerUp = (event) => {
@@ -770,13 +845,23 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
       event.clientX,
       event.clientY,
     );
-    queueRunFromCanvasPixel(xPx, yPx);
+    const hadPendingDebouncedPoint = pendingDebouncePoint !== null;
+    const wasSameAsLastMove = pointsMatch(lastPointerInteractionPoint, xPx, yPx);
+    clearDragDebounceTimer();
+    pendingDebouncePoint = null;
+    if (hadPendingDebouncedPoint || !wasSameAsLastMove) {
+      queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true });
+    }
     isPointerDown = false;
+    lastPointerInteractionPoint = null;
     releasePointerCaptureIfHeld(event);
   };
 
   const handlePointerCancel = (event) => {
     isPointerDown = false;
+    clearDragDebounceTimer();
+    pendingDebouncePoint = null;
+    lastPointerInteractionPoint = null;
     releasePointerCaptureIfHeld(event);
   };
 
@@ -795,9 +880,12 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
       activeRunToken.cancelled = true;
       activeRunToken = null;
     }
+    clearDragDebounceTimer();
     isPointerDown = false;
+    pendingDebouncePoint = null;
     queuedDragPoint = null;
     dragRunInFlight = false;
+    lastPointerInteractionPoint = null;
 
     shell.isochroneCanvas.removeEventListener('pointerdown', handlePointerDown);
     shell.isochroneCanvas.removeEventListener('pointermove', handlePointerMove);

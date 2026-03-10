@@ -465,14 +465,22 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
     assert "export function bindCanvasClickRouting(" in app_js
+    assert "const dragDebounceMs = options.dragDebounceMs ?? 60;" in app_js
     assert "let isPointerDown = false;" in app_js
+    assert "let dragDebounceTimerId = null;" in app_js
+    assert "let pendingDebouncePoint = null;" in app_js
     assert "let queuedDragPoint = null;" in app_js
     assert "let dragRunInFlight = false;" in app_js
+    assert "const clearDragDebounceTimer = () => {" in app_js
+    assert "const flushPendingDebouncedDragRun = () => {" in app_js
+    assert "const scheduleDebouncedDragRun = (xPx, yPx) => {" in app_js
     assert "shell.isochroneCanvas.addEventListener('pointerdown', handlePointerDown);" in app_js
     assert "shell.isochroneCanvas.addEventListener('pointermove', handlePointerMove);" in app_js
     assert "shell.isochroneCanvas.addEventListener('pointerup', handlePointerUp);" in app_js
     assert "shell.isochroneCanvas.addEventListener('pointercancel', handlePointerCancel);" in app_js
-    assert "queueRunFromCanvasPixel(xPx, yPx);" in app_js
+    assert "scheduleDebouncedDragRun(xPx, yPx);" in app_js
+    assert "flushPendingDebouncedDragRun();" in app_js
+    assert "queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true });" in app_js
     assert "if (!isPointerDown) {" in app_js
     assert "if (activeRunToken !== null) {" in app_js
     assert "activeRunToken.cancelled = true;" in app_js
