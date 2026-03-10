@@ -216,7 +216,7 @@ def test_app_js_has_gpu_travel_time_colourization_contract() -> None:
         "const supportsGpuEdgeInterpolation = typeof renderer.drawTravelTimeEdges === 'function';"
     ) in app_js
     assert "renderer.drawTravelTimeEdges(batchEdgeVertices," in app_js
-    assert "renderer.drawTravelTimeEdges(allEdgeVertices," in app_js
+    assert "paintedNodeCount = countFiniteTravelTimes(searchState.distSeconds);" in app_js
     assert "readPixelsRgba(samplePixels)" in app_js
     assert "export function runGpuCpuParityDiagnostic(" in app_js
     assert "const paritySampleCount = options.gpuParitySampleCount ?? 0;" in app_js
@@ -297,11 +297,20 @@ def test_app_js_has_time_sliced_search_contract() -> None:
     assert "export async function runSearchTimeSliced(" in app_js
     assert "const sliceBudgetMs = options.sliceBudgetMs ?? 8;" in app_js
     assert "const isCancelled = options.isCancelled ?? (() => false);" in app_js
+    assert "const onExpandOneTimingMs = options.onExpandOneTimingMs ?? null;" in app_js
+    assert (
+        "const onAnimationFrameWaitTimingMs = options.onAnimationFrameWaitTimingMs ?? null;"
+        in app_js
+    )
     assert "const requestAnimationFrameImpl = options.requestAnimationFrameImpl" in app_js
     assert "while (!isDone(searchState))" in app_js
     assert "if (isCancelled()) {" in app_js
     assert "while (elapsedMs < sliceBudgetMs && !isDone(searchState))" in app_js
     assert "onSlice(settledBatch);" in app_js
+    assert "const expandStartMs = onExpandOneTimingMs ? nowImpl() : 0;" in app_js
+    assert "onExpandOneTimingMs(Math.max(0, nowImpl() - expandStartMs));" in app_js
+    assert "const waitStartMs = onAnimationFrameWaitTimingMs ? nowImpl() : 0;" in app_js
+    assert "onAnimationFrameWaitTimingMs(Math.max(0, nowImpl() - waitStartMs));" in app_js
     assert "await waitForAnimationFrame(requestAnimationFrameImpl);" in app_js
     assert "export async function runSearchTimeSlicedWithRendering(" in app_js
     assert "const statusUpdateIntervalMs = options.statusUpdateIntervalMs ?? 120;" in app_js
@@ -315,6 +324,15 @@ def test_app_js_has_time_sliced_search_contract() -> None:
     assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
     assert "const routingProfileEnabled = isRoutingProfilingEnabled(options.profile);" in app_js
     assert "const profileMs = (field, callback) => {" in app_js
+    assert "searchExpandMs: 0," in app_js
+    assert "searchFrameWaitMs: 0," in app_js
+    assert "onExpandOneTimingMs:" in app_js
+    assert "onAnimationFrameWaitTimingMs:" in app_js
+    assert "routingProfileEnabled || typeof onExpandOneTimingExternal === 'function'" in app_js
+    assert (
+        "routingProfileEnabled || typeof onAnimationFrameWaitTimingExternal === 'function'"
+        in app_js
+    )
     assert "console.info('Routing profile', buildRoutingProfileSummary(" in app_js
     assert app_js.count("renderer.clear({") >= 2
     assert (

@@ -3707,6 +3707,8 @@ export async function runSearchTimeSliced(searchState, options = {}) {
   const sliceBudgetMs = options.sliceBudgetMs ?? 8;
   const onSlice = options.onSlice ?? (() => {});
   const isCancelled = options.isCancelled ?? (() => false);
+  const onExpandOneTimingMs = options.onExpandOneTimingMs ?? null;
+  const onAnimationFrameWaitTimingMs = options.onAnimationFrameWaitTimingMs ?? null;
   const nowImpl = options.nowImpl ?? defaultNowMs;
   const requestAnimationFrameImpl = options.requestAnimationFrameImpl ?? globalThis.requestAnimationFrame;
 
@@ -3718,6 +3720,12 @@ export async function runSearchTimeSliced(searchState, options = {}) {
   }
   if (typeof isCancelled !== 'function') {
     throw new Error('isCancelled must be a function');
+  }
+  if (onExpandOneTimingMs !== null && typeof onExpandOneTimingMs !== 'function') {
+    throw new Error('onExpandOneTimingMs must be a function when provided');
+  }
+  if (onAnimationFrameWaitTimingMs !== null && typeof onAnimationFrameWaitTimingMs !== 'function') {
+    throw new Error('onAnimationFrameWaitTimingMs must be a function when provided');
   }
   if (typeof nowImpl !== 'function') {
     throw new Error('nowImpl must be a function');
@@ -3743,7 +3751,11 @@ export async function runSearchTimeSliced(searchState, options = {}) {
         break;
       }
 
+      const expandStartMs = onExpandOneTimingMs ? nowImpl() : 0;
       const settledNodeIndex = searchState.expandOne();
+      if (onExpandOneTimingMs) {
+        onExpandOneTimingMs(Math.max(0, nowImpl() - expandStartMs));
+      }
       if (Number.isInteger(settledNodeIndex) && settledNodeIndex >= 0) {
         settledBatch.push(settledNodeIndex);
         totalSettledCount += 1;
@@ -3760,7 +3772,11 @@ export async function runSearchTimeSliced(searchState, options = {}) {
     sliceCount += 1;
 
     if (!isDone(searchState)) {
+      const waitStartMs = onAnimationFrameWaitTimingMs ? nowImpl() : 0;
       await waitForAnimationFrame(requestAnimationFrameImpl);
+      if (onAnimationFrameWaitTimingMs) {
+        onAnimationFrameWaitTimingMs(Math.max(0, nowImpl() - waitStartMs));
+      }
     }
   }
 
@@ -3802,6 +3818,8 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   const finalEdgeStepStride = options.finalEdgeStepStride ?? FINAL_EDGE_INTERPOLATION_STEP_STRIDE;
   const paritySampleCount = options.gpuParitySampleCount ?? 0;
   const onSliceExternal = options.onSlice;
+  const onExpandOneTimingExternal = options.onExpandOneTimingMs ?? null;
+  const onAnimationFrameWaitTimingExternal = options.onAnimationFrameWaitTimingMs ?? null;
   const edgeVertexBuilder = createEdgeVertexBufferBuilder();
   let paintedNodeCount = 0;
   let paintedEdgeCount = 0;
@@ -3815,11 +3833,22 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   if (typeof skipFinalFullPass !== 'boolean') {
     throw new Error('skipFinalFullPass must be a boolean');
   }
+  if (onExpandOneTimingExternal !== null && typeof onExpandOneTimingExternal !== 'function') {
+    throw new Error('options.onExpandOneTimingMs must be a function when provided');
+  }
+  if (
+    onAnimationFrameWaitTimingExternal !== null
+    && typeof onAnimationFrameWaitTimingExternal !== 'function'
+  ) {
+    throw new Error('options.onAnimationFrameWaitTimingMs must be a function when provided');
+  }
   const normalizedStatusUpdateIntervalMs = Math.round(statusUpdateIntervalMs);
   const routingProfileEnabled = isRoutingProfilingEnabled(options.profile);
   const routingProfile = routingProfileEnabled
     ? {
         initialPassMs: 0,
+        searchExpandMs: 0,
+        searchFrameWaitMs: 0,
         onSliceCollectMs: 0,
         onSlicePaintMs: 0,
         onSliceDrawMs: 0,
@@ -3864,6 +3893,28 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
 
   const runSummary = await runSearchTimeSliced(searchState, {
     ...options,
+    onExpandOneTimingMs:
+      routingProfileEnabled || typeof onExpandOneTimingExternal === 'function'
+        ? (elapsedMs) => {
+            if (routingProfileEnabled) {
+              routingProfile.searchExpandMs += elapsedMs;
+            }
+            if (typeof onExpandOneTimingExternal === 'function') {
+              onExpandOneTimingExternal(elapsedMs);
+            }
+          }
+        : onExpandOneTimingExternal,
+    onAnimationFrameWaitTimingMs:
+      routingProfileEnabled || typeof onAnimationFrameWaitTimingExternal === 'function'
+        ? (elapsedMs) => {
+            if (routingProfileEnabled) {
+              routingProfile.searchFrameWaitMs += elapsedMs;
+            }
+            if (typeof onAnimationFrameWaitTimingExternal === 'function') {
+              onAnimationFrameWaitTimingExternal(elapsedMs);
+            }
+          }
+        : onAnimationFrameWaitTimingExternal,
     onSlice(settledBatch) {
       settledNodeCount += settledBatch.length;
       if (supportsGpuEdgeInterpolation) {
@@ -3966,32 +4017,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   if (!runSummary.cancelled) {
     if (!skipFinalFullPass) {
       if (supportsGpuEdgeInterpolation) {
-        profileMs('finalDrawMs', () => {
-          renderer.clear({
-            widthPx: searchState.graph.header.gridWidthPx,
-            heightPx: searchState.graph.header.gridHeightPx,
-          });
-        });
-        const allEdgeVertices = profileMs('finalCollectMs', () =>
-          collectAllReachableTravelTimeEdgeVertices(
-            searchState.graph,
-            mapData.nodePixels,
-            searchState.distSeconds,
-            allowedModeMask,
-            {
-              builder: edgeVertexBuilder,
-              edgeTraversalCostSeconds,
-            },
-          ),
-        );
-        paintedEdgeCount = profileMs('finalDrawMs', () =>
-          renderer.drawTravelTimeEdges(allEdgeVertices, {
-            cycleMinutes: colourCycleMinutes,
-            append: false,
-            widthPx: searchState.graph.header.gridWidthPx,
-            heightPx: searchState.graph.header.gridHeightPx,
-          }),
-        );
+        // WebGL edge mode already rendered all settled edges incrementally during onSlice.
         paintedNodeCount = countFiniteTravelTimes(searchState.distSeconds);
       } else if (supportsGpuTravelTimeRendering) {
         profileMs('finalDrawMs', () => {
