@@ -214,6 +214,7 @@ body {
 #info-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 1rem;
   padding: 0.5rem 0.75rem;
   border-top: 1px solid #cad2da;
@@ -253,7 +254,20 @@ body {
   margin-left: auto;
   color: #5b6c79;
   font-size: 0.74rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.25;
+  white-space: normal;
+  text-align: right;
+  max-width: 52rem;
+}
+
+#routing-disclaimer a {
+  color: #2f6f9f;
+}
+
+@media (max-width: 960px) {
+  #routing-disclaimer {
+    margin-left: 0;
+    text-align: left;
+    max-width: none;
+  }
 }

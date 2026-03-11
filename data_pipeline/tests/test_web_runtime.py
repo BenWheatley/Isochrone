@@ -18,6 +18,9 @@ def test_index_html_uses_native_module_entrypoint() -> None:
     assert 'id="render-backend-badge"' in index_html
     assert 'id="routing-disclaimer"' in index_html
     assert "OSM data can include isolated disconnected route segments." in index_html
+    assert re.search(r"©\s*OpenStreetMap\s+contributors", index_html)
+    assert "Open Database License (ODbL)" in index_html
+    assert 'href="https://www.openstreetmap.org/copyright"' in index_html
     assert 'id="map-region"' in index_html
     assert 'id="canvas-stack"' in index_html
     assert 'id="mode-select"' in index_html
