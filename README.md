@@ -44,6 +44,7 @@ make review
 ## Agentic coding baseline
 This repo is configured for autonomous-agent workflows with:
 - single-command quality gates (`make check`)
+- JS static analysis (`ESLint`) for `web/src/app.js` included in `make lint`
 - explicit agent rules in `AGENTS.md`
-- CI for Python quality gates
+- CI for Python + JS quality gates
 - pre-commit hooks for fast local feedback

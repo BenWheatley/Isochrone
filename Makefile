@@ -5,15 +5,19 @@ PIP ?= $(PYTHON) -m pip
 RUFF ?= $(VENV_BIN)/ruff
 MYPY ?= $(VENV_BIN)/mypy
 PYTEST ?= $(VENV_BIN)/pytest
+NPM ?= npm
 PRE_COMMIT_HOME ?= .cache/pre-commit
 
-.PHONY: bootstrap bootstrap-python precommit-install format lint test review check build clean
+.PHONY: bootstrap bootstrap-python bootstrap-js precommit-install format lint lint-js test review check build clean
 
-bootstrap: bootstrap-python
+bootstrap: bootstrap-python bootstrap-js
 
 bootstrap-python:
 	python3 -m venv $(VENV_DIR)
 	$(PIP) install -e ".[dev]"
+
+bootstrap-js:
+	$(NPM) ci
 
 precommit-install:
 	PRE_COMMIT_HOME=$(PRE_COMMIT_HOME) $(VENV_BIN)/pre-commit install
@@ -21,10 +25,14 @@ precommit-install:
 format:
 	$(RUFF) format data_pipeline
 
+lint-js:
+	$(NPM) run --silent lint:js
+
 lint:
 	$(RUFF) check data_pipeline
 	$(RUFF) format --check data_pipeline
 	$(MYPY) data_pipeline/src
+	$(NPM) run --silent lint:js
 
 test:
 	$(PYTEST) -q

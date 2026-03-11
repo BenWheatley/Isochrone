@@ -51,6 +51,33 @@ def test_web_directory_has_no_node_toolchain_files() -> None:
     assert not (WEB_ROOT / "tests").exists()
 
 
+def test_repo_has_root_js_static_analysis_tooling_contract() -> None:
+    package_json = (REPO_ROOT / "package.json").read_text(encoding="utf-8")
+    eslint_config = (REPO_ROOT / "eslint.config.cjs").read_text(encoding="utf-8")
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    ci_workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert '"private": true' in package_json
+    assert '"scripts"' in package_json
+    assert '"lint:js"' in package_json
+    assert '"eslint"' in package_json
+    assert '"@eslint/js"' in package_json
+    assert '"globals"' in package_json
+    assert "const js = require('@eslint/js');" in eslint_config
+    assert "const globals = require('globals');" in eslint_config
+    assert "files: ['web/src/**/*.js']" in eslint_config
+    assert "sourceType: 'module'" in eslint_config
+    assert "globals: {" in eslint_config
+    assert "$(NPM) ci" in makefile
+    assert "$(NPM) run --silent lint:js" in makefile
+    assert "uses: actions/setup-node@v4" in ci_workflow
+    assert "npm ci" in ci_workflow
+    assert "npm run --silent lint:js" in ci_workflow
+    assert "make bootstrap" in readme
+    assert "make lint" in readme
+
+
 def test_app_js_has_zero_size_canvas_guard_and_binary_loader_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 

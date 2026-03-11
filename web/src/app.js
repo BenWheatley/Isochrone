@@ -7,7 +7,6 @@ const HEADER_SIZE = 64;
 const NODE_RECORD_SIZE = 16;
 const EDGE_RECORD_SIZE = 12;
 const BYTES_PER_MEBIBYTE = 1024 * 1024;
-const LOADING_FADE_MS = 180;
 const SUPPORTED_GRAPH_VERSIONS = new Set([2]);
 const EDGE_MODE_WALK_BIT = 1;
 const EDGE_MODE_BIKE_BIT = 1 << 1;
@@ -17,6 +16,7 @@ const BIKE_CRUISE_SPEED_KPH = 20;
 const CAR_FALLBACK_SPEED_KPH = 30;
 const ROAD_CLASS_MOTORWAY = 15;
 const DEFAULT_COLOUR_CYCLE_MINUTES = 60;
+const LOADING_FADE_MS = 180;
 const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;
 const INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE = 3;
 const FINAL_EDGE_INTERPOLATION_STEP_STRIDE = 1;
@@ -1968,7 +1968,7 @@ export async function initializeMapData(shell, options = {}) {
     );
     renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));
     updateDistanceScaleBar(shell, graph.header);
-    hideLoadingOverlay(shell);
+    fadeOutLoadingOverlay(shell);
 
     const nodePixels = precomputeNodePixelCoordinates(graph);
     const nodeModeMask = precomputeNodeModeMask(graph);
@@ -4419,15 +4419,6 @@ function fadeOutLoadingOverlay(shell) {
     shell.loadingOverlay.classList.remove('is-fading');
     shell.loadingFadeTimeoutId = null;
   }, LOADING_FADE_MS);
-}
-
-function hideLoadingOverlay(shell) {
-  if (shell.loadingFadeTimeoutId !== null) {
-    clearTimeout(shell.loadingFadeTimeoutId);
-    shell.loadingFadeTimeoutId = null;
-  }
-  shell.loadingOverlay.hidden = true;
-  shell.loadingOverlay.classList.remove('is-fading');
 }
 
 function setLoadingProgressBar(progressBar, progressPercent) {
