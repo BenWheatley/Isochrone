@@ -31,6 +31,7 @@ export function initializeAppShell(doc) {
   const renderBackendBadge = resolvedDocument.getElementById('render-backend-badge');
   const modeSelect = resolvedDocument.getElementById('mode-select');
   const colourCycleMinutesInput = resolvedDocument.getElementById('colour-cycle-minutes');
+  const exportSvgButton = resolvedDocument.getElementById('export-svg-button');
   const distanceScale = resolvedDocument.getElementById('distance-scale');
   const distanceScaleLine = resolvedDocument.getElementById('distance-scale-line');
   const distanceScaleLabel = resolvedDocument.getElementById('distance-scale-label');
@@ -69,6 +70,9 @@ export function initializeAppShell(doc) {
   if (!colourCycleMinutesInput || colourCycleMinutesInput.tagName !== 'INPUT') {
     throw new Error('index.html is missing <input id="colour-cycle-minutes">');
   }
+  if (!exportSvgButton || exportSvgButton.tagName !== 'BUTTON') {
+    throw new Error('index.html is missing <button id="export-svg-button">');
+  }
   if (!distanceScale || distanceScale.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="distance-scale">');
   }
@@ -93,6 +97,7 @@ export function initializeAppShell(doc) {
   setLoadingProgressBar(loadingProgressBar, 0);
   routingStatus.textContent = 'Ready.';
   renderBackendBadge.textContent = 'Renderer: Detecting...';
+  exportSvgButton.disabled = true;
   const locationSearch = globalThis.location?.search ?? '';
   const persistedModeValues = parseModeValuesFromLocationSearch(locationSearch);
   if (persistedModeValues !== null && persistedModeValues.length > 0) {
@@ -121,6 +126,7 @@ export function initializeAppShell(doc) {
     renderBackendBadge,
     modeSelect,
     colourCycleMinutesInput,
+    exportSvgButton,
     distanceScale,
     distanceScaleLine,
     distanceScaleLabel,

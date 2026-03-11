@@ -19,6 +19,7 @@ def test_web_entrypoint_uses_vanilla_module_and_required_shell_elements() -> Non
     assert 'id="routing-disclaimer"' in index_html
     assert 'id="mode-select"' in index_html
     assert 'id="colour-cycle-minutes"' in index_html
+    assert 'id="export-svg-button"' in index_html
     assert 'value="75"' in index_html
     assert 'id="isochrone-legend"' in index_html
     assert 'id="distance-scale"' in index_html

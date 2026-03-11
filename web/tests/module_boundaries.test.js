@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  bindSvgExportControl as appBindSvgExportControl,
+  buildRenderedIsochroneSvgDocument as appBuildRenderedIsochroneSvgDocument,
+  buildSvgExportFilename as appBuildSvgExportFilename,
+  exportCurrentRenderedIsochroneSvg as appExportCurrentRenderedIsochroneSvg,
   MinHeap as AppMinHeap,
   computeEdgeTraversalCostSeconds as appComputeEdgeTraversalCostSeconds,
   createWalkingSearchState as appCreateWalkingSearchState,
@@ -37,6 +41,12 @@ import {
   initializeAppShell,
 } from '../src/ui/orchestration.js';
 import { bindCanvasClickRouting } from '../src/interaction/canvas-routing.js';
+import {
+  bindSvgExportControl,
+  buildRenderedIsochroneSvgDocument,
+  buildSvgExportFilename,
+  exportCurrentRenderedIsochroneSvg,
+} from '../src/export/svg.js';
 import {
   CYCLE_COLOUR_MAP_GLSL,
   DEFAULT_COLOUR_CYCLE_MINUTES,
@@ -77,10 +87,18 @@ test('ui/input orchestration modules export expected entrypoints', async () => {
   assert.equal(typeof getAllowedModeMaskFromShell, 'function');
   assert.equal(typeof getColourCycleMinutesFromShell, 'function');
   assert.equal(typeof bindCanvasClickRouting, 'function');
+  assert.equal(typeof bindSvgExportControl, 'function');
+  assert.equal(typeof buildRenderedIsochroneSvgDocument, 'function');
+  assert.equal(typeof buildSvgExportFilename, 'function');
+  assert.equal(typeof exportCurrentRenderedIsochroneSvg, 'function');
 
   // Pure shell helpers are direct re-exports from app.js after split.
   assert.equal(app.initializeAppShell, initializeAppShell);
   assert.equal(app.getAllowedModeMaskFromShell, getAllowedModeMaskFromShell);
   assert.equal(app.getColourCycleMinutesFromShell, getColourCycleMinutesFromShell);
   assert.equal(typeof app.bindCanvasClickRouting, 'function');
+  assert.equal(appBindSvgExportControl, bindSvgExportControl);
+  assert.equal(appBuildRenderedIsochroneSvgDocument, buildRenderedIsochroneSvgDocument);
+  assert.equal(appBuildSvgExportFilename, buildSvgExportFilename);
+  assert.equal(appExportCurrentRenderedIsochroneSvg, exportCurrentRenderedIsochroneSvg);
 });

@@ -35,6 +35,10 @@ import {
 } from './ui/orchestration.js';
 import { bindCanvasClickRouting as bindCanvasClickRoutingInternal } from './interaction/canvas-routing.js';
 import {
+  bindSvgExportControl,
+  exportCurrentRenderedIsochroneSvg,
+} from './export/svg.js';
+import {
   CYCLE_COLOUR_MAP_GLSL,
   DEFAULT_COLOUR_CYCLE_MINUTES,
   timeToColour,
@@ -63,6 +67,12 @@ export {
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
 } from './ui/orchestration.js';
+export {
+  bindSvgExportControl,
+  buildRenderedIsochroneSvgDocument,
+  buildSvgExportFilename,
+  exportCurrentRenderedIsochroneSvg,
+} from './export/svg.js';
 export { timeToColour } from './render/colour.js';
 export function precomputeNodeModeMask(graph) {
   validateGraphForRouting(graph);
@@ -814,6 +824,9 @@ export async function initializeMapData(shell, options = {}) {
     );
     renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));
     updateDistanceScaleBar(shell, graph.header);
+    if (shell.exportSvgButton) {
+      shell.exportSvgButton.disabled = false;
+    }
     fadeOutLoadingOverlay(shell);
 
     const nodePixels = precomputeNodePixelCoordinates(graph);
@@ -835,6 +848,9 @@ export async function initializeMapData(shell, options = {}) {
       travelTimeGrid,
     };
   } catch (error) {
+    if (shell.exportSvgButton) {
+      shell.exportSvgButton.disabled = true;
+    }
     showLoadingOverlay(shell, 'Initialization failed.', 0);
     throw error;
   }
@@ -3455,6 +3471,7 @@ function isClosedPath(path) {
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
     const shell = initializeAppShell(globalThis.document);
+    bindSvgExportControl(shell, { exportCurrentRenderedIsochroneSvg });
     let routingBinding = null;
     bindModeSelectControl(shell, {
       requestIsochroneRedraw() {

@@ -46,6 +46,25 @@ body {
   min-width: 7.5rem;
 }
 
+.app-header button {
+  border: 1px solid #9eb0bf;
+  background: #f9fcff;
+  color: #16344a;
+  border-radius: 0.35rem;
+  padding: 0.34rem 0.6rem;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.app-header button:hover:enabled {
+  background: #edf6ff;
+}
+
+.app-header button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 #colour-cycle-minutes {
   min-width: 5rem;
 }
