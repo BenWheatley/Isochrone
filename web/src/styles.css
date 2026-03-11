@@ -139,6 +139,12 @@ body {
   flex: 0 0 auto;
 }
 
+.legend-note {
+  color: #c0d4e8;
+  font-size: 0.68rem;
+  line-height: 1.3;
+}
+
 #distance-scale {
   position: absolute;
   left: 0.75rem;

@@ -811,10 +811,12 @@ Tasks
 Estimated time: 45 min
 
 Tasks
-- [ ] Update the legend so the final default band is explicitly shown as `45m-60m`, not `45m+`
-- [ ] Make cycle behavior explicit in UI copy (for example: "colours repeat every N minutes")
-- [ ] When the cycle duration changes, recompute and display all band endpoints so each range remains explicit within one cycle
-- [ ] Review and document the UX impact of uneven band widths (0-5, 5-15, 15-30, 30-45, 45-60) during looping and decide whether to keep or replace with even segmentation
+- [x] Update the legend so the final default band is explicitly shown as `45m-60m`, not `45m+`
+- [x] Make cycle behavior explicit in UI copy (for example: "colours repeat every N minutes")
+- [x] When the cycle duration changes, recompute and display all band endpoints so each range remains explicit within one cycle
+- [x] Review and document the UX impact of uneven band widths (0-5, 5-15, 15-30, 30-45, 45-60) during looping and decide whether to keep or replace with even segmentation
+
+Decision note: keep uneven segmentation for now because shorter-time bins near the origin improve visual discrimination of nearby accessibility differences; this is now stated in the legend copy.
 
 ## 12.2 Add theme support
 Estimated time: 1 hour

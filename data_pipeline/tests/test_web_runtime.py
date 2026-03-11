@@ -513,6 +513,15 @@ def test_app_js_has_legend_and_scale_bar_contract() -> None:
     assert "export function getColourCycleMinutesFromShell(" in app_js
     assert "const rawCycleValue = shell.colourCycleMinutesInput?.value;" in app_js
     assert "export function renderIsochroneLegend(" in app_js
+    assert "const boundaries = [0, 5 / 60, 15 / 60, 30 / 60, 45 / 60, 1];" in app_js
+    assert (
+        "const rangeLabel = "
+        "`"
+        "${formatLegendDuration(rangeStartMinutes)}-${formatLegendDuration(rangeEndMinutes)}"
+        "`;"
+    ) in app_js
+    assert "Colours repeat every" in app_js
+    assert "Bands are uneven by design" in app_js
     assert "export function renderIsochroneLegendIfNeeded(" in app_js
     assert "shell.lastRenderedLegendCycleMinutes = cycleMinutes;" in app_js
     assert "export function updateDistanceScaleBar(" in app_js
@@ -668,3 +677,4 @@ def test_styles_prevent_zero_height_map_region() -> None:
     assert "#mode-select" in styles_css
     assert "#distance-scale" in styles_css
     assert "#isochrone-legend" in styles_css
+    assert ".legend-note" in styles_css

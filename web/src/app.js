@@ -2096,15 +2096,18 @@ export function renderIsochroneLegend(shell, cycleMinutes) {
     const colour = colours[index];
     const rangeStartMinutes = boundaries[index] * cycleMinutes;
     const rangeEndMinutes = boundaries[index + 1] * cycleMinutes;
-    const rangeLabel =
-      index === colours.length - 1
-        ? `${formatLegendDuration(rangeStartMinutes)}+`
-        : `${formatLegendDuration(rangeStartMinutes)}-${formatLegendDuration(rangeEndMinutes)}`;
+    const rangeLabel = `${formatLegendDuration(rangeStartMinutes)}-${formatLegendDuration(rangeEndMinutes)}`;
 
     legendRows.push(
       `<div class="legend-row"><span class="legend-swatch" style="background: rgb(${colour[0]}, ${colour[1]}, ${colour[2]});"></span><span>${rangeLabel}</span></div>`,
     );
   }
+  legendRows.push(
+    `<div class="legend-note">Colours repeat every ${formatLegendDuration(cycleMinutes)}.</div>`,
+  );
+  legendRows.push(
+    '<div class="legend-note">Bands are uneven by design to emphasize short-trip differences.</div>',
+  );
 
   shell.isochroneLegend.innerHTML = legendRows.join('');
 }
