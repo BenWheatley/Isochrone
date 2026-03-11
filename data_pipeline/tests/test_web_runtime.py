@@ -401,6 +401,7 @@ def test_app_js_has_min_heap_contract() -> None:
     assert "this.positionLookup = new Int32Array(" in app_js
     assert "push(nodeIndex, cost)" in app_js
     assert "pop()" in app_js
+    assert "popInto(outEntry)" in app_js
     assert "decreaseKey(nodeIndex, newCost)" in app_js
     assert "runMinHeapSelfTest" in app_js
     assert "for (let i = 0; i < 1000; i += 1)" in app_js
@@ -414,10 +415,14 @@ def test_app_js_has_walking_dijkstra_contract() -> None:
     assert "distSeconds.fill(Infinity);" in app_js
     assert "const settled = new Uint8Array(graph.header.nNodes);" in app_js
     assert "heap.push(sourceNodeIndex, 0);" in app_js
+    assert "const heapPopEntry = { nodeIndex: -1, cost: 0 };" in app_js
+    assert "if (!heap.popInto(heapPopEntry)) {" in app_js
     assert "if (Number.isFinite(timeLimitSeconds) && cost > timeLimitSeconds)" in app_js
     assert "if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0)" in app_js
     assert "const edgeTraversalCostSeconds = getOrCreateEdgeTraversalCostSecondsCache(" in app_js
-    assert "const edgeCostSeconds = getEdgeTraversalCostSeconds(" in app_js
+    assert "let edgeCostSeconds = edgeTraversalCostSeconds[edgeIndex];" in app_js
+    assert "if (Number.isNaN(edgeCostSeconds)) {" in app_js
+    assert "edgeTraversalCostSeconds[edgeIndex] = edgeCostSeconds;" in app_js
     assert "if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0)" in app_js
     assert "if (nextCost < distSeconds[targetIndex])" in app_js
     assert "heap.decreaseKey(targetIndex, nextCost);" in app_js

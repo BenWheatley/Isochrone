@@ -65,8 +65,19 @@ export class MinHeap {
   }
 
   pop() {
-    if (this.count === 0) {
+    const entry = { nodeIndex: -1, cost: 0 };
+    if (!this.popInto(entry)) {
       return null;
+    }
+    return entry;
+  }
+
+  popInto(outEntry) {
+    if (!outEntry || typeof outEntry !== 'object') {
+      throw new Error('outEntry must be an object');
+    }
+    if (this.count === 0) {
+      return false;
     }
 
     const rootNodeIndex = this.nodeIndices[0];
@@ -85,10 +96,9 @@ export class MinHeap {
       this._bubbleDown(0);
     }
 
-    return {
-      nodeIndex: rootNodeIndex,
-      cost: rootCost,
-    };
+    outEntry.nodeIndex = rootNodeIndex;
+    outEntry.cost = rootCost;
+    return true;
   }
 
   decreaseKey(nodeIndex, newCost) {
@@ -264,6 +274,7 @@ export function createWalkingSearchState(
 
   let done = false;
   let settledCount = 0;
+  const heapPopEntry = { nodeIndex: -1, cost: 0 };
 
   return {
     graph,
@@ -289,14 +300,13 @@ export function createWalkingSearchState(
       }
 
       while (!heap.isEmpty()) {
-        const entry = heap.pop();
-        if (!entry) {
+        if (!heap.popInto(heapPopEntry)) {
           done = true;
           return -1;
         }
 
-        const nodeIndex = entry.nodeIndex;
-        const cost = entry.cost;
+        const nodeIndex = heapPopEntry.nodeIndex;
+        const cost = heapPopEntry.cost;
 
         if (Number.isFinite(timeLimitSeconds) && cost > timeLimitSeconds) {
           done = true;
@@ -318,12 +328,11 @@ export function createWalkingSearchState(
             continue;
           }
           const targetIndex = graph.edgeU32[edgeIndex * 3];
-          const edgeCostSeconds = getEdgeTraversalCostSeconds(
-            graph,
-            edgeIndex,
-            allowedModeMask,
-            edgeTraversalCostSeconds,
-          );
+          let edgeCostSeconds = edgeTraversalCostSeconds[edgeIndex];
+          if (Number.isNaN(edgeCostSeconds)) {
+            edgeCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+            edgeTraversalCostSeconds[edgeIndex] = edgeCostSeconds;
+          }
           if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
             continue;
           }

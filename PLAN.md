@@ -683,6 +683,18 @@ Tasks
 
 ---
 
+## 10.5 Routing Hot-Path Performance Follow-Ups
+Estimated time: 2 hours 30 min
+
+Tasks
+- [x] Remove heap pop allocation in Dijkstra hot path by adding reusable-entry `MinHeap.popInto(...)` and switching `expandOne()` to reuse a single pop entry object
+- [x] Inline edge traversal cost cache access in `expandOne()` (`edgeTraversalCostSeconds[edgeIndex]`) with direct compute-on-NaN fallback to avoid per-edge helper call overhead
+- [ ] Hoist frequently-used graph TypedArray references and constants out of the innermost routing loop to reduce repeated property lookups
+- [ ] Evaluate replacing heap decrease-key with duplicate-push + stale-entry skip strategy and keep whichever wins in browser profiling for full-field runs
+- [ ] Add a nearest-node spatial index for click seeding (mode-aware) to avoid worst-case full-node scans before routing begins
+
+---
+
 # Phase 11 — Post-MVP: GTFS Transit Integration
 
 *This phase is explicitly deferred from MVP. The binary format, routing stubs, and stop-attachment flags in the graph are designed to accept transit data without schema changes. The system is designed for any GTFS feed, for any region.*
