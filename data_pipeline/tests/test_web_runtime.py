@@ -317,6 +317,7 @@ def test_app_js_has_time_sliced_search_contract() -> None:
     assert "export async function runSearchTimeSlicedWithRendering(" in app_js
     assert "const statusUpdateIntervalMs = options.statusUpdateIntervalMs ?? 120;" in app_js
     assert "const skipFinalFullPass = options.skipFinalFullPass ?? false;" in app_js
+    assert "const incrementalRender = options.incrementalRender ?? false;" in app_js
     assert (
         "const fullPassFrameYieldIntervalSlices = options.fullPassFrameYieldIntervalSlices ?? 2;"
         in app_js
@@ -327,6 +328,7 @@ def test_app_js_has_time_sliced_search_contract() -> None:
     )
     assert "let lastStatusUpdateMs = routeStartMs;" in app_js
     assert "if (nowMs - lastStatusUpdateMs >= statusUpdateIntervalMs) {" in app_js
+    assert "if (incrementalRender) {" in app_js
     assert "paintedNodeCount = settledNodeCount;" in app_js
     assert "if (!skipFinalFullPass) {" in app_js
     assert "setRoutingStatus(shell, formatRoutingStatusPreview(routeElapsedMs));" in app_js
@@ -345,7 +347,7 @@ def test_app_js_has_time_sliced_search_contract() -> None:
         in app_js
     )
     assert "console.info('Routing profile', buildRoutingProfileSummary(" in app_js
-    assert app_js.count("renderer.clear({") >= 2
+    assert app_js.count("renderer.clear({") >= 1
     assert (
         "if (supportsGpuEdgeInterpolation) {\n"
         "    clearGrid(mapData.pixelGrid);\n"
@@ -588,49 +590,26 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
     assert "export function bindCanvasClickRouting(" in app_js
-    assert "const dragDebounceMs = options.dragDebounceMs ?? 60;" in app_js
+    assert "const incrementalRender = options.incrementalRender ?? false;" in app_js
     assert "let isPointerDown = false;" in app_js
-    assert "let dragDebounceTimerId = null;" in app_js
-    assert "let pendingDebouncePoint = null;" in app_js
-    assert "let queuedDragPoint = null;" in app_js
-    assert "let dragRunInFlight = false;" in app_js
-    assert "const clearDragDebounceTimer = () => {" in app_js
-    assert "const flushPendingDebouncedDragRun = () => {" in app_js
-    assert "const scheduleDebouncedDragRun = (xPx, yPx) => {" in app_js
-    assert "const queueFullPassAtClientPoint = (clientX, clientY) => {" in app_js
+    assert "const queueFinalRunAtClientPoint = (clientX, clientY) => {" in app_js
     assert "shell.isochroneCanvas.addEventListener('pointerdown', handlePointerDown);" in app_js
     assert "shell.isochroneCanvas.addEventListener('pointermove', handlePointerMove);" in app_js
     assert "shell.isochroneCanvas.addEventListener('pointerup', handlePointerUp);" in app_js
     assert "shell.isochroneCanvas.addEventListener('pointercancel', handlePointerCancel);" in app_js
-    assert "scheduleDebouncedDragRun(xPx, yPx);" in app_js
-    assert "flushPendingDebouncedDragRun();" in app_js
-    assert "skipFinalFullPass: true" in app_js
+    assert "incrementalRender," in app_js
     assert "skipFinalFullPass: false" in app_js
-    assert (
-        "queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true, skipFinalFullPass: true });"
-        in app_js
-    )
-    assert (
-        "queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true, skipFinalFullPass: false });"
-        in app_js
-    )
-    assert "nextPoint.skipFinalFullPass" in app_js
-    assert "pendingDebouncePoint === null" in app_js
-    assert "pointsMatch(lastPointerInteractionPoint, nextPoint.xPx, nextPoint.yPx)" in app_js
-    assert "queueRunFromCanvasPixel(nextPoint.xPx, nextPoint.yPx, {" in app_js
-    assert "queueFullPassAtClientPoint(event.clientX, event.clientY);" in app_js
-    assert "if (hadPendingDebouncedPoint || !wasSameAsLastMove) {" not in app_js
-    assert "if (!isPointerDown) {" in app_js
     assert "if (activeRunToken !== null) {" in app_js
+    assert "ignoredBusy: true" in app_js
+    assert "queueFinalRunAtClientPoint(event.clientX, event.clientY);" in app_js
+    assert "if (hadPendingDebouncedPoint || !wasSameAsLastMove) {" not in app_js
+    assert "scheduleDebouncedDragRun(" not in app_js
+    assert "dragDebounceMs" not in app_js
+    assert "if (!isPointerDown) {" in app_js
     assert "activeRunToken.cancelled = true;" in app_js
     assert "const runToken = { cancelled: false };" in app_js
-    assert "clearGrid(mapData.pixelGrid);" in app_js
-    assert "if (renderer.mode === 'webgl') {" in app_js
-    assert "highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);" in app_js
     assert "renderIsochroneLegendIfNeeded(shell, colourCycleMinutes);" in app_js
-    assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
     assert "findNearestNodeForCanvasPixel(mapData, xPx, yPx, { allowedModeMask });" in app_js
-    assert "highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);" in app_js
     assert "runWalkingIsochroneFromSourceNode(" in app_js
     assert "Number.POSITIVE_INFINITY" in app_js
     assert "const allowedModeMask = getAllowedModeMaskFromShell(shell);" in app_js

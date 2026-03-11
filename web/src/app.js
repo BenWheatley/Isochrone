@@ -1005,61 +1005,36 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     throw new Error('mapData.graph is required');
   }
 
-  const dragDebounceMs = options.dragDebounceMs ?? 60;
-  const nowImpl = options.nowImpl ?? defaultNowMs;
-  if (!Number.isFinite(dragDebounceMs) || dragDebounceMs < 0) {
-    throw new Error('options.dragDebounceMs must be a non-negative finite number');
+  const incrementalRender = options.incrementalRender ?? false;
+  if (typeof incrementalRender !== 'boolean') {
+    throw new Error('options.incrementalRender must be a boolean when provided');
   }
-  if (typeof nowImpl !== 'function') {
-    throw new Error('options.nowImpl must be a function when provided');
-  }
-  const normalizedDragDebounceMs = Math.round(dragDebounceMs);
 
   let activeRunToken = null;
   let isDisposed = false;
   let isPointerDown = false;
-  let dragDebounceTimerId = null;
-  let pendingDebouncePoint = null;
-  let queuedDragPoint = null;
-  let dragRunInFlight = false;
-  let lastPointerInteractionPoint = null;
-  let lastDragRunRequestMs = Number.NEGATIVE_INFINITY;
-  let activeRunNodeIndex = -1;
-  let activeRunModeMask = 0;
-  let activeRunSkipFinalFullPass = false;
-  let lastCompletedNodeIndex = -1;
-  let lastCompletedModeMask = 0;
-  let lastCompletedSkipFinalFullPass = false;
 
-  const runFromNodeIndex = async (nodeIndex, modeMask = null, runOptions = {}) => {
+  const runFromNodeIndex = async (nodeIndex, modeMask = null) => {
     if (isDisposed) {
       throw new Error('routing click handler is disposed');
     }
     if (!Number.isInteger(nodeIndex) || nodeIndex < 0 || nodeIndex >= mapData.graph.header.nNodes) {
       throw new Error(`nodeIndex out of range: ${nodeIndex}`);
     }
-
     if (activeRunToken !== null) {
-      activeRunToken.cancelled = true;
+      return {
+        nodeIndex,
+        cancelled: true,
+        ignoredBusy: true,
+        elapsedMs: 0,
+        paintedEdgeCount: 0,
+        paintedNodeCount: 0,
+      };
     }
 
     const runToken = { cancelled: false };
     activeRunToken = runToken;
-    activeRunNodeIndex = nodeIndex;
-    activeRunModeMask = modeMask ?? getAllowedModeMaskFromShell(shell);
-    activeRunSkipFinalFullPass = runOptions.skipFinalFullPass === true;
-
-    const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
-    if (renderer.mode === 'webgl') {
-      renderer.clear({
-        widthPx: mapData.graph.header.gridWidthPx,
-        heightPx: mapData.graph.header.gridHeightPx,
-      });
-    } else {
-      clearGrid(mapData.pixelGrid);
-      highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);
-    }
-    const allowedModeMask = activeRunModeMask;
+    const allowedModeMask = modeMask ?? getAllowedModeMaskFromShell(shell);
     const colourCycleMinutes = getColourCycleMinutesFromShell(shell);
     renderIsochroneLegendIfNeeded(shell, colourCycleMinutes);
 
@@ -1073,23 +1048,14 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
           ...options,
           allowedModeMask,
           colourCycleMinutes,
-          skipFinalFullPass: activeRunSkipFinalFullPass,
+          skipFinalFullPass: false,
+          incrementalRender,
           isCancelled: () => runToken.cancelled,
         },
       );
-
       if (activeRunToken === runToken) {
         activeRunToken = null;
-        activeRunNodeIndex = -1;
-        activeRunModeMask = 0;
-        activeRunSkipFinalFullPass = false;
       }
-      if (!runSummary.cancelled) {
-        lastCompletedNodeIndex = nodeIndex;
-        lastCompletedModeMask = allowedModeMask;
-        lastCompletedSkipFinalFullPass = runOptions.skipFinalFullPass === true;
-      }
-
       return {
         nodeIndex,
         ...runSummary,
@@ -1097,185 +1063,45 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     } catch (error) {
       if (activeRunToken === runToken) {
         activeRunToken = null;
-        activeRunNodeIndex = -1;
-        activeRunModeMask = 0;
-        activeRunSkipFinalFullPass = false;
       }
       throw error;
     }
   };
 
-  const runFromCanvasPixel = async (xPx, yPx, runOptions = {}) => {
+  const runFromCanvasPixel = async (xPx, yPx) => {
+    if (activeRunToken !== null) {
+      return {
+        xPx,
+        yPx,
+        cancelled: true,
+        ignoredBusy: true,
+        elapsedMs: 0,
+        paintedEdgeCount: 0,
+        paintedNodeCount: 0,
+      };
+    }
     const allowedModeMask = getAllowedModeMaskFromShell(shell);
     const nearest = findNearestNodeForCanvasPixel(mapData, xPx, yPx, { allowedModeMask });
-    const runSummary = await runFromNodeIndex(nearest.nodeIndex, allowedModeMask, runOptions);
-
+    const runSummary = await runFromNodeIndex(nearest.nodeIndex, allowedModeMask);
     return {
       ...nearest,
       ...runSummary,
     };
   };
 
-  const pointsMatch = (point, xPx, yPx) => {
-    return point !== null && point.xPx === xPx && point.yPx === yPx;
-  };
-
-  const drainQueuedRuns = async () => {
-    if (dragRunInFlight || isDisposed) {
+  const queueFinalRunAtClientPoint = (clientX, clientY) => {
+    if (isDisposed || activeRunToken !== null) {
       return;
     }
-    dragRunInFlight = true;
-
-    try {
-      while (queuedDragPoint !== null && !isDisposed) {
-        const nextPoint = queuedDragPoint;
-        queuedDragPoint = null;
-        try {
-          const runSummary = await runFromNodeIndex(nextPoint.nodeIndex, nextPoint.allowedModeMask, {
-            skipFinalFullPass: nextPoint.skipFinalFullPass,
-          });
-          if (
-            !isDisposed
-            && !runSummary.cancelled
-            && nextPoint.skipFinalFullPass
-            && isPointerDown
-            && pendingDebouncePoint === null
-            && queuedDragPoint === null
-            && pointsMatch(lastPointerInteractionPoint, nextPoint.xPx, nextPoint.yPx)
-          ) {
-            queueRunFromCanvasPixel(nextPoint.xPx, nextPoint.yPx, {
-              cancelInFlight: false,
-              skipFinalFullPass: false,
-            });
-          }
-        } catch (error) {
-          setRoutingStatus(shell, 'Routing failed.');
-          console.error(error);
-        }
-      }
-    } finally {
-      dragRunInFlight = false;
-      if (!isDisposed && queuedDragPoint !== null) {
-        void drainQueuedRuns();
-      }
-    }
-  };
-
-  const queueRunFromCanvasPixel = (xPx, yPx, queueOptions = {}) => {
-    if (isDisposed) {
-      return;
-    }
-    const allowedModeMask = getAllowedModeMaskFromShell(shell);
-    const nearest = findNearestNodeForCanvasPixel(mapData, xPx, yPx, { allowedModeMask });
-    if (
-      queuedDragPoint !== null
-      && queuedDragPoint.nodeIndex === nearest.nodeIndex
-      && queuedDragPoint.allowedModeMask === allowedModeMask
-      && queuedDragPoint.skipFinalFullPass === (queueOptions.skipFinalFullPass === true)
-    ) {
-      return;
-    }
-    if (
-      activeRunToken !== null
-      && activeRunNodeIndex === nearest.nodeIndex
-      && activeRunModeMask === allowedModeMask
-      && activeRunSkipFinalFullPass === (queueOptions.skipFinalFullPass === true)
-      && queueOptions.cancelInFlight !== true
-    ) {
-      return;
-    }
-    if (
-      activeRunToken === null
-      && lastCompletedNodeIndex === nearest.nodeIndex
-      && lastCompletedModeMask === allowedModeMask
-      && lastCompletedSkipFinalFullPass === (queueOptions.skipFinalFullPass === true)
-    ) {
-      return;
-    }
-    if (
-      queueOptions.cancelInFlight === true
-      && activeRunToken !== null
-      && (
-        activeRunNodeIndex !== nearest.nodeIndex
-        || activeRunModeMask !== allowedModeMask
-        || activeRunSkipFinalFullPass !== (queueOptions.skipFinalFullPass === true)
-      )
-    ) {
-      activeRunToken.cancelled = true;
-    }
-    queuedDragPoint = {
-      xPx,
-      yPx,
-      nodeIndex: nearest.nodeIndex,
-      allowedModeMask,
-      skipFinalFullPass: queueOptions.skipFinalFullPass === true,
-    };
-    void drainQueuedRuns();
-  };
-
-  const clearDragDebounceTimer = () => {
-    if (dragDebounceTimerId !== null) {
-      clearTimeout(dragDebounceTimerId);
-      dragDebounceTimerId = null;
-    }
-  };
-
-  const flushPendingDebouncedDragRun = () => {
-    if (pendingDebouncePoint === null) {
-      return;
-    }
-    const { xPx, yPx } = pendingDebouncePoint;
-    pendingDebouncePoint = null;
-    lastDragRunRequestMs = nowImpl();
-    queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true, skipFinalFullPass: true });
-  };
-
-  const scheduleDebouncedDragRun = (xPx, yPx) => {
-    if (isDisposed) {
-      return;
-    }
-    if (pointsMatch(pendingDebouncePoint, xPx, yPx)) {
-      return;
-    }
-
-    pendingDebouncePoint = { xPx, yPx };
-    if (normalizedDragDebounceMs <= 0) {
-      clearDragDebounceTimer();
-      flushPendingDebouncedDragRun();
-      return;
-    }
-
-    const elapsedSinceLastRequestMs = nowImpl() - lastDragRunRequestMs;
-    if (
-      !Number.isFinite(elapsedSinceLastRequestMs)
-      || elapsedSinceLastRequestMs >= normalizedDragDebounceMs
-    ) {
-      clearDragDebounceTimer();
-      flushPendingDebouncedDragRun();
-      return;
-    }
-
-    if (dragDebounceTimerId !== null) {
-      return;
-    }
-
-    const remainingDebounceMs = Math.max(0, normalizedDragDebounceMs - elapsedSinceLastRequestMs);
-    dragDebounceTimerId = setTimeout(() => {
-      dragDebounceTimerId = null;
-      flushPendingDebouncedDragRun();
-    }, remainingDebounceMs);
-  };
-
-  const queueFullPassAtClientPoint = (clientX, clientY) => {
     const { xPx, yPx } = mapClientPointToCanvasPixel(
       shell.isochroneCanvas,
       clientX,
       clientY,
     );
-    clearDragDebounceTimer();
-    pendingDebouncePoint = null;
-    queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true, skipFinalFullPass: false });
-    lastPointerInteractionPoint = null;
+    void runFromCanvasPixel(xPx, yPx).catch((error) => {
+      setRoutingStatus(shell, 'Routing failed.');
+      console.error(error);
+    });
   };
 
   const releasePointerCaptureIfHeld = (event) => {
@@ -1312,9 +1138,6 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     ) {
       shell.isochroneCanvas.setPointerCapture(event.pointerId);
     }
-    clearDragDebounceTimer();
-    pendingDebouncePoint = null;
-    lastPointerInteractionPoint = null;
   };
 
   const handlePointerMove = (event) => {
@@ -1322,21 +1145,10 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
       return;
     }
     if (Number.isInteger(event.buttons) && (event.buttons & 1) === 0) {
-      queueFullPassAtClientPoint(event.clientX, event.clientY);
+      queueFinalRunAtClientPoint(event.clientX, event.clientY);
       isPointerDown = false;
       releasePointerCaptureIfHeld(event);
-      return;
     }
-    const { xPx, yPx } = mapClientPointToCanvasPixel(
-      shell.isochroneCanvas,
-      event.clientX,
-      event.clientY,
-    );
-    if (pointsMatch(lastPointerInteractionPoint, xPx, yPx)) {
-      return;
-    }
-    lastPointerInteractionPoint = { xPx, yPx };
-    scheduleDebouncedDragRun(xPx, yPx);
   };
 
   const handlePointerUp = (event) => {
@@ -1346,16 +1158,13 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     if (!isPointerDown) {
       return;
     }
-    queueFullPassAtClientPoint(event.clientX, event.clientY);
+    queueFinalRunAtClientPoint(event.clientX, event.clientY);
     isPointerDown = false;
     releasePointerCaptureIfHeld(event);
   };
 
   const handlePointerCancel = (event) => {
     isPointerDown = false;
-    clearDragDebounceTimer();
-    pendingDebouncePoint = null;
-    lastPointerInteractionPoint = null;
     releasePointerCaptureIfHeld(event);
   };
 
@@ -1374,18 +1183,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
       activeRunToken.cancelled = true;
       activeRunToken = null;
     }
-    activeRunNodeIndex = -1;
-    activeRunModeMask = 0;
-    activeRunSkipFinalFullPass = false;
-    lastCompletedNodeIndex = -1;
-    lastCompletedModeMask = 0;
-    lastCompletedSkipFinalFullPass = false;
-    clearDragDebounceTimer();
     isPointerDown = false;
-    pendingDebouncePoint = null;
-    queuedDragPoint = null;
-    dragRunInFlight = false;
-    lastPointerInteractionPoint = null;
 
     shell.isochroneCanvas.removeEventListener('pointerdown', handlePointerDown);
     shell.isochroneCanvas.removeEventListener('pointermove', handlePointerMove);
@@ -3990,6 +3788,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   const nowImpl = options.nowImpl ?? defaultNowMs;
   const statusUpdateIntervalMs = options.statusUpdateIntervalMs ?? 120;
   const skipFinalFullPass = options.skipFinalFullPass ?? false;
+  const incrementalRender = options.incrementalRender ?? false;
   const fullPassFrameYieldIntervalSlices = options.fullPassFrameYieldIntervalSlices ?? 2;
   const normalizedFrameYieldIntervalSlices = skipFinalFullPass ? 1 : fullPassFrameYieldIntervalSlices;
   const interactiveEdgeStepStride =
@@ -4011,6 +3810,9 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   }
   if (typeof skipFinalFullPass !== 'boolean') {
     throw new Error('skipFinalFullPass must be a boolean');
+  }
+  if (typeof incrementalRender !== 'boolean') {
+    throw new Error('incrementalRender must be a boolean');
   }
   if (
     !Number.isInteger(fullPassFrameYieldIntervalSlices)
@@ -4056,19 +3858,21 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   };
 
   profileMs('initialPassMs', () => {
-    if (supportsGpuEdgeInterpolation) {
-      renderer.clear({
-        widthPx: searchState.graph.header.gridWidthPx,
-        heightPx: searchState.graph.header.gridHeightPx,
-      });
-    } else if (supportsGpuTravelTimeRendering) {
-      clearTravelTimeGrid(mapData.travelTimeGrid);
-      renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
-        cycleMinutes: getColourCycleMinutesFromShell(shell),
-      });
-    } else {
-      clearGrid(mapData.pixelGrid);
-      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+    if (incrementalRender) {
+      if (supportsGpuEdgeInterpolation) {
+        renderer.clear({
+          widthPx: searchState.graph.header.gridWidthPx,
+          heightPx: searchState.graph.header.gridHeightPx,
+        });
+      } else if (supportsGpuTravelTimeRendering) {
+        clearTravelTimeGrid(mapData.travelTimeGrid);
+        renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
+          cycleMinutes: getColourCycleMinutesFromShell(shell),
+        });
+      } else {
+        clearGrid(mapData.pixelGrid);
+        blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+      }
     }
   });
   setRoutingStatus(shell, formatRoutingStatusCalculating(0));
@@ -4103,84 +3907,86 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
         : onAnimationFrameWaitTimingExternal,
     onSlice(settledBatch) {
       settledNodeCount += settledBatch.length;
-      if (supportsGpuEdgeInterpolation) {
-        const batchEdgeVertices = profileMs('onSliceCollectMs', () =>
-          collectSettledBatchTravelTimeEdgeVertices(
-            searchState.graph,
-            mapData.nodePixels,
-            searchState.distSeconds,
-            settledBatch,
-            allowedModeMask,
-            {
-              builder: edgeVertexBuilder,
-              edgeTraversalCostSeconds,
-            },
-          ),
-        );
-        paintedEdgeCount += profileMs('onSliceDrawMs', () =>
-          renderer.drawTravelTimeEdges(batchEdgeVertices, {
-            cycleMinutes: colourCycleMinutes,
-            append: true,
-            widthPx: searchState.graph.header.gridWidthPx,
-            heightPx: searchState.graph.header.gridHeightPx,
-          }),
-        );
-        paintedNodeCount = settledNodeCount;
-      } else if (supportsGpuTravelTimeRendering) {
-        paintedEdgeCount += profileMs('onSlicePaintMs', () =>
-          paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
-            mapData.travelTimeGrid,
-            searchState.graph,
-            mapData.nodePixels,
-            searchState.distSeconds,
-            settledBatch,
-            allowedModeMask,
-            {
-              stepStride: interactiveEdgeStepStride,
-              edgeTraversalCostSeconds,
-            },
-          ),
-        );
-        paintedNodeCount += profileMs('onSlicePaintMs', () =>
-          paintSettledBatchTravelTimesToGrid(
-            mapData.travelTimeGrid,
-            mapData.nodePixels,
-            searchState.distSeconds,
-            settledBatch,
-          ),
-        );
-        profileMs('onSliceDrawMs', () =>
-          renderer.drawTravelTimeGrid(mapData.travelTimeGrid, { cycleMinutes: colourCycleMinutes }),
-        );
-      } else {
-        paintedEdgeCount += profileMs('onSlicePaintMs', () =>
-          paintSettledBatchEdgeInterpolationsToGrid(
-            mapData.pixelGrid,
-            searchState.graph,
-            mapData.nodePixels,
-            searchState.distSeconds,
-            settledBatch,
-            allowedModeMask,
-            {
-              alpha,
-              colourCycleMinutes,
-              stepStride: interactiveEdgeStepStride,
-              edgeTraversalCostSeconds,
-            },
-          ),
-        );
-        paintedNodeCount += profileMs('onSlicePaintMs', () =>
-          paintSettledBatchToGrid(
-            mapData.pixelGrid,
-            mapData.nodePixels,
-            searchState.distSeconds,
-            settledBatch,
-            { alpha, colourCycleMinutes },
-          ),
-        );
-        profileMs('onSliceDrawMs', () =>
-          blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid),
-        );
+      if (incrementalRender) {
+        if (supportsGpuEdgeInterpolation) {
+          const batchEdgeVertices = profileMs('onSliceCollectMs', () =>
+            collectSettledBatchTravelTimeEdgeVertices(
+              searchState.graph,
+              mapData.nodePixels,
+              searchState.distSeconds,
+              settledBatch,
+              allowedModeMask,
+              {
+                builder: edgeVertexBuilder,
+                edgeTraversalCostSeconds,
+              },
+            ),
+          );
+          paintedEdgeCount += profileMs('onSliceDrawMs', () =>
+            renderer.drawTravelTimeEdges(batchEdgeVertices, {
+              cycleMinutes: colourCycleMinutes,
+              append: true,
+              widthPx: searchState.graph.header.gridWidthPx,
+              heightPx: searchState.graph.header.gridHeightPx,
+            }),
+          );
+          paintedNodeCount = settledNodeCount;
+        } else if (supportsGpuTravelTimeRendering) {
+          paintedEdgeCount += profileMs('onSlicePaintMs', () =>
+            paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
+              mapData.travelTimeGrid,
+              searchState.graph,
+              mapData.nodePixels,
+              searchState.distSeconds,
+              settledBatch,
+              allowedModeMask,
+              {
+                stepStride: interactiveEdgeStepStride,
+                edgeTraversalCostSeconds,
+              },
+            ),
+          );
+          paintedNodeCount += profileMs('onSlicePaintMs', () =>
+            paintSettledBatchTravelTimesToGrid(
+              mapData.travelTimeGrid,
+              mapData.nodePixels,
+              searchState.distSeconds,
+              settledBatch,
+            ),
+          );
+          profileMs('onSliceDrawMs', () =>
+            renderer.drawTravelTimeGrid(mapData.travelTimeGrid, { cycleMinutes: colourCycleMinutes }),
+          );
+        } else {
+          paintedEdgeCount += profileMs('onSlicePaintMs', () =>
+            paintSettledBatchEdgeInterpolationsToGrid(
+              mapData.pixelGrid,
+              searchState.graph,
+              mapData.nodePixels,
+              searchState.distSeconds,
+              settledBatch,
+              allowedModeMask,
+              {
+                alpha,
+                colourCycleMinutes,
+                stepStride: interactiveEdgeStepStride,
+                edgeTraversalCostSeconds,
+              },
+            ),
+          );
+          paintedNodeCount += profileMs('onSlicePaintMs', () =>
+            paintSettledBatchToGrid(
+              mapData.pixelGrid,
+              mapData.nodePixels,
+              searchState.distSeconds,
+              settledBatch,
+              { alpha, colourCycleMinutes },
+            ),
+          );
+          profileMs('onSliceDrawMs', () =>
+            blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid),
+          );
+        }
       }
       if (normalizedStatusUpdateIntervalMs <= 0) {
         setRoutingStatus(shell, formatRoutingStatusCalculating(settledNodeCount));
