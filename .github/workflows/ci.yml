@@ -30,4 +30,6 @@ jobs:
           ruff format --check data_pipeline
           mypy data_pipeline/src
       - name: Test
-        run: pytest -q
+        run: |
+          pytest -q
+          npm run --silent test:js

@@ -18,4 +18,18 @@ module.exports = [
       'no-unused-vars': ['warn', { args: 'none', caughtErrors: 'none' }],
     },
   },
+  {
+    files: ['web/tests/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        ...globals.node,
+        ...globals.es2024,
+      },
+    },
+    rules: {
+      'no-unused-vars': ['warn', { args: 'none', caughtErrors: 'none' }],
+    },
+  },
 ];

@@ -1,8 +1,10 @@
 {
   "name": "isochrone",
   "private": true,
+  "type": "module",
   "scripts": {
-    "lint:js": "eslint web/src/app.js"
+    "lint:js": "eslint web/src web/tests",
+    "test:js": "node --test web/tests"
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",

@@ -36,6 +36,7 @@ lint:
 
 test:
 	$(PYTEST) -q
+	$(NPM) run --silent test:js
 
 review:
 	@echo "== Git status =="
