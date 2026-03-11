@@ -625,35 +625,6 @@ function getEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask, edgeTrav
   return computedCostSeconds;
 }
 
-export function findNearestNodeIndex(graph, xM, yM) {
-  validateGraphForRouting(graph);
-
-  if (!Number.isFinite(xM) || !Number.isFinite(yM)) {
-    throw new Error('xM and yM must be finite numbers');
-  }
-
-  let nearestNodeIndex = -1;
-  let nearestDistanceSquared = Infinity;
-
-  for (let nodeIndex = 0; nodeIndex < graph.header.nNodes; nodeIndex += 1) {
-    const nodeXM = graph.nodeI32[nodeIndex * 4];
-    const nodeYM = graph.nodeI32[nodeIndex * 4 + 1];
-    const dx = nodeXM - xM;
-    const dy = nodeYM - yM;
-    const distanceSquared = dx * dx + dy * dy;
-
-    if (distanceSquared < nearestDistanceSquared) {
-      nearestDistanceSquared = distanceSquared;
-      nearestNodeIndex = nodeIndex;
-    }
-  }
-
-  if (nearestNodeIndex < 0) {
-    throw new Error('graph contains no nodes');
-  }
-  return nearestNodeIndex;
-}
-
 function nodeHasAllowedModeOutgoingEdge(graph, nodeIndex, allowedModeMask, edgeTraversalCostSeconds = null) {
   const firstEdgeIndex = graph.nodeU32[nodeIndex * 4 + 2];
   const edgeCount = graph.nodeU16[nodeIndex * 8 + 6];
@@ -1027,39 +998,6 @@ export function findNearestNodeForCanvasPixel(mapData, xPx, yPx, options = {}) {
     xM,
     yM,
   };
-}
-
-export function highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex, options = {}) {
-  if (!shell || !shell.isochroneCanvas) {
-    throw new Error('shell.isochroneCanvas is required');
-  }
-  if (!mapData || typeof mapData !== 'object') {
-    throw new Error('mapData must be an object');
-  }
-
-  validatePixelGrid(mapData.pixelGrid);
-  validateNodePixels(mapData.nodePixels);
-
-  if (!Number.isInteger(nodeIndex) || nodeIndex < 0 || nodeIndex >= mapData.nodePixels.nodePixelX.length) {
-    throw new Error(`nodeIndex out of range: ${nodeIndex}`);
-  }
-
-  const rgba = options.rgba ?? [12, 163, 242, 255];
-  if (!Array.isArray(rgba) || rgba.length < 4) {
-    throw new Error('options.rgba must be [r, g, b, a]');
-  }
-
-  const r = clampInt(Math.round(rgba[0]), 0, 255);
-  const g = clampInt(Math.round(rgba[1]), 0, 255);
-  const b = clampInt(Math.round(rgba[2]), 0, 255);
-  const alpha = clampInt(Math.round(rgba[3]), 0, 255);
-  const xPx = mapData.nodePixels.nodePixelX[nodeIndex];
-  const yPx = mapData.nodePixels.nodePixelY[nodeIndex];
-
-  setPixel(mapData.pixelGrid, xPx, yPx, r, g, b, alpha);
-  blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
-
-  return { nodeIndex, xPx, yPx };
 }
 
 export function bindCanvasClickRouting(shell, mapData, options = {}) {
@@ -1640,85 +1578,6 @@ export function parseBoundaryBasemapPayload(payload) {
       axis,
     },
     features,
-  };
-}
-
-export function createBoundaryCanvasTransform(coordinateSpace, canvasWidth, canvasHeight) {
-  if (canvasWidth <= 0 || canvasHeight <= 0) {
-    throw new Error('canvas width/height must be positive');
-  }
-
-  const scale = Math.min(
-    canvasWidth / coordinateSpace.width,
-    canvasHeight / coordinateSpace.height,
-  );
-  const offsetX = (canvasWidth - coordinateSpace.width * scale) / 2;
-  const offsetY = (canvasHeight - coordinateSpace.height * scale) / 2;
-
-  return { scale, offsetX, offsetY };
-}
-
-export function mapBoundaryPathToCanvas(path, transform) {
-  return path.map(([x, y]) => [
-    transform.offsetX + x * transform.scale,
-    transform.offsetY + y * transform.scale,
-  ]);
-}
-
-export function drawBoundaryBasemap(boundaryCanvas, payload) {
-  if (!boundaryCanvas || typeof boundaryCanvas.getContext !== 'function') {
-    throw new Error('boundaryCanvas must provide getContext("2d")');
-  }
-
-  sizeCanvasToCssPixels(boundaryCanvas);
-
-  const parsed = parseBoundaryBasemapPayload(payload);
-  const context = boundaryCanvas.getContext('2d');
-  if (!context) {
-    throw new Error('Unable to get 2D context for boundary canvas');
-  }
-
-  const transform = createBoundaryCanvasTransform(
-    parsed.coordinateSpace,
-    boundaryCanvas.width,
-    boundaryCanvas.height,
-  );
-
-  context.clearRect(0, 0, boundaryCanvas.width, boundaryCanvas.height);
-  context.fillStyle = 'rgba(0, 0, 0, 0)';
-  context.strokeStyle = 'rgba(125, 175, 220, 0.55)';
-  context.lineWidth = 1.2;
-  context.lineJoin = 'round';
-  context.lineCap = 'round';
-
-  let renderedPathCount = 0;
-
-  for (const feature of parsed.features) {
-    for (const path of feature.paths) {
-      const mappedPath = mapBoundaryPathToCanvas(path, transform);
-      if (mappedPath.length < 2) {
-        continue;
-      }
-
-      context.beginPath();
-      context.moveTo(mappedPath[0][0], mappedPath[0][1]);
-      for (let i = 1; i < mappedPath.length; i += 1) {
-        context.lineTo(mappedPath[i][0], mappedPath[i][1]);
-      }
-
-      if (isClosedPath(mappedPath)) {
-        context.closePath();
-        context.fill();
-      }
-
-      context.stroke();
-      renderedPathCount += 1;
-    }
-  }
-
-  return {
-    featureCount: parsed.features.length,
-    pathCount: renderedPathCount,
   };
 }
 
