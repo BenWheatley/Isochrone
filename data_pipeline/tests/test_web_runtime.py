@@ -592,7 +592,11 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
     assert "export function bindCanvasClickRouting(" in app_js
     assert "const incrementalRender = options.incrementalRender ?? false;" in app_js
     assert "let isPointerDown = false;" in app_js
-    assert "const queueFinalRunAtClientPoint = (clientX, clientY) => {" in app_js
+    assert "let queuedClientPoint = null;" in app_js
+    assert "let lastCompletedClientPoint = null;" in app_js
+    assert "const maybeStartQueuedRun = async () => {" in app_js
+    assert "const queueLatestRunAtClientPoint = (clientX, clientY) => {" in app_js
+    assert "queuedClientPoint = { xPx, yPx };" in app_js
     assert "shell.isochroneCanvas.addEventListener('pointerdown', handlePointerDown);" in app_js
     assert "shell.isochroneCanvas.addEventListener('pointermove', handlePointerMove);" in app_js
     assert "shell.isochroneCanvas.addEventListener('pointerup', handlePointerUp);" in app_js
@@ -601,7 +605,7 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
     assert "skipFinalFullPass: false" in app_js
     assert "if (activeRunToken !== null) {" in app_js
     assert "ignoredBusy: true" in app_js
-    assert "queueFinalRunAtClientPoint(event.clientX, event.clientY);" in app_js
+    assert "queueLatestRunAtClientPoint(event.clientX, event.clientY);" in app_js
     assert "if (hadPendingDebouncedPoint || !wasSameAsLastMove) {" not in app_js
     assert "scheduleDebouncedDragRun(" not in app_js
     assert "dragDebounceMs" not in app_js
