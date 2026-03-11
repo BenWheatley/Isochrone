@@ -843,9 +843,9 @@ Tasks
 Estimated time: 1 hour
 
 Tasks
-- [ ] On mouse-up (final interaction point), write location to URL parameters/hash
-- [ ] On page load, read location from URL and restore that start point if valid
-- [ ] Keep URL updates deterministic and bookmark/share safe
+- [x] Write last selected start node ID to URL query parameters (`node=<graphNodeId>`) after successful routing
+- [x] On page load, read `node` from URL and restore that start node if valid for current graph
+- [x] Keep URL updates deterministic and bookmark/share safe (`history.replaceState`, preserve other params/hash)
 
 ---
 

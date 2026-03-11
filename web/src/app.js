@@ -17,6 +17,7 @@ const CAR_FALLBACK_SPEED_KPH = 30;
 const ROAD_CLASS_MOTORWAY = 15;
 const DEFAULT_COLOUR_CYCLE_MINUTES = 60;
 const LOADING_FADE_MS = 180;
+const LAST_CLICKED_NODE_QUERY_PARAM = 'node';
 const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;
 const INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE = 3;
 const FINAL_EDGE_INTERPOLATION_STEP_STRIDE = 1;
@@ -929,6 +930,55 @@ export function mapClientPointToCanvasPixel(canvas, clientX, clientY) {
   return { xPx, yPx };
 }
 
+export function parseNodeIndexFromLocationSearch(locationSearch, maxNodeCount) {
+  if (!Number.isInteger(maxNodeCount) || maxNodeCount <= 0) {
+    throw new Error('maxNodeCount must be a positive integer');
+  }
+  if (typeof locationSearch !== 'string' || locationSearch.length === 0) {
+    return null;
+  }
+
+  const params = new URLSearchParams(locationSearch);
+  const rawNodeIndex = params.get(LAST_CLICKED_NODE_QUERY_PARAM);
+  if (rawNodeIndex === null) {
+    return null;
+  }
+  if (!/^\d+$/.test(rawNodeIndex)) {
+    return null;
+  }
+
+  const nodeIndex = Number.parseInt(rawNodeIndex, 10);
+  if (!Number.isInteger(nodeIndex) || nodeIndex < 0 || nodeIndex >= maxNodeCount) {
+    return null;
+  }
+  return nodeIndex;
+}
+
+export function persistNodeIndexToLocation(nodeIndex, options = {}) {
+  if (!Number.isInteger(nodeIndex) || nodeIndex < 0) {
+    throw new Error('nodeIndex must be a non-negative integer');
+  }
+
+  const locationObject = options.locationObject ?? globalThis.location ?? null;
+  const historyObject = options.historyObject ?? globalThis.history ?? null;
+  if (!locationObject || typeof locationObject.href !== 'string') {
+    return false;
+  }
+  if (!historyObject || typeof historyObject.replaceState !== 'function') {
+    return false;
+  }
+
+  const nextUrl = new URL(locationObject.href);
+  const nodeText = String(nodeIndex);
+  if (nextUrl.searchParams.get(LAST_CLICKED_NODE_QUERY_PARAM) === nodeText) {
+    return false;
+  }
+
+  nextUrl.searchParams.set(LAST_CLICKED_NODE_QUERY_PARAM, nodeText);
+  historyObject.replaceState(null, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+  return true;
+}
+
 export function findNearestNodeForCanvasPixel(mapData, xPx, yPx, options = {}) {
   if (!mapData || typeof mapData !== 'object' || !mapData.graph) {
     throw new Error('mapData.graph is required');
@@ -1055,6 +1105,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
           isCancelled: () => runToken.cancelled,
         },
       );
+      if (!runSummary.cancelled) {
+        persistNodeIndexToLocation(nodeIndex);
+      }
       if (activeRunToken === runToken) {
         activeRunToken = null;
       }
@@ -1206,6 +1259,18 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
   shell.isochroneCanvas.addEventListener('pointermove', handlePointerMove);
   shell.isochroneCanvas.addEventListener('pointerup', handlePointerUp);
   shell.isochroneCanvas.addEventListener('pointercancel', handlePointerCancel);
+
+  const initialNodeIndex = parseNodeIndexFromLocationSearch(
+    globalThis.location?.search ?? '',
+    mapData.graph.header.nNodes,
+  );
+  if (initialNodeIndex !== null) {
+    const allowedModeMask = getAllowedModeMaskFromShell(shell);
+    void runFromNodeIndex(initialNodeIndex, allowedModeMask).catch((error) => {
+      setRoutingStatus(shell, 'Routing failed.');
+      console.error(error);
+    });
+  }
 
   const dispose = () => {
     if (isDisposed) {

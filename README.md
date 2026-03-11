@@ -23,6 +23,7 @@ make review
 - Web runtime loads `data_pipeline/output/graph-walk.bin.gz` by default.
 - The graph payload is gzip-compressed and decompressed in-browser before parsing.
 - Clicking the map computes a full travel-time field across all reachable graph nodes (no walk-time cap).
+- Last selected start node is persisted in URL query params as `node=<graphNodeId>` and restored on reload.
 - Current binary schema details and compatibility policy: `docs/graph-binary-schema-v2.md`.
 
 ## Deployment (GitHub Pages)

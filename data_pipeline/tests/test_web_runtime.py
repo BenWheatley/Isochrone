@@ -652,13 +652,45 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
     assert "activeRunToken.cancelled = true;" in app_js
     assert "const runToken = { cancelled: false };" in app_js
     assert "renderIsochroneLegendIfNeeded(shell, colourCycleMinutes);" in app_js
+    assert "persistNodeIndexToLocation(nodeIndex);" in app_js
     assert "findNearestNodeForCanvasPixel(mapData, xPx, yPx, { allowedModeMask });" in app_js
     assert "runWalkingIsochroneFromSourceNode(" in app_js
     assert "Number.POSITIVE_INFINITY" in app_js
     assert "const allowedModeMask = getAllowedModeMaskFromShell(shell);" in app_js
     assert "allowedModeMask," in app_js
     assert "isCancelled: () => runToken.cancelled," in app_js
+    assert "const initialNodeIndex = parseNodeIndexFromLocationSearch(" in app_js
+    assert "globalThis.location?.search ?? ''" in app_js
+    assert "void runFromNodeIndex(initialNodeIndex, allowedModeMask).catch((error) => {" in app_js
     assert "return { dispose, runFromCanvasPixel };" in app_js
+
+
+def test_app_js_has_node_id_url_persistence_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "const LAST_CLICKED_NODE_QUERY_PARAM = 'node';" in app_js
+    assert (
+        "export function parseNodeIndexFromLocationSearch(locationSearch, maxNodeCount) {" in app_js
+    )
+    assert "const rawNodeIndex = params.get(LAST_CLICKED_NODE_QUERY_PARAM);" in app_js
+    assert "if (!/^\\d+$/.test(rawNodeIndex)) {" in app_js
+    assert "const nodeIndex = Number.parseInt(rawNodeIndex, 10);" in app_js
+    assert (
+        "if (!Number.isInteger(nodeIndex) || nodeIndex < 0 || nodeIndex >= maxNodeCount) "
+        "{" in app_js
+    )
+    assert "export function persistNodeIndexToLocation(nodeIndex, options = {}) {" in app_js
+    assert "const locationObject = options.locationObject ?? globalThis.location ?? null;" in app_js
+    assert "const historyObject = options.historyObject ?? globalThis.history ?? null;" in app_js
+    assert "const nextUrl = new URL(locationObject.href);" in app_js
+    assert "nextUrl.searchParams.set(LAST_CLICKED_NODE_QUERY_PARAM, nodeText);" in app_js
+    assert (
+        "historyObject.replaceState(null, '', "
+        "`"
+        "${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}"
+        "`"
+        ");"
+    ) in app_js
 
 
 def test_app_js_has_boundary_graph_alignment_contract() -> None:
