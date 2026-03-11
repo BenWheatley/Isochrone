@@ -398,8 +398,11 @@ export function runPostMvpTransitStub(graph, walkingSearchState) {
   };
 }
 
-export function bindModeSelectControl(shell) {
-  return bindModeSelectControlInternal(shell, { renderIsochroneLegendIfNeeded });
+export function bindModeSelectControl(shell, options = {}) {
+  return bindModeSelectControlInternal(shell, {
+    renderIsochroneLegendIfNeeded,
+    requestIsochroneRedraw: options.requestIsochroneRedraw,
+  });
 }
 
 export function parseBoundaryBasemapPayload(payload) {
@@ -3452,14 +3455,19 @@ function isClosedPath(path) {
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
     const shell = initializeAppShell(globalThis.document);
-    bindModeSelectControl(shell);
+    let routingBinding = null;
+    bindModeSelectControl(shell, {
+      requestIsochroneRedraw() {
+        return routingBinding?.requestIsochroneRedraw() ?? false;
+      },
+    });
     void initializeMapData(shell)
       .then((mapData) => {
         window.addEventListener('resize', () => {
           layoutMapViewportToContainGraph(shell, mapData.graph.header);
           updateDistanceScaleBar(shell, mapData.graph.header);
         });
-        bindCanvasClickRouting(shell, mapData);
+        routingBinding = bindCanvasClickRouting(shell, mapData);
       })
       .catch((error) => {
         console.error(error);

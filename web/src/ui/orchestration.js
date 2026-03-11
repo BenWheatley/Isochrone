@@ -194,15 +194,36 @@ export function bindModeSelectControl(shell, dependencies = {}) {
   if (typeof renderIsochroneLegendIfNeeded !== 'function') {
     throw new Error('dependencies.renderIsochroneLegendIfNeeded must be a function');
   }
+  const requestIsochroneRedraw = dependencies.requestIsochroneRedraw;
+  if (
+    requestIsochroneRedraw !== undefined
+    && typeof requestIsochroneRedraw !== 'function'
+  ) {
+    throw new Error('dependencies.requestIsochroneRedraw must be a function when provided');
+  }
+
+  const maybeRequestIsochroneRedraw = () => {
+    if (typeof requestIsochroneRedraw !== 'function') {
+      return;
+    }
+    const maybePromise = requestIsochroneRedraw();
+    if (maybePromise && typeof maybePromise.then === 'function') {
+      void maybePromise.catch((error) => {
+        console.error(error);
+      });
+    }
+  };
 
   const handleSelectChange = () => {
     getAllowedModeMaskFromShell(shell);
     persistModeValuesToLocation(getSelectedModeValues(shell.modeSelect));
+    maybeRequestIsochroneRedraw();
   };
   const handleCycleChange = () => {
     const cycleMinutes = getColourCycleMinutesFromShell(shell);
     persistColourCycleMinutesToLocation(cycleMinutes);
     renderIsochroneLegendIfNeeded(shell, cycleMinutes);
+    maybeRequestIsochroneRedraw();
   };
 
   getAllowedModeMaskFromShell(shell);

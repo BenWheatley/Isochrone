@@ -55,7 +55,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   let isDisposed = false;
   let isPointerDown = false;
   let queuedClientPoint = null;
+  let queuedNodeIndex = null;
   let lastCompletedClientPoint = null;
+  let lastCompletedNodeIndex = null;
 
   const runFromNodeIndex = async (nodeIndex, modeMask = null) => {
     if (isDisposed) {
@@ -98,9 +100,13 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
       );
       if (!runSummary.cancelled) {
         persistNodeIndexToLocation(nodeIndex);
+        lastCompletedNodeIndex = nodeIndex;
       }
       if (activeRunToken === runToken) {
         activeRunToken = null;
+      }
+      if (!isDisposed && activeRunToken === null && (queuedNodeIndex !== null || queuedClientPoint !== null)) {
+        void maybeStartQueuedRun();
       }
       return {
         nodeIndex,
@@ -109,6 +115,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     } catch (error) {
       if (activeRunToken === runToken) {
         activeRunToken = null;
+      }
+      if (!isDisposed && activeRunToken === null && (queuedNodeIndex !== null || queuedClientPoint !== null)) {
+        void maybeStartQueuedRun();
       }
       throw error;
     }
@@ -139,18 +148,30 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   };
 
   const maybeStartQueuedRun = async () => {
-    if (isDisposed || activeRunToken !== null || queuedClientPoint === null) {
+    if (isDisposed || activeRunToken !== null) {
       return;
     }
-    const nextPoint = queuedClientPoint;
+    const nextNodeIndex = queuedNodeIndex;
+    const nextPoint = queuedNodeIndex === null ? queuedClientPoint : null;
+    queuedNodeIndex = null;
     queuedClientPoint = null;
 
-    await runFromCanvasPixel(nextPoint.xPx, nextPoint.yPx).catch((error) => {
+    const queuedRunPromise =
+      nextNodeIndex !== null
+        ? runFromNodeIndex(nextNodeIndex)
+        : nextPoint !== null
+          ? runFromCanvasPixel(nextPoint.xPx, nextPoint.yPx)
+          : null;
+    if (queuedRunPromise === null) {
+      return;
+    }
+
+    await queuedRunPromise.catch((error) => {
       setRoutingStatus(shell, 'Routing failed.');
       console.error(error);
     });
 
-    if (!isDisposed && activeRunToken === null && queuedClientPoint !== null) {
+    if (!isDisposed && activeRunToken === null && (queuedNodeIndex !== null || queuedClientPoint !== null)) {
       await maybeStartQueuedRun();
     }
   };
@@ -178,6 +199,47 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     }
     queuedClientPoint = { xPx, yPx };
     void maybeStartQueuedRun();
+  };
+
+  const queueLatestRunAtNodeIndex = (nodeIndex) => {
+    if (isDisposed) {
+      return false;
+    }
+    if (!Number.isInteger(nodeIndex) || nodeIndex < 0 || nodeIndex >= mapData.graph.header.nNodes) {
+      return false;
+    }
+    if (
+      queuedNodeIndex !== null
+      && queuedNodeIndex === nodeIndex
+    ) {
+      return true;
+    }
+    if (
+      activeRunToken === null
+      && queuedNodeIndex === null
+      && queuedClientPoint === null
+      && lastCompletedNodeIndex !== null
+      && lastCompletedNodeIndex === nodeIndex
+    ) {
+      return true;
+    }
+
+    queuedNodeIndex = nodeIndex;
+    queuedClientPoint = null;
+    void maybeStartQueuedRun();
+    return true;
+  };
+
+  const requestIsochroneRedraw = () => {
+    const candidateNodeIndex =
+      lastCompletedNodeIndex ?? parseNodeIndexFromLocationSearch(
+        globalThis.location?.search ?? '',
+        mapData.graph.header.nNodes,
+      );
+    if (candidateNodeIndex === null) {
+      return false;
+    }
+    return queueLatestRunAtNodeIndex(candidateNodeIndex);
   };
 
   const releasePointerCaptureIfHeld = (event) => {
@@ -275,7 +337,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     }
     isPointerDown = false;
     queuedClientPoint = null;
+    queuedNodeIndex = null;
     lastCompletedClientPoint = null;
+    lastCompletedNodeIndex = null;
 
     shell.isochroneCanvas.removeEventListener('pointerdown', handlePointerDown);
     shell.isochroneCanvas.removeEventListener('pointermove', handlePointerMove);
@@ -283,5 +347,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     shell.isochroneCanvas.removeEventListener('pointercancel', handlePointerCancel);
   };
 
-  return { dispose, runFromCanvasPixel };
+  return {
+    dispose,
+    runFromCanvasPixel,
+    requestIsochroneRedraw,
+  };
 }
