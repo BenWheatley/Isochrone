@@ -295,7 +295,7 @@ def test_app_js_has_time_sliced_search_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
     assert "export async function runSearchTimeSliced(" in app_js
-    assert "const sliceBudgetMs = options.sliceBudgetMs ?? 8;" in app_js
+    assert "const sliceBudgetMs = options.sliceBudgetMs ?? 33;" in app_js
     assert "const frameYieldIntervalSlices = options.frameYieldIntervalSlices ?? 1;" in app_js
     assert "const isCancelled = options.isCancelled ?? (() => false);" in app_js
     assert "const onExpandOneTimingMs = options.onExpandOneTimingMs ?? null;" in app_js

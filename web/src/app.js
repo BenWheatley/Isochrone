@@ -3872,7 +3872,7 @@ export function collectAllReachableTravelTimeEdgeVertices(
 export async function runSearchTimeSliced(searchState, options = {}) {
   validateSearchState(searchState);
 
-  const sliceBudgetMs = options.sliceBudgetMs ?? 8;
+  const sliceBudgetMs = options.sliceBudgetMs ?? 33;
   const frameYieldIntervalSlices = options.frameYieldIntervalSlices ?? 1;
   const onSlice = options.onSlice ?? (() => {});
   const isCancelled = options.isCancelled ?? (() => false);
