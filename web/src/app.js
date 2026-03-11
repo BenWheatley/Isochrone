@@ -22,6 +22,21 @@ const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;
 const INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE = 3;
 const FINAL_EDGE_INTERPOLATION_STEP_STRIDE = 1;
 const EDGE_TRAVERSAL_COST_CACHE_PROPERTY = '__edgeTraversalCostSecondsByModeMask';
+const CYCLE_COLOUR_MAP_GLSL = `vec3 mapCycleColour(float cycleRatio) {
+  if (cycleRatio <= 1.0 / 5.0) {
+    return vec3(0.0, 255.0, 255.0);
+  }
+  if (cycleRatio <= 2.0 / 5.0) {
+    return vec3(64.0, 255.0, 64.0);
+  }
+  if (cycleRatio <= 3.0 / 5.0) {
+    return vec3(255.0, 255.0, 64.0);
+  }
+  if (cycleRatio <= 4.0 / 5.0) {
+    return vec3(255.0, 140.0, 0.0);
+  }
+  return vec3(255.0, 64.0, 160.0);
+}`;
 
 export class MinHeap {
   constructor(maxNodeCount) {
@@ -2719,21 +2734,7 @@ uniform float u_cycle_minutes;
 in vec2 v_uv;
 out vec4 outColor;
 
-vec3 mapCycleColour(float cycleRatio) {
-  if (cycleRatio <= 1.0 / 5.0) {
-    return vec3(0.0, 255.0, 255.0);
-  }
-  if (cycleRatio <= 2.0 / 5.0) {
-    return vec3(64.0, 255.0, 64.0);
-  }
-  if (cycleRatio <= 3.0 / 5.0) {
-    return vec3(255.0, 255.0, 64.0);
-  }
-  if (cycleRatio <= 4.0 / 5.0) {
-    return vec3(255.0, 140.0, 0.0);
-  }
-  return vec3(255.0, 64.0, 160.0);
-}
+${CYCLE_COLOUR_MAP_GLSL}
 
 void main(void) {
   float seconds = texture(u_time_texture, vec2(v_uv.x, 1.0 - v_uv.y)).r;
@@ -2805,21 +2806,7 @@ uniform float u_alpha;
 in float v_seconds;
 out vec4 outColor;
 
-vec3 mapCycleColour(float cycleRatio) {
-  if (cycleRatio <= 1.0 / 5.0) {
-    return vec3(0.0, 255.0, 255.0);
-  }
-  if (cycleRatio <= 2.0 / 5.0) {
-    return vec3(64.0, 255.0, 64.0);
-  }
-  if (cycleRatio <= 3.0 / 5.0) {
-    return vec3(255.0, 255.0, 64.0);
-  }
-  if (cycleRatio <= 4.0 / 5.0) {
-    return vec3(255.0, 140.0, 0.0);
-  }
-  return vec3(255.0, 64.0, 160.0);
-}
+${CYCLE_COLOUR_MAP_GLSL}
 
 void main(void) {
   if (v_seconds < 0.0) {
@@ -2837,21 +2824,7 @@ uniform float u_cycle_minutes;
 uniform float u_alpha;
 varying float v_seconds;
 
-vec3 mapCycleColour(float cycleRatio) {
-  if (cycleRatio <= 1.0 / 5.0) {
-    return vec3(0.0, 255.0, 255.0);
-  }
-  if (cycleRatio <= 2.0 / 5.0) {
-    return vec3(64.0, 255.0, 64.0);
-  }
-  if (cycleRatio <= 3.0 / 5.0) {
-    return vec3(255.0, 255.0, 64.0);
-  }
-  if (cycleRatio <= 4.0 / 5.0) {
-    return vec3(255.0, 140.0, 0.0);
-  }
-  return vec3(255.0, 64.0, 160.0);
-}
+${CYCLE_COLOUR_MAP_GLSL}
 
 void main(void) {
   if (v_seconds < 0.0) {

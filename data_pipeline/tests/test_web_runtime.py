@@ -216,6 +216,13 @@ def test_app_js_has_webgl_blit_renderer_contract() -> None:
     assert "renderer.draw(pixelGrid);" in app_js
 
 
+def test_app_js_reuses_glsl_cycle_colour_map_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "const CYCLE_COLOUR_MAP_GLSL = `vec3 mapCycleColour(float cycleRatio) {" in app_js
+    assert app_js.count("${CYCLE_COLOUR_MAP_GLSL}") == 3
+
+
 def test_app_js_has_gpu_travel_time_colourization_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
