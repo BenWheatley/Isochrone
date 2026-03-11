@@ -247,8 +247,9 @@ export function createWalkingSearchState(
   allowedModeMask = EDGE_MODE_CAR_BIT,
 ) {
   validateGraphForRouting(graph);
+  const nNodes = graph.header.nNodes;
 
-  if (!Number.isInteger(sourceNodeIndex) || sourceNodeIndex < 0 || sourceNodeIndex >= graph.header.nNodes) {
+  if (!Number.isInteger(sourceNodeIndex) || sourceNodeIndex < 0 || sourceNodeIndex >= nNodes) {
     throw new Error(`sourceNodeIndex out of range: ${sourceNodeIndex}`);
   }
   if (
@@ -263,11 +264,17 @@ export function createWalkingSearchState(
     throw new Error('allowedModeMask must be a positive 8-bit integer');
   }
 
+  const nodeU32 = graph.nodeU32;
+  const nodeU16 = graph.nodeU16;
+  const edgeU32 = graph.edgeU32;
+  const edgeModeMask = graph.edgeModeMask;
   const edgeTraversalCostSeconds = getOrCreateEdgeTraversalCostSecondsCache(graph, allowedModeMask);
-  const distSeconds = new Float64Array(graph.header.nNodes);
+  const distSeconds = new Float64Array(nNodes);
   distSeconds.fill(Infinity);
-  const settled = new Uint8Array(graph.header.nNodes);
-  const heap = new MinHeap(graph.header.nNodes);
+  const settled = new Uint8Array(nNodes);
+  const heap = new MinHeap(nNodes);
+  const heapPositionLookup = heap.positionLookup;
+  const hasFiniteTimeLimit = Number.isFinite(timeLimitSeconds);
 
   distSeconds[sourceNodeIndex] = 0;
   heap.push(sourceNodeIndex, 0);
@@ -308,7 +315,7 @@ export function createWalkingSearchState(
         const nodeIndex = heapPopEntry.nodeIndex;
         const cost = heapPopEntry.cost;
 
-        if (Number.isFinite(timeLimitSeconds) && cost > timeLimitSeconds) {
+        if (hasFiniteTimeLimit && cost > timeLimitSeconds) {
           done = true;
           return -1;
         }
@@ -319,15 +326,15 @@ export function createWalkingSearchState(
         settled[nodeIndex] = 1;
         settledCount += 1;
 
-        const firstEdgeIndex = graph.nodeU32[nodeIndex * 4 + 2];
-        const edgeCount = graph.nodeU16[nodeIndex * 8 + 6];
+        const firstEdgeIndex = nodeU32[nodeIndex * 4 + 2];
+        const edgeCount = nodeU16[nodeIndex * 8 + 6];
         const endEdgeIndex = firstEdgeIndex + edgeCount;
 
         for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
-          if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
+          if ((edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
             continue;
           }
-          const targetIndex = graph.edgeU32[edgeIndex * 3];
+          const targetIndex = edgeU32[edgeIndex * 3];
           let edgeCostSeconds = edgeTraversalCostSeconds[edgeIndex];
           if (Number.isNaN(edgeCostSeconds)) {
             edgeCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
@@ -338,11 +345,11 @@ export function createWalkingSearchState(
           }
           const nextCost = cost + edgeCostSeconds;
 
-          if (Number.isFinite(timeLimitSeconds) && nextCost > timeLimitSeconds) {
+          if (hasFiniteTimeLimit && nextCost > timeLimitSeconds) {
             continue;
           }
           if (nextCost < distSeconds[targetIndex]) {
-            const heapPosition = heap.positionLookup[targetIndex];
+            const heapPosition = heapPositionLookup[targetIndex];
             if (heapPosition === -1) {
               distSeconds[targetIndex] = nextCost;
               heap.push(targetIndex, nextCost);

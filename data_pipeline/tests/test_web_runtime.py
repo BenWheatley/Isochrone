@@ -408,20 +408,31 @@ def test_app_js_has_walking_dijkstra_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
     assert "export function createWalkingSearchState(" in app_js
-    assert "const distSeconds = new Float64Array(graph.header.nNodes);" in app_js
+    assert "const nNodes = graph.header.nNodes;" in app_js
+    assert "const distSeconds = new Float64Array(nNodes);" in app_js
     assert "distSeconds.fill(Infinity);" in app_js
-    assert "const settled = new Uint8Array(graph.header.nNodes);" in app_js
+    assert "const settled = new Uint8Array(nNodes);" in app_js
     assert "heap.push(sourceNodeIndex, 0);" in app_js
     assert "const heapPopEntry = { nodeIndex: -1, cost: 0 };" in app_js
+    assert "const nodeU32 = graph.nodeU32;" in app_js
+    assert "const nodeU16 = graph.nodeU16;" in app_js
+    assert "const edgeU32 = graph.edgeU32;" in app_js
+    assert "const edgeModeMask = graph.edgeModeMask;" in app_js
+    assert "const heapPositionLookup = heap.positionLookup;" in app_js
+    assert "const hasFiniteTimeLimit = Number.isFinite(timeLimitSeconds);" in app_js
     assert "if (!heap.popInto(heapPopEntry)) {" in app_js
-    assert "if (Number.isFinite(timeLimitSeconds) && cost > timeLimitSeconds)" in app_js
-    assert "if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0)" in app_js
+    assert "if (hasFiniteTimeLimit && cost > timeLimitSeconds)" in app_js
+    assert "if ((edgeModeMask[edgeIndex] & allowedModeMask) === 0)" in app_js
     assert "const edgeTraversalCostSeconds = getOrCreateEdgeTraversalCostSecondsCache(" in app_js
+    assert "const firstEdgeIndex = nodeU32[nodeIndex * 4 + 2];" in app_js
+    assert "const edgeCount = nodeU16[nodeIndex * 8 + 6];" in app_js
+    assert "const targetIndex = edgeU32[edgeIndex * 3];" in app_js
     assert "let edgeCostSeconds = edgeTraversalCostSeconds[edgeIndex];" in app_js
     assert "if (Number.isNaN(edgeCostSeconds)) {" in app_js
     assert "edgeTraversalCostSeconds[edgeIndex] = edgeCostSeconds;" in app_js
     assert "if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0)" in app_js
     assert "if (nextCost < distSeconds[targetIndex])" in app_js
+    assert "const heapPosition = heapPositionLookup[targetIndex];" in app_js
     assert "heap.decreaseKey(targetIndex, nextCost);" in app_js
     assert "export function findNearestNodeIndex(" in app_js
     assert "const dx = nodeXM - xM;" in app_js
