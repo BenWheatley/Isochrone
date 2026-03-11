@@ -27,12 +27,15 @@ def test_web_entrypoint_uses_vanilla_module_and_required_shell_elements() -> Non
 
 
 def test_web_defaults_reference_pipeline_outputs() -> None:
+    constants_js = (WEB_ROOT / "src" / "config" / "constants.js").read_text(encoding="utf-8")
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
+    assert "DEFAULT_BOUNDARY_BASEMAP_URL" in constants_js
+    assert "DEFAULT_GRAPH_BINARY_URL" in constants_js
+    assert "../data_pipeline/output/berlin-district-boundaries-canvas.json" in constants_js
+    assert "../data_pipeline/output/graph-walk.bin.gz" in constants_js
     assert "DEFAULT_BOUNDARY_BASEMAP_URL" in app_js
     assert "DEFAULT_GRAPH_BINARY_URL" in app_js
-    assert "../data_pipeline/output/berlin-district-boundaries-canvas.json" in app_js
-    assert "../data_pipeline/output/graph-walk.bin.gz" in app_js
 
 
 def test_quality_gates_include_js_lint_and_runtime_tests() -> None:

@@ -1,0 +1,39 @@
+export const DEFAULT_BOUNDARY_BASEMAP_URL =
+  '../data_pipeline/output/berlin-district-boundaries-canvas.json';
+export const DEFAULT_GRAPH_BINARY_URL = '../data_pipeline/output/graph-walk.bin.gz';
+export const GRAPH_MAGIC = 0x49534f43;
+
+export const HEADER_SIZE = 64;
+export const NODE_RECORD_SIZE = 16;
+export const EDGE_RECORD_SIZE = 12;
+export const BYTES_PER_MEBIBYTE = 1024 * 1024;
+export const SUPPORTED_GRAPH_VERSIONS = new Set([2]);
+export const EDGE_MODE_WALK_BIT = 1;
+export const EDGE_MODE_BIKE_BIT = 1 << 1;
+export const EDGE_MODE_CAR_BIT = 1 << 2;
+export const WALKING_SPEED_M_S = 1.39;
+export const BIKE_CRUISE_SPEED_KPH = 20;
+export const CAR_FALLBACK_SPEED_KPH = 30;
+export const ROAD_CLASS_MOTORWAY = 15;
+export const DEFAULT_COLOUR_CYCLE_MINUTES = 60;
+export const LOADING_FADE_MS = 180;
+export const LAST_CLICKED_NODE_QUERY_PARAM = 'node';
+export const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;
+export const INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE = 3;
+export const FINAL_EDGE_INTERPOLATION_STEP_STRIDE = 1;
+export const EDGE_TRAVERSAL_COST_CACHE_PROPERTY = '__edgeTraversalCostSecondsByModeMask';
+export const CYCLE_COLOUR_MAP_GLSL = `vec3 mapCycleColour(float cycleRatio) {
+  if (cycleRatio <= 1.0 / 5.0) {
+    return vec3(0.0, 255.0, 255.0);
+  }
+  if (cycleRatio <= 2.0 / 5.0) {
+    return vec3(64.0, 255.0, 64.0);
+  }
+  if (cycleRatio <= 3.0 / 5.0) {
+    return vec3(255.0, 255.0, 64.0);
+  }
+  if (cycleRatio <= 4.0 / 5.0) {
+    return vec3(255.0, 140.0, 0.0);
+  }
+  return vec3(255.0, 64.0, 160.0);
+}`;
