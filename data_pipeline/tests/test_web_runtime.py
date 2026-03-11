@@ -393,6 +393,7 @@ def test_app_js_has_min_heap_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
     assert "export class MinHeap" in app_js
+    assert "class DuplicateEntryMinHeap" in app_js
     assert "this.costs = new Float64Array(" in app_js
     assert "this.nodeIndices = new Int32Array(" in app_js
     assert "this.positionLookup = new Int32Array(" in app_js
@@ -418,9 +419,12 @@ def test_app_js_has_walking_dijkstra_contract() -> None:
     assert "const nodeU16 = graph.nodeU16;" in app_js
     assert "const edgeU32 = graph.edgeU32;" in app_js
     assert "const edgeModeMask = graph.edgeModeMask;" in app_js
+    assert "const heapStrategy = options.heapStrategy ?? 'decrease-key';" in app_js
+    assert "const useDuplicatePushHeap = heapStrategy === 'duplicate-push';" in app_js
     assert "const heapPositionLookup = heap.positionLookup;" in app_js
     assert "const hasFiniteTimeLimit = Number.isFinite(timeLimitSeconds);" in app_js
     assert "if (!heap.popInto(heapPopEntry)) {" in app_js
+    assert "if (useDuplicatePushHeap && cost > distSeconds[nodeIndex]) {" in app_js
     assert "if (hasFiniteTimeLimit && cost > timeLimitSeconds)" in app_js
     assert "if ((edgeModeMask[edgeIndex] & allowedModeMask) === 0)" in app_js
     assert "const edgeTraversalCostSeconds = getOrCreateEdgeTraversalCostSecondsCache(" in app_js
@@ -433,12 +437,14 @@ def test_app_js_has_walking_dijkstra_contract() -> None:
     assert "if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0)" in app_js
     assert "if (nextCost < distSeconds[targetIndex])" in app_js
     assert "const heapPosition = heapPositionLookup[targetIndex];" in app_js
+    assert "if (useDuplicatePushHeap) {" in app_js
     assert "heap.decreaseKey(targetIndex, nextCost);" in app_js
     assert "export function findNearestNodeIndex(" in app_js
     assert "const dx = nodeXM - xM;" in app_js
     assert "const dy = nodeYM - yM;" in app_js
     assert "export async function runWalkingIsochroneFromSourceNode(" in app_js
     assert "const allowedModeMask = options.allowedModeMask ?? EDGE_MODE_CAR_BIT;" in app_js
+    assert "const heapStrategy = options.heapStrategy ?? 'decrease-key';" in app_js
     assert "if (!runSummary.cancelled) {" in app_js
     assert "runPostMvpTransitStub(mapData.graph, searchState);" in app_js
     assert "runSearchTimeSlicedWithRendering(" in app_js

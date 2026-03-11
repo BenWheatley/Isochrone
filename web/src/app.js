@@ -197,6 +197,138 @@ export class MinHeap {
   }
 }
 
+class DuplicateEntryMinHeap {
+  constructor(maxNodeCount) {
+    if (!Number.isInteger(maxNodeCount) || maxNodeCount <= 0) {
+      throw new Error('maxNodeCount must be a positive integer');
+    }
+
+    this.maxNodeCount = maxNodeCount;
+    this.count = 0;
+    this.costs = new Float64Array(Math.min(1024, maxNodeCount));
+    this.nodeIndices = new Int32Array(Math.min(1024, maxNodeCount));
+  }
+
+  get size() {
+    return this.count;
+  }
+
+  isEmpty() {
+    return this.count === 0;
+  }
+
+  push(nodeIndex, cost) {
+    this._validateNodeIndex(nodeIndex);
+    this._validateFiniteCost(cost, 'cost');
+
+    this._ensureCapacity(this.count + 1);
+    this.costs[this.count] = cost;
+    this.nodeIndices[this.count] = nodeIndex;
+    this._bubbleUp(this.count);
+    this.count += 1;
+  }
+
+  popInto(outEntry) {
+    if (!outEntry || typeof outEntry !== 'object') {
+      throw new Error('outEntry must be an object');
+    }
+    if (this.count === 0) {
+      return false;
+    }
+
+    const rootNodeIndex = this.nodeIndices[0];
+    const rootCost = this.costs[0];
+
+    const lastIndex = this.count - 1;
+    this.count -= 1;
+
+    if (this.count > 0) {
+      this.nodeIndices[0] = this.nodeIndices[lastIndex];
+      this.costs[0] = this.costs[lastIndex];
+      this._bubbleDown(0);
+    }
+
+    outEntry.nodeIndex = rootNodeIndex;
+    outEntry.cost = rootCost;
+    return true;
+  }
+
+  _bubbleUp(startIndex) {
+    let index = startIndex;
+    while (index > 0) {
+      const parent = (index - 1) >> 1;
+      if (this.costs[parent] <= this.costs[index]) {
+        break;
+      }
+      this._swap(index, parent);
+      index = parent;
+    }
+  }
+
+  _bubbleDown(startIndex) {
+    let index = startIndex;
+    while (true) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let smallest = index;
+
+      if (left < this.count && this.costs[left] < this.costs[smallest]) {
+        smallest = left;
+      }
+      if (right < this.count && this.costs[right] < this.costs[smallest]) {
+        smallest = right;
+      }
+
+      if (smallest === index) {
+        break;
+      }
+      this._swap(index, smallest);
+      index = smallest;
+    }
+  }
+
+  _swap(a, b) {
+    const nodeA = this.nodeIndices[a];
+    this.nodeIndices[a] = this.nodeIndices[b];
+    this.nodeIndices[b] = nodeA;
+
+    const costA = this.costs[a];
+    this.costs[a] = this.costs[b];
+    this.costs[b] = costA;
+  }
+
+  _ensureCapacity(minCapacity) {
+    if (this.costs.length >= minCapacity) {
+      return;
+    }
+
+    let nextCapacity = this.costs.length;
+    while (nextCapacity < minCapacity) {
+      nextCapacity *= 2;
+    }
+
+    const nextCosts = new Float64Array(nextCapacity);
+    nextCosts.set(this.costs);
+    this.costs = nextCosts;
+
+    const nextNodeIndices = new Int32Array(nextCapacity);
+    nextNodeIndices.set(this.nodeIndices);
+    this.nodeIndices = nextNodeIndices;
+  }
+
+  _validateNodeIndex(nodeIndex) {
+    if (!Number.isInteger(nodeIndex) || nodeIndex < 0 || nodeIndex >= this.maxNodeCount) {
+      throw new Error(`nodeIndex out of range: ${nodeIndex}`);
+    }
+  }
+
+  _validateFiniteCost(cost, fieldName) {
+    if (!Number.isFinite(cost)) {
+      throw new Error(`${fieldName} must be finite`);
+    }
+  }
+}
+
 export function runMinHeapSelfTest(seed = 0x12345678) {
   const maxCount = 1000;
   const heap = new MinHeap(maxCount);
@@ -245,6 +377,7 @@ export function createWalkingSearchState(
   sourceNodeIndex,
   timeLimitSeconds = Number.POSITIVE_INFINITY,
   allowedModeMask = EDGE_MODE_CAR_BIT,
+  options = {},
 ) {
   validateGraphForRouting(graph);
   const nNodes = graph.header.nNodes;
@@ -263,16 +396,24 @@ export function createWalkingSearchState(
   if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
     throw new Error('allowedModeMask must be a positive 8-bit integer');
   }
+  if (!options || typeof options !== 'object') {
+    throw new Error('options must be an object');
+  }
 
   const nodeU32 = graph.nodeU32;
   const nodeU16 = graph.nodeU16;
   const edgeU32 = graph.edgeU32;
   const edgeModeMask = graph.edgeModeMask;
+  const heapStrategy = options.heapStrategy ?? 'decrease-key';
+  if (heapStrategy !== 'decrease-key' && heapStrategy !== 'duplicate-push') {
+    throw new Error("options.heapStrategy must be 'decrease-key' or 'duplicate-push'");
+  }
+  const useDuplicatePushHeap = heapStrategy === 'duplicate-push';
   const edgeTraversalCostSeconds = getOrCreateEdgeTraversalCostSecondsCache(graph, allowedModeMask);
   const distSeconds = new Float64Array(nNodes);
   distSeconds.fill(Infinity);
   const settled = new Uint8Array(nNodes);
-  const heap = new MinHeap(nNodes);
+  const heap = useDuplicatePushHeap ? new DuplicateEntryMinHeap(nNodes) : new MinHeap(nNodes);
   const heapPositionLookup = heap.positionLookup;
   const hasFiniteTimeLimit = Number.isFinite(timeLimitSeconds);
 
@@ -288,6 +429,7 @@ export function createWalkingSearchState(
     sourceNodeIndex,
     timeLimitSeconds,
     allowedModeMask,
+    heapStrategy,
     edgeTraversalCostSeconds,
     distSeconds,
     settled,
@@ -315,6 +457,9 @@ export function createWalkingSearchState(
         const nodeIndex = heapPopEntry.nodeIndex;
         const cost = heapPopEntry.cost;
 
+        if (useDuplicatePushHeap && cost > distSeconds[nodeIndex]) {
+          continue;
+        }
         if (hasFiniteTimeLimit && cost > timeLimitSeconds) {
           done = true;
           return -1;
@@ -349,16 +494,21 @@ export function createWalkingSearchState(
             continue;
           }
           if (nextCost < distSeconds[targetIndex]) {
-            const heapPosition = heapPositionLookup[targetIndex];
-            if (heapPosition === -1) {
+            if (useDuplicatePushHeap) {
               distSeconds[targetIndex] = nextCost;
               heap.push(targetIndex, nextCost);
-            } else if (nextCost < heap.costs[heapPosition]) {
-              distSeconds[targetIndex] = nextCost;
-              heap.decreaseKey(targetIndex, nextCost);
             } else {
-              // Keep distance cache consistent with queued best cost under rounding edge cases.
-              distSeconds[targetIndex] = heap.costs[heapPosition];
+              const heapPosition = heapPositionLookup[targetIndex];
+              if (heapPosition === -1) {
+                distSeconds[targetIndex] = nextCost;
+                heap.push(targetIndex, nextCost);
+              } else if (nextCost < heap.costs[heapPosition]) {
+                distSeconds[targetIndex] = nextCost;
+                heap.decreaseKey(targetIndex, nextCost);
+              } else {
+                // Keep distance cache consistent with queued best cost under rounding edge cases.
+                distSeconds[targetIndex] = heap.costs[heapPosition];
+              }
             }
           }
         }
@@ -1258,11 +1408,13 @@ export async function runWalkingIsochroneFromSourceNode(
   }
 
   const allowedModeMask = options.allowedModeMask ?? EDGE_MODE_CAR_BIT;
+  const heapStrategy = options.heapStrategy ?? 'decrease-key';
   const searchState = createWalkingSearchState(
     mapData.graph,
     sourceNodeIndex,
     timeLimitSeconds,
     allowedModeMask,
+    { heapStrategy },
   );
   const runSummary = await runSearchTimeSlicedWithRendering(shell, mapData, searchState, options);
   if (!runSummary.cancelled) {
@@ -4168,6 +4320,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
       routingProfile,
       {
         rendererMode: renderer.mode,
+        heapStrategy: searchState.heapStrategy ?? 'unknown',
         cancelled: runSummary.cancelled,
         skipFinalFullPass,
         elapsedMs: routeElapsedMs,
