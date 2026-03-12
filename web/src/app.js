@@ -1096,6 +1096,51 @@ function pickScaleDistanceMetres(targetDistanceMetres) {
   return chosen;
 }
 
+function pickScaleBucketDistanceMetres(totalDistanceMetres) {
+  const safeTotal = Math.max(1, totalDistanceMetres);
+  const targetSegments = 5;
+  const minSegments = 3;
+  const maxSegments = 10;
+  const candidateRoots = [1, 2, 5];
+  const baseExponent = Math.floor(Math.log10(safeTotal / targetSegments));
+  const candidates = [];
+
+  for (let exponentOffset = -1; exponentOffset <= 2; exponentOffset += 1) {
+    const exponent = baseExponent + exponentOffset;
+    const scale = 10 ** exponent;
+    for (const root of candidateRoots) {
+      const candidate = root * scale;
+      if (!(candidate > 0) || candidate > safeTotal) {
+        continue;
+      }
+      const segmentCount = safeTotal / candidate;
+      if (segmentCount < minSegments || segmentCount > maxSegments) {
+        continue;
+      }
+      const integerPenalty = Math.abs(segmentCount - Math.round(segmentCount));
+      const segmentPenalty = Math.abs(segmentCount - targetSegments);
+      const score = integerPenalty * 3 + segmentPenalty;
+      candidates.push({
+        candidate,
+        score,
+      });
+    }
+  }
+
+  if (candidates.length === 0) {
+    return safeTotal / targetSegments;
+  }
+
+  candidates.sort((a, b) => {
+    if (a.score !== b.score) {
+      return a.score - b.score;
+    }
+    return a.candidate - b.candidate;
+  });
+
+  return candidates[0].candidate;
+}
+
 export function renderIsochroneLegend(shell, cycleMinutes, options = {}) {
   if (!shell || typeof shell !== 'object' || !shell.isochroneLegend) {
     throw new Error('shell.isochroneLegend is required');
@@ -1179,8 +1224,15 @@ export function updateDistanceScaleBar(shell, graphHeader) {
   const preferredDistanceMetres = preferredWidthPx * metresPerCssPixel;
   const chosenDistanceMetres = pickScaleDistanceMetres(preferredDistanceMetres);
   const lineWidthPx = Math.max(24, Math.round(chosenDistanceMetres / metresPerCssPixel));
+  const bucketDistanceMetres = pickScaleBucketDistanceMetres(chosenDistanceMetres);
+  const segmentWidthPx = Math.max(4, Math.round(bucketDistanceMetres / metresPerCssPixel));
 
   shell.distanceScaleLine.style.width = `${lineWidthPx}px`;
+  if (typeof shell.distanceScaleLine.style.setProperty === 'function') {
+    shell.distanceScaleLine.style.setProperty('--scale-segment-width-px', `${segmentWidthPx}px`);
+  } else {
+    shell.distanceScaleLine.style['--scale-segment-width-px'] = `${segmentWidthPx}px`;
+  }
   shell.distanceScaleLabel.textContent = formatDistanceLabel(chosenDistanceMetres);
 }
 

@@ -19,6 +19,7 @@ import {
   precomputeNodeModeMask,
   precomputeNodePixelCoordinates,
   renderIsochroneLegendIfNeeded,
+  updateDistanceScaleBar,
   timeToColour,
 } from '../src/app.js';
 
@@ -272,6 +273,38 @@ test('renderIsochroneLegendIfNeeded renders print-safe swatches and caches by th
 
   const themeChangeRender = renderIsochroneLegendIfNeeded(shell, 75, { theme: 'dark' });
   assert.equal(themeChangeRender, true);
+});
+
+test('updateDistanceScaleBar sets distance-aligned segment width for patterned bar', () => {
+  const lineStyle = {
+    width: '',
+    values: {},
+    setProperty(name, value) {
+      this.values[name] = value;
+    },
+  };
+  const shell = {
+    distanceScale: {},
+    distanceScaleLine: { style: lineStyle },
+    distanceScaleLabel: { textContent: '' },
+    isochroneCanvas: {
+      getBoundingClientRect() {
+        return { width: 1000 };
+      },
+    },
+  };
+  const graphHeader = {
+    originEasting: 0,
+    originNorthing: 0,
+    gridWidthPx: 1000,
+    gridHeightPx: 500,
+    pixelSizeM: 10,
+  };
+
+  updateDistanceScaleBar(shell, graphHeader);
+  assert.equal(shell.distanceScaleLine.style.width, '100px');
+  assert.equal(shell.distanceScaleLabel.textContent, '1.0 km');
+  assert.equal(shell.distanceScaleLine.style.values['--scale-segment-width-px'], '20px');
 });
 
 test('parseNodeIndexFromLocationSearch validates and clamps invalid params', () => {
