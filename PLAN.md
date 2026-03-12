@@ -698,6 +698,68 @@ Benchmark note (2026-03-11):
 
 ---
 
+## 10.6 Post-MVP: Multi-Location OSM Fetch Generalization
+Estimated time: 3 hours 45 min
+
+*This phase generalizes the current Berlin-specific Overpass fetch flow into a reusable multi-location pipeline stage without changing routing internals yet.*
+
+### 10.6.1 Add location manifests
+Estimated time: 40 min
+
+Tasks
+- [ ] Add `data_pipeline/locations/<slug>.json` manifests with required fields: `slug`, `display_name`, `relation_id`, `wikidata` (optional), `epsg`, `boundary_admin_level`, `default_timeout_s`.
+- [ ] Add a Berlin manifest as canonical baseline and define validation rules for required fields.
+- [ ] Add deterministic location-selection precedence (`--location` explicit arg, then default location).
+
+### 10.6.2 Add Overpass query templating
+Estimated time: 45 min
+
+Tasks
+- [ ] Replace Berlin-only query sources with reusable routing/boundary query templates parameterized by relation/admin-level selectors.
+- [ ] Render concrete `.ql` files per location for reproducibility/debugging before fetch.
+- [ ] Keep deterministic selector policy: relation-id-first, with optional guard tags (`name`/`wikidata`) where available.
+
+### 10.6.3 Replace hardcoded fetch script with parameterized fetch entrypoint
+Estimated time: 45 min
+
+Tasks
+- [ ] Replace `data_pipeline/fetch-data.sh` hardcoded Berlin paths with a parameterized fetch command (`--location`, `--dataset routing|boundaries`, `--output`, `--timeout`, `--endpoint`).
+- [ ] Keep strict shell behavior (`set -euo pipefail`) and explicit error output from `curl`.
+- [ ] Store fetched JSON under per-location paths by default, with optional explicit output override.
+
+### 10.6.4 Standardize per-location artifact layout
+Estimated time: 25 min
+
+Tasks
+- [ ] Standardize OSM input paths as `data_pipeline/input/<slug>/routing.osm.json` and `data_pipeline/input/<slug>/boundaries.osm.json`.
+- [ ] Standardize pipeline outputs as `data_pipeline/output/<slug>/...` for summaries and generated artifacts.
+- [ ] Keep temporary compatibility aliases for existing Berlin paths until migration is complete.
+
+### 10.6.5 Add location-aware pipeline wiring
+Estimated time: 25 min
+
+Tasks
+- [ ] Add optional `--location` convenience resolution to data pipeline scripts that currently rely on Berlin defaults.
+- [ ] Resolve default `--epsg` and input/output paths from location manifests when `--location` is provided.
+- [ ] Preserve explicit `--input`/`--output`/`--epsg` overrides for deterministic manual runs.
+
+### 10.6.6 Generalize Overpass survey tooling
+Estimated time: 20 min
+
+Tasks
+- [ ] Update Overpass survey script/query builder to use location manifests instead of hardcoded Berlin relation IDs.
+- [ ] Ensure report headers and output metadata include location slug/display name.
+
+### 10.6.7 Tests and migration docs
+Estimated time: 25 min
+
+Tasks
+- [ ] Add tests for manifest validation, query rendering, and location-based path resolution.
+- [ ] Add at least one non-Berlin test fixture manifest to verify location-agnostic behavior.
+- [ ] Document onboarding steps in `docs/locations.md` and mark legacy Berlin-only commands as compatibility paths.
+
+---
+
 # Phase 11 — Post-MVP: Global Public Transit Data Pipeline
 
 *This phase is explicitly deferred from MVP. Goal: support public transport data ingestion and routing for any region, not just Berlin/Germany, by separating source formats from a canonical routing format.*
@@ -867,8 +929,9 @@ The pipeline is parameterised from Phase 3.2 onward: `--epsg`, `--input`, `--out
 
 **MVP total: ~21 hours for a junior developer**
 
-Post-MVP adds approximately **22–24 hours** of development:
+Post-MVP adds approximately **26–28 hours** of development:
 - [ ] Phase 10.4 (multimodal road schema + extraction): ~4.5 hours
+- [ ] Phase 10.6 (multi-location OSM fetch generalization): ~3.75 hours
 - [ ] Phase 11 (global public transit pipeline): ~12.25 hours
 - [ ] Phase 12 (UX and sharing enhancements): ~5.5 hours
 - [ ] Plus variable time to obtain/validate feed licences and feed-specific integration constraints.
@@ -889,6 +952,8 @@ Post-MVP adds approximately **22–24 hours** of development:
 ## Post-MVP additions
 - `berlin_graph.bin.gz` schema v2 with per-edge mode mask + speed metadata (bike/car/walk support)
 - Pipeline summaries for speed/access coverage and mode-specific edge counts
+- Location manifest registry (`data_pipeline/locations/*.json`) and rendered per-location Overpass queries
+- Per-location OSM input/output layout (`data_pipeline/input/<slug>/...`, `data_pipeline/output/<slug>/...`)
 - Canonical transit snapshots (`stops/routes/trips/connections/services/transfers`) independent of source format
 - Transit-enabled graph export with populated stop/connection tables
 - CSA runtime module and source-adapter pipeline (`GTFS`, `GTFS-RT`, `NeTEx`, `SIRI` scaffold)
