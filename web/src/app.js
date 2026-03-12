@@ -3599,7 +3599,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
     const shell = initializeAppShell(globalThis.document);
     let initializedMapData = null;
     let routingBinding = null;
-    bindThemeControl(shell, {
+    const themeBinding = bindThemeControl(shell, {
       onThemeChange(themeValue) {
         if (initializedMapData?.boundaryPayload && initializedMapData?.graph?.header) {
           drawBoundaryBasemapAlignedToGraphGrid(
@@ -3613,6 +3613,24 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         renderIsochroneLegendIfNeeded(shell, cycleMinutes, { theme: themeValue });
         routingBinding?.requestIsochroneRedraw();
       },
+    });
+    let printRestoreTheme = null;
+    window.addEventListener('beforeprint', () => {
+      const currentTheme = resolveIsochroneTheme();
+      if (currentTheme === 'light') {
+        return;
+      }
+      if (!printRestoreTheme) {
+        printRestoreTheme = currentTheme;
+      }
+      themeBinding.setTheme('light', { persist: false, notify: true });
+    });
+    window.addEventListener('afterprint', () => {
+      if (!printRestoreTheme) {
+        return;
+      }
+      themeBinding.setTheme(printRestoreTheme, { persist: false, notify: true });
+      printRestoreTheme = null;
     });
     bindSvgExportControl(shell, {
       async exportCurrentRenderedIsochroneSvg() {

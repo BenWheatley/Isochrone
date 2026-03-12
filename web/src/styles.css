@@ -366,3 +366,42 @@ body {
     max-width: none;
   }
 }
+
+@media print {
+  :root,
+  :root[data-theme='dark'] {
+    color-scheme: light;
+    --page-bg: #ffffff;
+    --chrome-bg: #ffffff;
+    --chrome-border: #cad2da;
+    --chrome-text: #122230;
+    --chrome-label: #223746;
+    --control-bg: #ffffff;
+    --control-hover-bg: #edf6ff;
+    --control-border: #9eb0bf;
+    --control-text: #16344a;
+    --control-button-bg: #f9fcff;
+    --status-text: #304454;
+    --disclaimer-text: #5b6c79;
+    --disclaimer-link: #2f6f9f;
+    --badge-text: #174769;
+    --badge-border: #b8c9d8;
+    --badge-bg: #edf4fb;
+    --badge-webgl-text: #0d5f30;
+    --badge-webgl-border: #8cc7a8;
+    --badge-webgl-bg: #e8f7ef;
+    --badge-cpu-text: #7a4b00;
+    --badge-cpu-border: #e0c58d;
+    --badge-cpu-bg: #fff5e6;
+    --map-bg: #dfe8f0;
+    --map-overlay-bg: rgba(251, 253, 255, 0.92);
+    --map-overlay-border: rgba(97, 130, 159, 0.62);
+    --map-overlay-text: #173750;
+    --map-overlay-note: #365772;
+    --map-scale-line-bg: #21435d;
+  }
+
+  #loading {
+    display: none !important;
+  }
+}

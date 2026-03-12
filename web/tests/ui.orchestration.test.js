@@ -141,3 +141,35 @@ test('bindThemeControl restores persisted theme and persists changes', () => {
   themeSelect.emit('change');
   assert.equal(rootElement.dataset.theme, 'light');
 });
+
+test('bindThemeControl setTheme supports non-persistent temporary overrides', () => {
+  const themeSelect = createThemeSelect('dark');
+  const shell = { themeSelect };
+  const rootElement = { dataset: {} };
+  const persistedWrites = [];
+  const storage = {
+    getItem() {
+      return 'dark';
+    },
+    setItem(key, value) {
+      persistedWrites.push([key, value]);
+    },
+  };
+  const changeEvents = [];
+
+  const binding = bindThemeControl(shell, {
+    rootElement,
+    storage,
+    onThemeChange(themeValue) {
+      changeEvents.push(themeValue);
+    },
+  });
+
+  binding.setTheme('light', { persist: false, notify: true });
+  assert.equal(rootElement.dataset.theme, 'light');
+  assert.equal(themeSelect.value, 'light');
+  assert.deepEqual(changeEvents, ['light']);
+  assert.deepEqual(persistedWrites, []);
+
+  binding.dispose();
+});

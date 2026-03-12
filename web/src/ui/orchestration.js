@@ -177,20 +177,30 @@ export function bindThemeControl(shell, options = {}) {
     return normalizedTheme;
   };
 
+  const applyTheme = (themeValue, applyOptions = {}) => {
+    const persist = applyOptions.persist !== false;
+    const notify = applyOptions.notify === true;
+    const nextTheme = setTheme(themeValue, persist);
+    if (notify && onThemeChange) {
+      onThemeChange(nextTheme);
+    }
+    return nextTheme;
+  };
+
   const persistedTheme = safeStorageGet(storage, storageKey);
   setTheme(persistedTheme, false);
 
   const handleThemeChange = () => {
-    const nextTheme = setTheme(shell.themeSelect.value, true);
-    if (onThemeChange) {
-      onThemeChange(nextTheme);
-    }
+    applyTheme(shell.themeSelect.value, { persist: true, notify: true });
   };
   shell.themeSelect.addEventListener('change', handleThemeChange);
 
   return {
     dispose() {
       shell.themeSelect.removeEventListener('change', handleThemeChange);
+    },
+    setTheme(themeValue, applyOptions = {}) {
+      return applyTheme(themeValue, applyOptions);
     },
   };
 }
