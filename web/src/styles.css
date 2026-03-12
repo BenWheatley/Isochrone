@@ -25,7 +25,7 @@
   --badge-cpu-text: #7a4b00;
   --badge-cpu-border: #e0c58d;
   --badge-cpu-bg: #fff5e6;
-  --map-bg: #dfe8f0;
+  --map-bg: white;
   --map-overlay-bg: rgba(251, 253, 255, 0.92);
   --map-overlay-border: rgba(97, 130, 159, 0.62);
   --map-overlay-text: #173750;
@@ -405,7 +405,7 @@ body {
     --badge-cpu-text: #7a4b00;
     --badge-cpu-border: #e0c58d;
     --badge-cpu-bg: #fff5e6;
-    --map-bg: #dfe8f0;
+    --map-bg: white;
     --map-overlay-bg: rgba(251, 253, 255, 0.92);
     --map-overlay-border: rgba(97, 130, 159, 0.62);
     --map-overlay-text: #173750;
