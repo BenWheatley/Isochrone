@@ -159,8 +159,12 @@ export function bindThemeControl(shell, options = {}) {
   }
   const storage = options.storage ?? globalThis.localStorage ?? null;
   const storageKey = options.storageKey ?? THEME_STORAGE_KEY;
+  const onThemeChange = options.onThemeChange ?? null;
   if (typeof storageKey !== 'string' || storageKey.length === 0) {
     throw new Error('storageKey must be a non-empty string');
+  }
+  if (onThemeChange !== null && typeof onThemeChange !== 'function') {
+    throw new Error('onThemeChange must be a function when provided');
   }
 
   const setTheme = (themeValue, persist = true) => {
@@ -177,7 +181,10 @@ export function bindThemeControl(shell, options = {}) {
   setTheme(persistedTheme, false);
 
   const handleThemeChange = () => {
-    setTheme(shell.themeSelect.value, true);
+    const nextTheme = setTheme(shell.themeSelect.value, true);
+    if (onThemeChange) {
+      onThemeChange(nextTheme);
+    }
   };
   shell.themeSelect.addEventListener('change', handleThemeChange);
 

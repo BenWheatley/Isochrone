@@ -25,7 +25,7 @@ export const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;
 export const INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE = 3;
 export const FINAL_EDGE_INTERPOLATION_STEP_STRIDE = 1;
 export const EDGE_TRAVERSAL_COST_CACHE_PROPERTY = '__edgeTraversalCostSecondsByModeMask';
-export const CYCLE_COLOUR_MAP_GLSL = `vec3 mapCycleColour(float cycleRatio) {
+export const CYCLE_COLOUR_MAP_GLSL = `vec3 mapCycleColourDark(float cycleRatio) {
   if (cycleRatio <= 1.0 / 5.0) {
     return vec3(0.0, 255.0, 255.0);
   }
@@ -39,4 +39,27 @@ export const CYCLE_COLOUR_MAP_GLSL = `vec3 mapCycleColour(float cycleRatio) {
     return vec3(255.0, 140.0, 0.0);
   }
   return vec3(255.0, 64.0, 160.0);
+}
+
+vec3 mapCycleColourLight(float cycleRatio) {
+  if (cycleRatio <= 1.0 / 5.0) {
+    return vec3(0.0, 110.0, 210.0);
+  }
+  if (cycleRatio <= 2.0 / 5.0) {
+    return vec3(0.0, 150.0, 70.0);
+  }
+  if (cycleRatio <= 3.0 / 5.0) {
+    return vec3(185.0, 140.0, 0.0);
+  }
+  if (cycleRatio <= 4.0 / 5.0) {
+    return vec3(185.0, 85.0, 0.0);
+  }
+  return vec3(165.0, 0.0, 130.0);
+}
+
+vec3 mapCycleColour(float cycleRatio, float themeVariant) {
+  if (themeVariant >= 0.5) {
+    return mapCycleColourLight(cycleRatio);
+  }
+  return mapCycleColourDark(cycleRatio);
 }`;

@@ -106,6 +106,7 @@ test('bindThemeControl restores persisted theme and persists changes', () => {
   const themeSelect = createThemeSelect('light');
   const shell = { themeSelect };
   const rootElement = { dataset: {} };
+  const themeChangeEvents = [];
   let storedValue = 'dark';
   const storage = {
     getItem(key) {
@@ -118,14 +119,22 @@ test('bindThemeControl restores persisted theme and persists changes', () => {
     },
   };
 
-  const binding = bindThemeControl(shell, { rootElement, storage });
+  const binding = bindThemeControl(shell, {
+    rootElement,
+    storage,
+    onThemeChange(themeValue) {
+      themeChangeEvents.push(themeValue);
+    },
+  });
   assert.equal(themeSelect.value, 'dark');
   assert.equal(rootElement.dataset.theme, 'dark');
+  assert.deepEqual(themeChangeEvents, []);
 
   themeSelect.value = 'light';
   themeSelect.emit('change');
   assert.equal(rootElement.dataset.theme, 'light');
   assert.equal(storedValue, 'light');
+  assert.deepEqual(themeChangeEvents, ['light']);
 
   binding.dispose();
   themeSelect.value = 'dark';

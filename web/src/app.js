@@ -44,6 +44,8 @@ import {
 import {
   CYCLE_COLOUR_MAP_GLSL,
   DEFAULT_COLOUR_CYCLE_MINUTES,
+  getIsochronePalette,
+  normalizeIsochroneTheme,
   timeToColour,
 } from './render/colour.js';
 import {
@@ -518,7 +520,18 @@ export function parseBoundaryBasemapPayload(payload) {
   };
 }
 
-export function drawBoundaryBasemapAlignedToGraphGrid(boundaryCanvas, payload, graphHeader) {
+function getBoundaryStrokeStyle(colourTheme) {
+  return normalizeIsochroneTheme(colourTheme, 'dark') === 'light'
+    ? 'rgba(58, 94, 126, 0.62)'
+    : 'rgba(125, 175, 220, 0.55)';
+}
+
+export function drawBoundaryBasemapAlignedToGraphGrid(
+  boundaryCanvas,
+  payload,
+  graphHeader,
+  options = {},
+) {
   if (!boundaryCanvas || typeof boundaryCanvas.getContext !== 'function') {
     throw new Error('boundaryCanvas must provide getContext("2d")');
   }
@@ -535,7 +548,7 @@ export function drawBoundaryBasemapAlignedToGraphGrid(boundaryCanvas, payload, g
 
   context.clearRect(0, 0, boundaryCanvas.width, boundaryCanvas.height);
   context.fillStyle = 'rgba(0, 0, 0, 0)';
-  context.strokeStyle = 'rgba(125, 175, 220, 0.55)';
+  context.strokeStyle = getBoundaryStrokeStyle(options.colourTheme);
   context.lineWidth = 1.2;
   context.lineJoin = 'round';
   context.lineCap = 'round';
@@ -845,6 +858,7 @@ export async function initializeMapData(shell, options = {}) {
       shell.boundaryCanvas,
       boundaryLoad.boundaryPayload,
       graph.header,
+      { colourTheme: resolveIsochroneTheme() },
     );
     renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));
     updateDistanceScaleBar(shell, graph.header);
@@ -864,6 +878,7 @@ export async function initializeMapData(shell, options = {}) {
     return {
       boundarySummary: boundaryLoad.boundarySummary,
       alignedBoundarySummary,
+      boundaryPayload: boundaryLoad.boundaryPayload,
       graph,
       nodePixels,
       nodeModeMask,
@@ -931,6 +946,15 @@ function formatLegendDuration(totalMinutes) {
   return `${hours}h ${minutes}m`;
 }
 
+function resolveIsochroneTheme(rootElement = globalThis.document?.documentElement ?? null) {
+  const datasetTheme = rootElement?.dataset?.theme ?? null;
+  return normalizeIsochroneTheme(datasetTheme, 'dark');
+}
+
+function getIsochroneThemeVariant(theme) {
+  return normalizeIsochroneTheme(theme, 'dark') === 'light' ? 1 : 0;
+}
+
 function formatDistanceLabel(distanceMetres) {
   if (distanceMetres >= 1000) {
     const km = distanceMetres / 1000;
@@ -962,7 +986,7 @@ function pickScaleDistanceMetres(targetDistanceMetres) {
   return chosen;
 }
 
-export function renderIsochroneLegend(shell, cycleMinutes) {
+export function renderIsochroneLegend(shell, cycleMinutes, options = {}) {
   if (!shell || typeof shell !== 'object' || !shell.isochroneLegend) {
     throw new Error('shell.isochroneLegend is required');
   }
@@ -971,13 +995,11 @@ export function renderIsochroneLegend(shell, cycleMinutes) {
   }
 
   const boundaries = [0, 1 / 5, 2 / 5, 3 / 5, 4 / 5, 1];
-  const colours = [
-    [0, 255, 255],
-    [64, 255, 64],
-    [255, 255, 64],
-    [255, 140, 0],
-    [255, 64, 160],
-  ];
+  const theme = normalizeIsochroneTheme(
+    options.theme ?? resolveIsochroneTheme(options.rootElement),
+    'dark',
+  );
+  const colours = getIsochronePalette(theme);
 
   const legendRows = [];
   for (let index = 0; index < colours.length; index += 1) {
@@ -997,20 +1019,28 @@ export function renderIsochroneLegend(shell, cycleMinutes) {
   shell.isochroneLegend.innerHTML = legendRows.join('');
 }
 
-export function renderIsochroneLegendIfNeeded(shell, cycleMinutes) {
+export function renderIsochroneLegendIfNeeded(shell, cycleMinutes, options = {}) {
   if (!shell || typeof shell !== 'object' || !shell.isochroneLegend) {
     throw new Error('shell.isochroneLegend is required');
   }
   if (!Number.isFinite(cycleMinutes) || cycleMinutes <= 0) {
     throw new Error('cycleMinutes must be a positive finite number');
   }
+  const theme = normalizeIsochroneTheme(
+    options.theme ?? resolveIsochroneTheme(options.rootElement),
+    'dark',
+  );
 
-  if (shell.lastRenderedLegendCycleMinutes === cycleMinutes) {
+  if (
+    shell.lastRenderedLegendCycleMinutes === cycleMinutes
+    && shell.lastRenderedLegendTheme === theme
+  ) {
     return false;
   }
 
-  renderIsochroneLegend(shell, cycleMinutes);
+  renderIsochroneLegend(shell, cycleMinutes, { theme });
   shell.lastRenderedLegendCycleMinutes = cycleMinutes;
+  shell.lastRenderedLegendTheme = theme;
   return true;
 }
 
@@ -1228,6 +1258,7 @@ export function paintInterpolatedEdgeToGrid(
 
   const alpha = clampInt(Math.round(options.alpha ?? 255), 0, 255);
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+  const colourTheme = normalizeIsochroneTheme(options.colourTheme, 'dark');
   const stepStride = options.stepStride ?? 1;
   if (!Number.isInteger(stepStride) || stepStride <= 0) {
     throw new Error('stepStride must be a positive integer');
@@ -1251,7 +1282,10 @@ export function paintInterpolatedEdgeToGrid(
       stepIndex,
       totalSteps,
     );
-    const [r, g, b] = timeToColour(seconds, { cycleMinutes: colourCycleMinutes });
+    const [r, g, b] = timeToColour(seconds, {
+      cycleMinutes: colourCycleMinutes,
+      theme: colourTheme,
+    });
     if (setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)) {
       paintedCount += 1;
     }
@@ -1312,11 +1346,15 @@ export function paintReachableNodesToGrid(pixelGrid, nodePixels, distSeconds, op
 
   const alpha = options.alpha ?? 255;
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+  const colourTheme = normalizeIsochroneTheme(options.colourTheme, 'dark');
   let paintedCount = 0;
 
   for (let nodeIndex = 0; nodeIndex < nodePixels.nodePixelX.length; nodeIndex += 1) {
     if (distSeconds[nodeIndex] < Infinity) {
-      const [r, g, b] = timeToColour(distSeconds[nodeIndex], { cycleMinutes: colourCycleMinutes });
+      const [r, g, b] = timeToColour(distSeconds[nodeIndex], {
+        cycleMinutes: colourCycleMinutes,
+        theme: colourTheme,
+      });
       const xPx = nodePixels.nodePixelX[nodeIndex];
       const yPx = nodePixels.nodePixelY[nodeIndex];
       if (setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)) {
@@ -1505,12 +1543,14 @@ void main(void) {
   let travelTimeTexture = null;
   let travelTimeTextureLocation = null;
   let travelTimeCycleMinutesLocation = null;
+  let travelTimeThemeVariantLocation = null;
 
   if (isWebGl2) {
     const travelTimeFragmentSource = `#version 300 es
 precision highp float;
 uniform sampler2D u_time_texture;
 uniform float u_cycle_minutes;
+uniform float u_theme_variant;
 in vec2 v_uv;
 out vec4 outColor;
 
@@ -1525,7 +1565,7 @@ void main(void) {
   float cycleMinutes = max(u_cycle_minutes, 1.0);
   float cyclePositionMinutes = mod(seconds / 60.0, cycleMinutes);
   float cycleRatio = cyclePositionMinutes / cycleMinutes;
-  vec3 rgb = mapCycleColour(cycleRatio) / 255.0;
+  vec3 rgb = mapCycleColour(cycleRatio, u_theme_variant) / 255.0;
   outColor = vec4(rgb, 1.0);
 }`;
 
@@ -1548,6 +1588,7 @@ void main(void) {
         gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
         travelTimeTextureLocation = gl.getUniformLocation(travelTimeProgram, 'u_time_texture');
         travelTimeCycleMinutesLocation = gl.getUniformLocation(travelTimeProgram, 'u_cycle_minutes');
+        travelTimeThemeVariantLocation = gl.getUniformLocation(travelTimeProgram, 'u_theme_variant');
       }
     }
   }
@@ -1583,6 +1624,7 @@ void main(void) {
 precision highp float;
 uniform float u_cycle_minutes;
 uniform float u_alpha;
+uniform float u_theme_variant;
 in float v_seconds;
 out vec4 outColor;
 
@@ -1596,12 +1638,13 @@ void main(void) {
   float cycleMinutes = max(u_cycle_minutes, 1.0);
   float cyclePositionMinutes = mod(v_seconds / 60.0, cycleMinutes);
   float cycleRatio = cyclePositionMinutes / cycleMinutes;
-  vec3 rgb = mapCycleColour(cycleRatio) / 255.0;
+  vec3 rgb = mapCycleColour(cycleRatio, u_theme_variant) / 255.0;
   outColor = vec4(rgb, u_alpha);
 }`
     : `precision highp float;
 uniform float u_cycle_minutes;
 uniform float u_alpha;
+uniform float u_theme_variant;
 varying float v_seconds;
 
 ${CYCLE_COLOUR_MAP_GLSL}
@@ -1614,7 +1657,7 @@ void main(void) {
   float cycleMinutes = max(u_cycle_minutes, 1.0);
   float cyclePositionMinutes = mod(v_seconds / 60.0, cycleMinutes);
   float cycleRatio = cyclePositionMinutes / cycleMinutes;
-  vec3 rgb = mapCycleColour(cycleRatio) / 255.0;
+  vec3 rgb = mapCycleColour(cycleRatio, u_theme_variant) / 255.0;
   gl_FragColor = vec4(rgb, u_alpha);
 }`;
   const edgeProgram = createWebGlProgram(gl, edgeVertexShaderSource, edgeFragmentShaderSource);
@@ -1627,6 +1670,7 @@ void main(void) {
   const edgeViewportLocation = gl.getUniformLocation(edgeProgram, 'u_viewport_px');
   const edgeCycleMinutesLocation = gl.getUniformLocation(edgeProgram, 'u_cycle_minutes');
   const edgeAlphaLocation = gl.getUniformLocation(edgeProgram, 'u_alpha');
+  const edgeThemeVariantLocation = gl.getUniformLocation(edgeProgram, 'u_theme_variant');
   const edgeVertexBuffer = gl.createBuffer();
   if (!edgeVertexBuffer) {
     gl.deleteProgram(edgeProgram);
@@ -1702,7 +1746,7 @@ void main(void) {
         gl.UNSIGNED_BYTE,
         pixelGrid.rgba,
       );
-      if (textureLocation) {
+      if (textureLocation !== null) {
         gl.uniform1i(textureLocation, 0);
       }
       gl.clearColor(0, 0, 0, 0);
@@ -1722,6 +1766,7 @@ void main(void) {
       }
 
       const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+      const themeVariant = getIsochroneThemeVariant(options.colourTheme ?? 'dark');
       const alpha = Number.isFinite(options.alpha) ? options.alpha : 1;
       const clampedAlpha = Math.max(0, Math.min(1, alpha));
       const append = options.append ?? false;
@@ -1756,14 +1801,17 @@ void main(void) {
       gl.vertexAttribPointer(edgePositionLocation, 2, gl.FLOAT, false, 12, 0);
       gl.enableVertexAttribArray(edgeSecondsLocation);
       gl.vertexAttribPointer(edgeSecondsLocation, 1, gl.FLOAT, false, 12, 8);
-      if (edgeViewportLocation) {
+      if (edgeViewportLocation !== null) {
         gl.uniform2f(edgeViewportLocation, canvas.width, canvas.height);
       }
-      if (edgeCycleMinutesLocation) {
+      if (edgeCycleMinutesLocation !== null) {
         gl.uniform1f(edgeCycleMinutesLocation, cycleMinutes);
       }
-      if (edgeAlphaLocation) {
+      if (edgeAlphaLocation !== null) {
         gl.uniform1f(edgeAlphaLocation, clampedAlpha);
+      }
+      if (edgeThemeVariantLocation !== null) {
+        gl.uniform1f(edgeThemeVariantLocation, themeVariant);
       }
       gl.drawArrays(gl.LINES, 0, edgeVertexData.length / 3);
       return edgeVertexData.length / 6;
@@ -1806,6 +1854,7 @@ void main(void) {
       }
 
       const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+      const themeVariant = getIsochroneThemeVariant(options.colourTheme ?? 'dark');
       gl.viewport(0, 0, canvas.width, canvas.height);
       bindQuadToProgram(travelTimeProgram, travelTimePositionLocation);
       gl.activeTexture(gl.TEXTURE0);
@@ -1821,11 +1870,14 @@ void main(void) {
         gl.FLOAT,
         travelTimeGrid.seconds,
       );
-      if (travelTimeTextureLocation) {
+      if (travelTimeTextureLocation !== null) {
         gl.uniform1i(travelTimeTextureLocation, 0);
       }
-      if (travelTimeCycleMinutesLocation) {
+      if (travelTimeCycleMinutesLocation !== null) {
         gl.uniform1f(travelTimeCycleMinutesLocation, cycleMinutes);
+      }
+      if (travelTimeThemeVariantLocation !== null) {
+        gl.uniform1f(travelTimeThemeVariantLocation, themeVariant);
       }
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
@@ -1911,6 +1963,7 @@ export function paintSettledBatchToGrid(pixelGrid, nodePixels, distSeconds, sett
 
   const alpha = options.alpha ?? 255;
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+  const colourTheme = normalizeIsochroneTheme(options.colourTheme, 'dark');
   let paintedCount = 0;
 
   for (const nodeIndex of settledBatch) {
@@ -1921,7 +1974,10 @@ export function paintSettledBatchToGrid(pixelGrid, nodePixels, distSeconds, sett
       continue;
     }
 
-    const [r, g, b] = timeToColour(distSeconds[nodeIndex], { cycleMinutes: colourCycleMinutes });
+    const [r, g, b] = timeToColour(distSeconds[nodeIndex], {
+      cycleMinutes: colourCycleMinutes,
+      theme: colourTheme,
+    });
     const xPx = nodePixels.nodePixelX[nodeIndex];
     const yPx = nodePixels.nodePixelY[nodeIndex];
     if (setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)) {
@@ -2020,6 +2076,7 @@ function paintEligibleOutgoingEdgesFromSourceNode(
   allowedModeMask,
   alpha,
   colourCycleMinutes,
+  colourTheme,
   edgeSlackSeconds,
   stepStride,
   edgeTraversalCostSeconds,
@@ -2041,7 +2098,7 @@ function paintEligibleOutgoingEdgesFromSourceNode(
         x1,
         y1,
         expectedTargetSeconds,
-        { alpha, colourCycleMinutes, stepStride },
+        { alpha, colourCycleMinutes, colourTheme, stepStride },
       ),
   );
 }
@@ -2066,6 +2123,7 @@ export function paintSettledBatchEdgeInterpolationsToGrid(
 
   const alpha = options.alpha ?? 255;
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+  const colourTheme = normalizeIsochroneTheme(options.colourTheme, 'dark');
   const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
   const stepStride = options.stepStride ?? 1;
   const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
@@ -2091,6 +2149,7 @@ export function paintSettledBatchEdgeInterpolationsToGrid(
       allowedModeMask,
       alpha,
       colourCycleMinutes,
+      colourTheme,
       edgeSlackSeconds,
       stepStride,
       edgeTraversalCostSeconds,
@@ -2118,6 +2177,7 @@ export function paintAllReachableEdgeInterpolationsToGrid(
 
   const alpha = options.alpha ?? 255;
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+  const colourTheme = normalizeIsochroneTheme(options.colourTheme, 'dark');
   const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
   const stepStride = options.stepStride ?? 1;
   const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
@@ -2142,6 +2202,7 @@ export function paintAllReachableEdgeInterpolationsToGrid(
       allowedModeMask,
       alpha,
       colourCycleMinutes,
+      colourTheme,
       edgeSlackSeconds,
       stepStride,
       edgeTraversalCostSeconds,
@@ -2598,6 +2659,7 @@ function renderInitialPassByBackend(renderContext) {
     clearTravelTimeGrid(mapData.travelTimeGrid);
     renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
       cycleMinutes: getColourCycleMinutesFromShell(shell),
+      colourTheme: renderContext.colourTheme,
     });
   } else {
     clearGrid(mapData.pixelGrid);
@@ -2618,6 +2680,7 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
     edgeTraversalCostSeconds,
     renderer,
     colourCycleMinutes,
+    colourTheme,
     interactiveEdgeStepStride,
     alpha,
     shell,
@@ -2644,6 +2707,7 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
     paintedEdgeCount += profileMs('onSliceDrawMs', () =>
       renderer.drawTravelTimeEdges(batchEdgeVertices, {
         cycleMinutes: colourCycleMinutes,
+        colourTheme,
         append: true,
         widthPx: searchState.graph.header.gridWidthPx,
         heightPx: searchState.graph.header.gridHeightPx,
@@ -2674,7 +2738,10 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
       ),
     );
     profileMs('onSliceDrawMs', () =>
-      renderer.drawTravelTimeGrid(mapData.travelTimeGrid, { cycleMinutes: colourCycleMinutes }),
+      renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
+        cycleMinutes: colourCycleMinutes,
+        colourTheme,
+      }),
     );
   } else {
     paintedEdgeCount += profileMs('onSlicePaintMs', () =>
@@ -2688,6 +2755,7 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
         {
           alpha,
           colourCycleMinutes,
+          colourTheme,
           stepStride: interactiveEdgeStepStride,
           edgeTraversalCostSeconds,
         },
@@ -2699,7 +2767,7 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
         mapData.nodePixels,
         searchState.distSeconds,
         settledBatch,
-        { alpha, colourCycleMinutes },
+        { alpha, colourCycleMinutes, colourTheme },
       ),
     );
     profileMs('onSliceDrawMs', () =>
@@ -2722,6 +2790,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
     edgeTraversalCostSeconds,
     renderer,
     colourCycleMinutes,
+    colourTheme,
     finalEdgeStepStride,
     alpha,
     shell,
@@ -2744,6 +2813,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
     paintedEdgeCount = profileMs('finalDrawMs', () =>
       renderer.drawTravelTimeEdges(allEdgeVertices, {
         cycleMinutes: colourCycleMinutes,
+        colourTheme,
         append: false,
         widthPx: searchState.graph.header.gridWidthPx,
         heightPx: searchState.graph.header.gridHeightPx,
@@ -2775,7 +2845,10 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
       ),
     );
     profileMs('finalDrawMs', () =>
-      renderer.drawTravelTimeGrid(mapData.travelTimeGrid, { cycleMinutes: colourCycleMinutes }),
+      renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
+        cycleMinutes: colourCycleMinutes,
+        colourTheme,
+      }),
     );
   } else {
     profileMs('finalDrawMs', () => {
@@ -2791,6 +2864,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
         {
           alpha,
           colourCycleMinutes,
+          colourTheme,
           stepStride: finalEdgeStepStride,
           edgeTraversalCostSeconds,
         },
@@ -2801,7 +2875,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
         mapData.pixelGrid,
         mapData.nodePixels,
         searchState.distSeconds,
-        { alpha, colourCycleMinutes },
+        { alpha, colourCycleMinutes, colourTheme },
       ),
     );
     profileMs('finalDrawMs', () =>
@@ -2833,6 +2907,10 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
 
   const alpha = options.alpha ?? 255;
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+  const colourTheme = normalizeIsochroneTheme(
+    options.colourTheme ?? resolveIsochroneTheme(),
+    'dark',
+  );
   const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;
   const edgeTraversalCostSeconds = searchState.edgeTraversalCostSeconds;
   const nowImpl = options.nowImpl ?? defaultNowMs;
@@ -2919,6 +2997,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
     edgeVertexBuilder,
     edgeTraversalCostSeconds,
     colourCycleMinutes,
+    colourTheme,
     interactiveEdgeStepStride,
     finalEdgeStepStride,
     alpha,
@@ -3007,6 +3086,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
           {
             allowedModeMask,
             cycleMinutes: colourCycleMinutes,
+            colourTheme,
             alpha,
             stepStride: finalEdgeStepStride,
             sampleCount: paritySampleCount,
@@ -3146,6 +3226,7 @@ export function runGpuCpuParityDiagnostic(renderer, mapData, searchState, option
   }
 
   const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+  const colourTheme = normalizeIsochroneTheme(options.colourTheme, 'dark');
   const alpha = clampInt(Math.round(options.alpha ?? 255), 0, 255);
   const stepStride = options.stepStride ?? FINAL_EDGE_INTERPOLATION_STEP_STRIDE;
   const rawSampleCount = options.sampleCount ?? 256;
@@ -3161,13 +3242,13 @@ export function runGpuCpuParityDiagnostic(renderer, mapData, searchState, option
     mapData.nodePixels,
     searchState.distSeconds,
     allowedModeMask,
-    { alpha, colourCycleMinutes: cycleMinutes, stepStride },
+    { alpha, colourCycleMinutes: cycleMinutes, colourTheme, stepStride },
   );
   paintReachableNodesToGrid(
     referenceGrid,
     mapData.nodePixels,
     searchState.distSeconds,
-    { alpha, colourCycleMinutes: cycleMinutes },
+    { alpha, colourCycleMinutes: cycleMinutes, colourTheme },
   );
 
   const samplePixels = createDeterministicSamplePixels(
@@ -3516,8 +3597,23 @@ function isClosedPath(path) {
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
     const shell = initializeAppShell(globalThis.document);
-    bindThemeControl(shell);
     let initializedMapData = null;
+    let routingBinding = null;
+    bindThemeControl(shell, {
+      onThemeChange(themeValue) {
+        if (initializedMapData?.boundaryPayload && initializedMapData?.graph?.header) {
+          drawBoundaryBasemapAlignedToGraphGrid(
+            shell.boundaryCanvas,
+            initializedMapData.boundaryPayload,
+            initializedMapData.graph.header,
+            { colourTheme: themeValue },
+          );
+        }
+        const cycleMinutes = getColourCycleMinutesFromShell(shell);
+        renderIsochroneLegendIfNeeded(shell, cycleMinutes, { theme: themeValue });
+        routingBinding?.requestIsochroneRedraw();
+      },
+    });
     bindSvgExportControl(shell, {
       async exportCurrentRenderedIsochroneSvg() {
         if (routingBinding && typeof routingBinding.waitForIdle === 'function') {
@@ -3568,7 +3664,6 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         setRoutingStatus(shell, 'SVG export failed.');
       },
     });
-    let routingBinding = null;
     bindModeSelectControl(shell, {
       requestIsochroneRedraw() {
         return routingBinding?.requestIsochroneRedraw() ?? false;

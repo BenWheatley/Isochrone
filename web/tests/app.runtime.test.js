@@ -245,9 +245,12 @@ test('timeToColour wraps to the beginning after each configured cycle', () => {
   const start = timeToColour(0, { cycleMinutes: 60 });
   const afterCycle = timeToColour(3600, { cycleMinutes: 60 });
   const secondBand = timeToColour(13 * 60, { cycleMinutes: 60 });
+  const startLight = timeToColour(0, { cycleMinutes: 60, theme: 'light' });
   assert.deepEqual(start, [0, 255, 255]);
   assert.deepEqual(afterCycle, start);
   assert.deepEqual(secondBand, [64, 255, 64]);
+  assert.deepEqual(startLight, [0, 110, 210]);
+  assert.notDeepEqual(startLight, start);
 });
 
 test('parseNodeIndexFromLocationSearch validates and clamps invalid params', () => {
