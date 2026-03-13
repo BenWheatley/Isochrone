@@ -504,6 +504,9 @@ export async function runWalkingIsochroneFromSourceNode(
       allowedModeMask,
       edgeTraversalCostSeconds,
       colourCycleMinutes: options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
+      edgeVertexData: runSummary.edgeVertexData ?? null,
+      edgeVertexDataModeMask:
+        runSummary.edgeVertexData instanceof Float32Array ? allowedModeMask : null,
     };
     runPostMvpTransitStub(mapData.graph, searchState);
   }
@@ -539,6 +542,56 @@ async function loadEdgeCostPrecomputeKernel(options = {}) {
   }
 }
 
+export function getOrBuildSnapshotEdgeVertexData(mapData, snapshot, options = {}) {
+  if (!mapData || typeof mapData !== 'object' || !mapData.graph || !mapData.nodePixels) {
+    throw new Error('mapData.graph and mapData.nodePixels are required');
+  }
+  if (!snapshot || typeof snapshot !== 'object') {
+    throw new Error('snapshot must be an object');
+  }
+  const distSeconds = snapshot.distSeconds;
+  if (!(distSeconds instanceof Float32Array) && !(distSeconds instanceof Float64Array)) {
+    throw new Error('snapshot.distSeconds must be a Float32Array or Float64Array');
+  }
+
+  const allowedModeMask = options.allowedModeMask ?? snapshot.allowedModeMask ?? EDGE_MODE_CAR_BIT;
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+
+  if (
+    snapshot.edgeVertexData instanceof Float32Array
+    && snapshot.edgeVertexDataModeMask === allowedModeMask
+  ) {
+    return snapshot.edgeVertexData;
+  }
+
+  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
+    snapshot.edgeTraversalCostSeconds,
+    mapData.graph.header.nEdges,
+  );
+  const collectEdgeVerticesImpl =
+    options.collectEdgeVerticesImpl ?? collectAllReachableTravelTimeEdgeVertices;
+  if (typeof collectEdgeVerticesImpl !== 'function') {
+    throw new Error('collectEdgeVerticesImpl must be a function');
+  }
+
+  const edgeVertexData = collectEdgeVerticesImpl(
+    mapData.graph,
+    mapData.nodePixels,
+    distSeconds,
+    allowedModeMask,
+    { edgeTraversalCostSeconds },
+  );
+  if (!(edgeVertexData instanceof Float32Array)) {
+    throw new Error('collectEdgeVerticesImpl must return a Float32Array');
+  }
+
+  snapshot.edgeVertexData = edgeVertexData;
+  snapshot.edgeVertexDataModeMask = allowedModeMask;
+  return edgeVertexData;
+}
+
 function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   if (!shell || typeof shell !== 'object' || !shell.isochroneCanvas) {
     return false;
@@ -570,10 +623,6 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
     'dark',
   );
   const allowedModeMask = options.allowedModeMask ?? snapshot.allowedModeMask ?? EDGE_MODE_CAR_BIT;
-  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
-    snapshot.edgeTraversalCostSeconds,
-    mapData.graph.header.nEdges,
-  );
 
   const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
   updateRenderBackendBadge(shell, renderer);
@@ -581,22 +630,24 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
 
   if (supportsGpuEdgeInterpolation) {
-    const allEdgeVertices = collectAllReachableTravelTimeEdgeVertices(
-      mapData.graph,
-      mapData.nodePixels,
-      distSeconds,
+    const allEdgeVertices = getOrBuildSnapshotEdgeVertexData(mapData, snapshot, {
       allowedModeMask,
-      { edgeTraversalCostSeconds },
-    );
+    });
     renderer.drawTravelTimeEdges(allEdgeVertices, {
       cycleMinutes: colourCycleMinutes,
       colourTheme,
       append: false,
+      reuseUploadedGeometry: true,
       widthPx: mapData.graph.header.gridWidthPx,
       heightPx: mapData.graph.header.gridHeightPx,
     });
     return true;
   }
+
+  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
+    snapshot.edgeTraversalCostSeconds,
+    mapData.graph.header.nEdges,
+  );
 
   if (supportsGpuTravelTimeRendering && mapData.travelTimeGrid) {
     clearTravelTimeGrid(mapData.travelTimeGrid);
@@ -1755,6 +1806,26 @@ function createCanvas2dIsochroneRenderer(canvas) {
   };
 }
 
+export function shouldUploadEdgeGeometry(
+  previousEdgeVertexDataRef,
+  previousEdgeVertexDataLength,
+  edgeVertexData,
+  options = {},
+) {
+  if (!(edgeVertexData instanceof Float32Array)) {
+    throw new Error('edgeVertexData must be a Float32Array');
+  }
+  const append = options.append === true;
+  const reuseUploadedGeometry = options.reuseUploadedGeometry === true;
+  if (append || !reuseUploadedGeometry) {
+    return true;
+  }
+  if (previousEdgeVertexDataRef !== edgeVertexData) {
+    return true;
+  }
+  return previousEdgeVertexDataLength !== edgeVertexData.length;
+}
+
 function createWebGlShader(gl, type, source) {
   const shader = gl.createShader(type);
   if (!shader) {
@@ -2023,6 +2094,8 @@ void main(void) {
     throw new Error('failed to allocate WebGL edge vertex buffer');
   }
   let edgeVertexBufferCapacityFloats = 0;
+  let lastUploadedEdgeVertexDataRef = null;
+  let lastUploadedEdgeVertexDataLength = 0;
   const ensureEdgeVertexBufferCapacity = (requiredFloats) => {
     if (!Number.isInteger(requiredFloats) || requiredFloats <= 0) {
       throw new Error('requiredFloats must be a positive integer');
@@ -2107,7 +2180,12 @@ void main(void) {
       if (edgeVertexData.length % 6 !== 0) {
         throw new Error('edgeVertexData length must be a multiple of 6 (x0,y0,t0,x1,y1,t1)');
       }
+      const append = options.append ?? false;
       if (edgeVertexData.length === 0) {
+        if (!append) {
+          lastUploadedEdgeVertexDataRef = null;
+          lastUploadedEdgeVertexDataLength = 0;
+        }
         return 0;
       }
 
@@ -2115,7 +2193,7 @@ void main(void) {
       const themeVariant = getIsochroneThemeVariant(options.colourTheme ?? 'dark');
       const alpha = Number.isFinite(options.alpha) ? options.alpha : 1;
       const clampedAlpha = Math.max(0, Math.min(1, alpha));
-      const append = options.append ?? false;
+      const reuseUploadedGeometry = options.reuseUploadedGeometry === true;
       const targetWidthPx = options.widthPx ?? canvas.width;
       const targetHeightPx = options.heightPx ?? canvas.height;
       if (!Number.isFinite(targetWidthPx) || targetWidthPx <= 0) {
@@ -2142,7 +2220,18 @@ void main(void) {
       gl.useProgram(edgeProgram);
       gl.bindBuffer(gl.ARRAY_BUFFER, edgeVertexBuffer);
       ensureEdgeVertexBufferCapacity(edgeVertexData.length);
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, edgeVertexData);
+      const shouldUploadGeometry = shouldUploadEdgeGeometry(
+        lastUploadedEdgeVertexDataRef,
+        lastUploadedEdgeVertexDataLength,
+        edgeVertexData,
+        {
+          append,
+          reuseUploadedGeometry,
+        },
+      );
+      if (shouldUploadGeometry) {
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, edgeVertexData);
+      }
       gl.enableVertexAttribArray(edgePositionLocation);
       gl.vertexAttribPointer(edgePositionLocation, 2, gl.FLOAT, false, 12, 0);
       gl.enableVertexAttribArray(edgeSecondsLocation);
@@ -2160,6 +2249,13 @@ void main(void) {
         gl.uniform1f(edgeThemeVariantLocation, themeVariant);
       }
       gl.drawArrays(gl.LINES, 0, edgeVertexData.length / 3);
+      if (!append) {
+        lastUploadedEdgeVertexDataRef = edgeVertexData;
+        lastUploadedEdgeVertexDataLength = edgeVertexData.length;
+      } else {
+        lastUploadedEdgeVertexDataRef = null;
+        lastUploadedEdgeVertexDataLength = 0;
+      }
       return edgeVertexData.length / 6;
     },
     readPixelsRgba(samplePixels) {
@@ -3142,6 +3238,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
     shell,
   } = renderContext;
   let { paintedNodeCount, paintedEdgeCount } = paintCounts;
+  let edgeVertexData = null;
 
   if (supportsGpuEdgeInterpolation) {
     const allEdgeVertices = profileMs('finalCollectMs', () =>
@@ -3156,6 +3253,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
         },
       ),
     );
+    edgeVertexData = allEdgeVertices;
     paintedEdgeCount = profileMs('finalDrawMs', () =>
       renderer.drawTravelTimeEdges(allEdgeVertices, {
         cycleMinutes: colourCycleMinutes,
@@ -3229,7 +3327,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
     );
   }
 
-  return { paintedNodeCount, paintedEdgeCount };
+  return { paintedNodeCount, paintedEdgeCount, edgeVertexData };
 }
 
 export async function runSearchTimeSlicedWithRendering(shell, mapData, searchState, options = {}) {
@@ -3275,6 +3373,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   const edgeVertexBuilder = createEdgeVertexBufferBuilder();
   let paintedNodeCount = 0;
   let paintedEdgeCount = 0;
+  let finalEdgeVertexData = null;
   let settledNodeCount = 0;
   if (typeof nowImpl !== 'function') {
     throw new Error('nowImpl must be a function');
@@ -3428,6 +3527,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
       });
       paintedNodeCount = finalPaintCounts.paintedNodeCount;
       paintedEdgeCount = finalPaintCounts.paintedEdgeCount;
+      finalEdgeVertexData = finalPaintCounts.edgeVertexData;
     }
 
     if (!skipFinalFullPass && supportsGpuEdgeInterpolation && paritySampleCount > 0) {
@@ -3484,6 +3584,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
     elapsedMs: routeElapsedMs,
     paintedEdgeCount,
     paintedNodeCount,
+    edgeVertexData: finalEdgeVertexData,
   };
 }
 
@@ -4058,15 +4159,9 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         let cycleMinutes = getColourCycleMinutesFromShell(shell);
         const routingSnapshot = initializedMapData?.lastRoutingSnapshot ?? null;
         if (initializedMapData && routingSnapshot) {
-          edgeVertexData = collectAllReachableTravelTimeEdgeVertices(
-            initializedMapData.graph,
-            initializedMapData.nodePixels,
-            routingSnapshot.distSeconds,
-            routingSnapshot.allowedModeMask,
-            {
-              edgeTraversalCostSeconds: routingSnapshot.edgeTraversalCostSeconds,
-            },
-          );
+          edgeVertexData = getOrBuildSnapshotEdgeVertexData(initializedMapData, routingSnapshot, {
+            allowedModeMask: routingSnapshot.allowedModeMask,
+          });
           cycleMinutes = routingSnapshot.colourCycleMinutes;
         }
 

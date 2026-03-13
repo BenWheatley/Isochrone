@@ -20,8 +20,10 @@ import {
   persistNodeIndexToLocation,
   precomputeNodeModeMask,
   precomputeNodePixelCoordinates,
+  getOrBuildSnapshotEdgeVertexData,
   rerenderIsochroneFromSnapshotWithStatus,
   renderIsochroneLegendIfNeeded,
+  shouldUploadEdgeGeometry,
   updateDistanceScaleBar,
   timeToColour,
 } from '../src/app.js';
@@ -549,4 +551,96 @@ test('rerenderIsochroneFromSnapshotWithStatus preserves status when rerender is 
 
   assert.equal(rerendered, false);
   assert.equal(shell.routingStatus.textContent, 'Calculating... (42 nodes settled)');
+});
+
+test('getOrBuildSnapshotEdgeVertexData reuses cached edge vertices when mode mask matches', () => {
+  const graph = createFixtureGraph();
+  const nodePixels = precomputeNodePixelCoordinates(graph);
+  const cachedEdgeVertices = new Float32Array([1, 2, 3, 4, 5, 6]);
+  const snapshot = {
+    distSeconds: new Float32Array([0, 10, 20]),
+    allowedModeMask: EDGE_MODE_CAR_BIT,
+    edgeTraversalCostSeconds: new Float32Array(graph.header.nEdges),
+    edgeVertexData: cachedEdgeVertices,
+    edgeVertexDataModeMask: EDGE_MODE_CAR_BIT,
+  };
+  let collectCallCount = 0;
+
+  const edgeVertexData = getOrBuildSnapshotEdgeVertexData(
+    { graph, nodePixels },
+    snapshot,
+    {
+      collectEdgeVerticesImpl() {
+        collectCallCount += 1;
+        return new Float32Array([9, 9, 9, 9, 9, 9]);
+      },
+    },
+  );
+
+  assert.equal(edgeVertexData, cachedEdgeVertices);
+  assert.equal(snapshot.edgeVertexData, cachedEdgeVertices);
+  assert.equal(collectCallCount, 0);
+});
+
+test('getOrBuildSnapshotEdgeVertexData rebuilds and stores vertices when cache is missing', () => {
+  const graph = createFixtureGraph();
+  const nodePixels = precomputeNodePixelCoordinates(graph);
+  const snapshot = {
+    distSeconds: new Float32Array([0, 10, 20]),
+    allowedModeMask: EDGE_MODE_BIKE_BIT,
+    edgeTraversalCostSeconds: new Float32Array(graph.header.nEdges),
+  };
+  const rebuiltEdgeVertices = new Float32Array([10, 11, 12, 13, 14, 15]);
+  let collectCallCount = 0;
+
+  const edgeVertexData = getOrBuildSnapshotEdgeVertexData(
+    { graph, nodePixels },
+    snapshot,
+    {
+      collectEdgeVerticesImpl(receivedGraph, receivedNodePixels, receivedDistSeconds, receivedModeMask, collectOptions) {
+        collectCallCount += 1;
+        assert.equal(receivedGraph, graph);
+        assert.equal(receivedNodePixels, nodePixels);
+        assert.equal(receivedDistSeconds, snapshot.distSeconds);
+        assert.equal(receivedModeMask, EDGE_MODE_BIKE_BIT);
+        assert.equal(collectOptions.edgeTraversalCostSeconds, snapshot.edgeTraversalCostSeconds);
+        return rebuiltEdgeVertices;
+      },
+    },
+  );
+
+  assert.equal(collectCallCount, 1);
+  assert.equal(edgeVertexData, rebuiltEdgeVertices);
+  assert.equal(snapshot.edgeVertexData, rebuiltEdgeVertices);
+  assert.equal(snapshot.edgeVertexDataModeMask, EDGE_MODE_BIKE_BIT);
+});
+
+test('shouldUploadEdgeGeometry only skips upload for unchanged reusable full-frame geometry', () => {
+  const edgeVertexData = new Float32Array([1, 2, 3, 4, 5, 6]);
+
+  assert.equal(
+    shouldUploadEdgeGeometry(null, 0, edgeVertexData, { append: false, reuseUploadedGeometry: true }),
+    true,
+  );
+  assert.equal(
+    shouldUploadEdgeGeometry(edgeVertexData, edgeVertexData.length, edgeVertexData, {
+      append: false,
+      reuseUploadedGeometry: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldUploadEdgeGeometry(edgeVertexData, edgeVertexData.length, edgeVertexData, {
+      append: true,
+      reuseUploadedGeometry: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldUploadEdgeGeometry(edgeVertexData, edgeVertexData.length, edgeVertexData, {
+      append: false,
+      reuseUploadedGeometry: false,
+    }),
+    true,
+  );
 });
