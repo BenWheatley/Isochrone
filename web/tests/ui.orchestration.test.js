@@ -61,7 +61,7 @@ function createThemeSelect(initialValue = 'light') {
   };
 }
 
-test('bindModeSelectControl requests isochrone redraw on mode and cycle changes', () => {
+test('bindModeSelectControl uses redraw for mode changes and repaint for cycle changes', () => {
   const modeSelect = createModeSelect(['car']);
   const colourCycleMinutesInput = createInput('75');
   const shell = {
@@ -71,10 +71,15 @@ test('bindModeSelectControl requests isochrone redraw on mode and cycle changes'
   };
 
   let redrawRequestCount = 0;
+  let repaintRequestCount = 0;
   let legendRenderCount = 0;
   const binding = bindModeSelectControl(shell, {
     renderIsochroneLegendIfNeeded() {
       legendRenderCount += 1;
+    },
+    requestIsochroneRepaint() {
+      repaintRequestCount += 1;
+      return true;
     },
     requestIsochroneRedraw() {
       redrawRequestCount += 1;
@@ -89,17 +94,55 @@ test('bindModeSelectControl requests isochrone redraw on mode and cycle changes'
   modeSelect.options[0].selected = true;
   modeSelect.emit('change');
   assert.equal(redrawRequestCount, 1);
+  assert.equal(repaintRequestCount, 0);
 
   colourCycleMinutesInput.value = '90';
   colourCycleMinutesInput.emit('change');
-  assert.equal(redrawRequestCount, 2);
+  assert.equal(redrawRequestCount, 1);
+  assert.equal(repaintRequestCount, 1);
   assert.equal(legendRenderCount, 2);
 
   binding.dispose();
   modeSelect.emit('change');
   colourCycleMinutesInput.emit('change');
-  assert.equal(redrawRequestCount, 2);
+  assert.equal(redrawRequestCount, 1);
+  assert.equal(repaintRequestCount, 1);
   assert.equal(legendRenderCount, 2);
+});
+
+test('bindModeSelectControl falls back to redraw when cycle repaint is unavailable', () => {
+  const modeSelect = createModeSelect(['car']);
+  const colourCycleMinutesInput = createInput('75');
+  const shell = {
+    modeSelect,
+    colourCycleMinutesInput,
+    isochroneLegend: {},
+  };
+
+  let redrawRequestCount = 0;
+  let repaintRequestCount = 0;
+  let legendRenderCount = 0;
+  const binding = bindModeSelectControl(shell, {
+    renderIsochroneLegendIfNeeded() {
+      legendRenderCount += 1;
+    },
+    requestIsochroneRepaint() {
+      repaintRequestCount += 1;
+      return false;
+    },
+    requestIsochroneRedraw() {
+      redrawRequestCount += 1;
+      return true;
+    },
+  });
+
+  colourCycleMinutesInput.value = '120';
+  colourCycleMinutesInput.emit('change');
+  assert.equal(repaintRequestCount, 1);
+  assert.equal(redrawRequestCount, 1);
+  assert.equal(legendRenderCount, 2);
+
+  binding.dispose();
 });
 
 test('bindThemeControl restores persisted theme and persists changes', () => {

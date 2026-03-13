@@ -548,10 +548,17 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   }
 
   const snapshot = options.snapshot ?? mapData.lastRoutingSnapshot ?? null;
-  if (!snapshot || !(snapshot.distSeconds instanceof Float64Array)) {
+  const distSeconds = snapshot?.distSeconds ?? null;
+  if (
+    !snapshot
+    || (
+      !(distSeconds instanceof Float32Array)
+      && !(distSeconds instanceof Float64Array)
+    )
+  ) {
     return false;
   }
-  if (snapshot.distSeconds.length < mapData.graph.header.nNodes) {
+  if (distSeconds.length < mapData.graph.header.nNodes) {
     return false;
   }
 
@@ -577,7 +584,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
     const allEdgeVertices = collectAllReachableTravelTimeEdgeVertices(
       mapData.graph,
       mapData.nodePixels,
-      snapshot.distSeconds,
+      distSeconds,
       allowedModeMask,
       { edgeTraversalCostSeconds },
     );
@@ -597,7 +604,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
       mapData.travelTimeGrid,
       mapData.graph,
       mapData.nodePixels,
-      snapshot.distSeconds,
+      distSeconds,
       allowedModeMask,
       {
         stepStride: FINAL_EDGE_INTERPOLATION_STEP_STRIDE,
@@ -607,7 +614,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
     paintReachableNodesTravelTimesToGrid(
       mapData.travelTimeGrid,
       mapData.nodePixels,
-      snapshot.distSeconds,
+      distSeconds,
     );
     renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
       cycleMinutes: colourCycleMinutes,
@@ -622,7 +629,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
       mapData.pixelGrid,
       mapData.graph,
       mapData.nodePixels,
-      snapshot.distSeconds,
+      distSeconds,
       allowedModeMask,
       {
         alpha: 255,
@@ -635,7 +642,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
     paintReachableNodesToGrid(
       mapData.pixelGrid,
       mapData.nodePixels,
-      snapshot.distSeconds,
+      distSeconds,
       {
         alpha: 255,
         colourCycleMinutes,
@@ -682,6 +689,7 @@ export function runPostMvpTransitStub(graph, walkingSearchState) {
 export function bindModeSelectControl(shell, options = {}) {
   return bindModeSelectControlInternal(shell, {
     renderIsochroneLegendIfNeeded,
+    requestIsochroneRepaint: options.requestIsochroneRepaint,
     requestIsochroneRedraw: options.requestIsochroneRedraw,
   });
 }
@@ -4058,6 +4066,17 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
       },
     });
     bindModeSelectControl(shell, {
+      requestIsochroneRepaint() {
+        const cycleMinutes = getColourCycleMinutesFromShell(shell);
+        const rerendered = rerenderIsochroneFromSnapshot(shell, initializedMapData, {
+          colourTheme: resolveIsochroneTheme(),
+          colourCycleMinutes: cycleMinutes,
+        });
+        if (rerendered && initializedMapData?.lastRoutingSnapshot) {
+          initializedMapData.lastRoutingSnapshot.colourCycleMinutes = cycleMinutes;
+        }
+        return rerendered;
+      },
       requestIsochroneRedraw() {
         return routingBinding?.requestIsochroneRedraw() ?? false;
       },

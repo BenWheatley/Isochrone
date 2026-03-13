@@ -270,23 +270,52 @@ export function bindModeSelectControl(shell, dependencies = {}) {
     throw new Error('dependencies.renderIsochroneLegendIfNeeded must be a function');
   }
   const requestIsochroneRedraw = dependencies.requestIsochroneRedraw;
+  const requestIsochroneRepaint = dependencies.requestIsochroneRepaint;
   if (
     requestIsochroneRedraw !== undefined
     && typeof requestIsochroneRedraw !== 'function'
   ) {
     throw new Error('dependencies.requestIsochroneRedraw must be a function when provided');
   }
+  if (
+    requestIsochroneRepaint !== undefined
+    && typeof requestIsochroneRepaint !== 'function'
+  ) {
+    throw new Error('dependencies.requestIsochroneRepaint must be a function when provided');
+  }
 
   const maybeRequestIsochroneRedraw = () => {
     if (typeof requestIsochroneRedraw !== 'function') {
-      return;
+      return false;
     }
     const maybePromise = requestIsochroneRedraw();
     if (maybePromise && typeof maybePromise.then === 'function') {
       void maybePromise.catch((error) => {
         console.error(error);
       });
+      return true;
     }
+    return Boolean(maybePromise);
+  };
+
+  const maybeRequestIsochroneRepaint = () => {
+    if (typeof requestIsochroneRepaint !== 'function') {
+      return false;
+    }
+    const maybePromise = requestIsochroneRepaint();
+    if (maybePromise && typeof maybePromise.then === 'function') {
+      void maybePromise
+        .then((didRepaint) => {
+          if (!didRepaint) {
+            maybeRequestIsochroneRedraw();
+          }
+        })
+        .catch((error) => {
+          console.error(error);
+        });
+      return true;
+    }
+    return Boolean(maybePromise);
   };
 
   const handleSelectChange = () => {
@@ -298,7 +327,9 @@ export function bindModeSelectControl(shell, dependencies = {}) {
     const cycleMinutes = getColourCycleMinutesFromShell(shell);
     persistColourCycleMinutesToLocation(cycleMinutes);
     renderIsochroneLegendIfNeeded(shell, cycleMinutes);
-    maybeRequestIsochroneRedraw();
+    if (!maybeRequestIsochroneRepaint()) {
+      maybeRequestIsochroneRedraw();
+    }
   };
 
   getAllowedModeMaskFromShell(shell);
