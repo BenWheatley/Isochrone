@@ -48,7 +48,10 @@ export function createWalkingSearchState(
     throw new Error("options.heapStrategy must be 'decrease-key' or 'duplicate-push'");
   }
   const useDuplicatePushHeap = heapStrategy === 'duplicate-push';
-  const edgeTraversalCostSeconds = getOrCreateEdgeTraversalCostSecondsCache(graph, allowedModeMask);
+  const edgeTraversalCostSeconds = precomputeEdgeTraversalCostSecondsCache(
+    graph,
+    allowedModeMask,
+  );
   const distSeconds = new Float64Array(nNodes);
   distSeconds.fill(Infinity);
   const settled = new Uint8Array(nNodes);
@@ -119,11 +122,7 @@ export function createWalkingSearchState(
             continue;
           }
           const targetIndex = edgeU32[edgeIndex * 3];
-          let edgeCostSeconds = edgeTraversalCostSeconds[edgeIndex];
-          if (Number.isNaN(edgeCostSeconds)) {
-            edgeCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
-            edgeTraversalCostSeconds[edgeIndex] = edgeCostSeconds;
-          }
+          const edgeCostSeconds = edgeTraversalCostSeconds[edgeIndex];
           if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
             continue;
           }
@@ -231,6 +230,31 @@ export function getOrCreateEdgeTraversalCostSecondsCache(graph, allowedModeMask)
   }
 
   return edgeTraversalCostSeconds;
+}
+
+export function precomputeEdgeTraversalCostSecondsCache(
+  graph,
+  allowedModeMask,
+  edgeTraversalCostSeconds = null,
+) {
+  validateGraphForRouting(graph);
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+
+  const costSeconds = edgeTraversalCostSeconds
+    ?? getOrCreateEdgeTraversalCostSecondsCache(graph, allowedModeMask);
+  if (!(costSeconds instanceof Float32Array) || costSeconds.length < graph.header.nEdges) {
+    throw new Error('edgeTraversalCostSeconds must be a Float32Array covering graph.header.nEdges');
+  }
+
+  for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
+    if (Number.isNaN(costSeconds[edgeIndex])) {
+      costSeconds[edgeIndex] = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+    }
+  }
+
+  return costSeconds;
 }
 
 export function getEdgeTraversalCostSeconds(

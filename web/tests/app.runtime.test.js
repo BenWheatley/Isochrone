@@ -217,6 +217,16 @@ test('createWalkingSearchState settles reachable nodes and computes best costs',
   assert.ok(Math.abs(state.distSeconds[2] - 12) < 0.05);
 });
 
+test('createWalkingSearchState precomputes edge traversal cache for active mode', () => {
+  const graph = createFixtureGraph();
+  const state = createWalkingSearchState(graph, 0, Number.POSITIVE_INFINITY, EDGE_MODE_CAR_BIT);
+
+  assert.equal(state.edgeTraversalCostSeconds.length, graph.header.nEdges);
+  for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
+    assert.ok(!Number.isNaN(state.edgeTraversalCostSeconds[edgeIndex]));
+  }
+});
+
 test('node spatial index search prefers nearest node with an allowed mode', () => {
   const graph = createFixtureGraph();
   const nodePixels = precomputeNodePixelCoordinates(graph);
