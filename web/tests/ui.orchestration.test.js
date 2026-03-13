@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { bindModeSelectControl, bindThemeControl } from '../src/ui/orchestration.js';
+import {
+  bindHeaderMenuControl,
+  bindModeSelectControl,
+  bindThemeControl,
+} from '../src/ui/orchestration.js';
 
 function createEventTarget() {
   const listeners = new Map();
@@ -15,13 +19,13 @@ function createEventTarget() {
       const listenerSet = listeners.get(type);
       listenerSet?.delete(listener);
     },
-    emit(type) {
+    emit(type, event = {}) {
       const listenerSet = listeners.get(type);
       if (!listenerSet) {
         return;
       }
       for (const listener of listenerSet) {
-        listener({ type });
+        listener({ type, ...event });
       }
     },
   };
@@ -58,6 +62,31 @@ function createThemeSelect(initialValue = 'light') {
   return {
     ...eventTarget,
     value: initialValue,
+  };
+}
+
+function createHeaderMenuFixture() {
+  const insideTargets = new Set();
+  const controlsMenu = {
+    tagName: 'DETAILS',
+    open: false,
+    contains(target) {
+      return insideTargets.has(target);
+    },
+  };
+  const controlsMenuSummary = {
+    tagName: 'SUMMARY',
+    focusCallCount: 0,
+    focus() {
+      this.focusCallCount += 1;
+    },
+  };
+  insideTargets.add(controlsMenu);
+  insideTargets.add(controlsMenuSummary);
+  return {
+    controlsMenu,
+    controlsMenuSummary,
+    insideTargets,
   };
 }
 
@@ -215,4 +244,41 @@ test('bindThemeControl setTheme supports non-persistent temporary overrides', ()
   assert.deepEqual(persistedWrites, []);
 
   binding.dispose();
+});
+
+test('bindHeaderMenuControl closes menu on outside pointerdown and Escape key', () => {
+  const eventRoot = createEventTarget();
+  const { controlsMenu, controlsMenuSummary, insideTargets } = createHeaderMenuFixture();
+  const shell = {
+    controlsMenu,
+    controlsMenuSummary,
+  };
+  const binding = bindHeaderMenuControl(shell, { eventRoot });
+
+  const outsideTarget = {};
+  controlsMenu.open = true;
+  eventRoot.emit('pointerdown', { target: controlsMenuSummary });
+  assert.equal(controlsMenu.open, true);
+
+  controlsMenu.open = true;
+  eventRoot.emit('pointerdown', { target: outsideTarget });
+  assert.equal(controlsMenu.open, false);
+
+  controlsMenu.open = true;
+  eventRoot.emit('keydown', { key: 'Enter', target: outsideTarget });
+  assert.equal(controlsMenu.open, true);
+  assert.equal(controlsMenuSummary.focusCallCount, 0);
+
+  controlsMenu.open = true;
+  eventRoot.emit('keydown', { key: 'Escape', target: outsideTarget });
+  assert.equal(controlsMenu.open, false);
+  assert.equal(controlsMenuSummary.focusCallCount, 1);
+
+  binding.dispose();
+  controlsMenu.open = true;
+  eventRoot.emit('pointerdown', { target: outsideTarget });
+  eventRoot.emit('keydown', { key: 'Escape', target: outsideTarget });
+  assert.equal(controlsMenu.open, true);
+  assert.equal(controlsMenuSummary.focusCallCount, 1);
+  assert.equal(insideTargets.has(controlsMenu), true);
 });

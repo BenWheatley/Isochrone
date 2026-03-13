@@ -10,29 +10,47 @@
     <main class="app-shell">
       <header class="app-header">
         <h1>Isochrone</h1>
-        <label for="theme-select">Theme</label>
-        <select id="theme-select" name="theme-select">
-          <option value="light" selected>Light</option>
-          <option value="dark">Dark</option>
-        </select>
-        <label class="mode-select" for="mode-select">Transport modes</label>
-        <select id="mode-select" name="mode-select" multiple size="3">
-          <option value="walk">Walk</option>
-          <option value="bike">Bike</option>
-          <option value="car" selected>Car</option>
-        </select>
-        <label for="colour-cycle-minutes">Colour cycle (min)</label>
-        <input
-          id="colour-cycle-minutes"
-          name="colour-cycle-minutes"
-          type="number"
-          min="5"
-          step="5"
-          value="75"
-        />
-        <label for="departure-time">Departure time</label>
-        <input id="departure-time" name="departure-time" type="time" value="08:00" step="60" />
-        <button id="export-svg-button" type="button" disabled>Export SVG</button>
+        <details id="controls-menu" class="controls-menu">
+          <summary id="controls-menu-summary" aria-label="Open options menu">
+            <span aria-hidden="true">☰</span>
+            <span>Options</span>
+          </summary>
+          <div class="controls-menu-panel">
+            <div class="control-row">
+              <label for="theme-select">Theme</label>
+              <select id="theme-select" name="theme-select">
+                <option value="light" selected>Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </div>
+            <div class="control-row">
+              <label for="mode-select">Transport modes</label>
+              <select id="mode-select" name="mode-select" multiple size="3">
+                <option value="walk">Walk</option>
+                <option value="bike">Bike</option>
+                <option value="car" selected>Car</option>
+              </select>
+            </div>
+            <div class="control-row">
+              <label for="colour-cycle-minutes">Colour cycle (min)</label>
+              <input
+                id="colour-cycle-minutes"
+                name="colour-cycle-minutes"
+                type="number"
+                min="5"
+                step="5"
+                value="75"
+              />
+            </div>
+            <div class="control-row">
+              <label for="departure-time">Departure time</label>
+              <input id="departure-time" name="departure-time" type="time" value="08:00" step="60" />
+            </div>
+            <div class="control-row">
+              <button id="export-svg-button" type="button" disabled>Export SVG</button>
+            </div>
+          </div>
+        </details>
       </header>
 
       <section id="map-region" class="map-region" aria-label="Map viewport">

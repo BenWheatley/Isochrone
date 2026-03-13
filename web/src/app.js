@@ -29,6 +29,7 @@ import {
   persistNodeIndexToLocation,
 } from './core/coords.js';
 import {
+  bindHeaderMenuControl as bindHeaderMenuControlInternal,
   bindThemeControl as bindThemeControlInternal,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
@@ -1006,6 +1007,10 @@ export function bindModeSelectControl(shell, options = {}) {
   });
 }
 
+export function bindHeaderMenuControl(shell, options = {}) {
+  return bindHeaderMenuControlInternal(shell, options);
+}
+
 export function bindThemeControl(shell, options = {}) {
   return bindThemeControlInternal(shell, options);
 }
@@ -1482,37 +1487,23 @@ export async function initializeMapData(shell, options = {}) {
 }
 
 export function layoutMapViewportToContainGraph(shell, graphHeader) {
-  if (!shell || !shell.mapRegion || !shell.canvasStack) {
-    throw new Error('shell.mapRegion and shell.canvasStack are required');
+  if (!shell || !shell.canvasStack) {
+    throw new Error('shell.canvasStack is required');
   }
 
   validateGraphHeaderForBoundaryAlignment(graphHeader);
-  const regionRect = shell.mapRegion.getBoundingClientRect();
-  if (!(regionRect.width > 0) || !(regionRect.height > 0)) {
-    throw new Error('map region must have positive width and height');
-  }
-
   const graphAspect = graphHeader.gridWidthPx / graphHeader.gridHeightPx;
-  const regionAspect = regionRect.width / regionRect.height;
-
-  let layoutWidthPx = regionRect.width;
-  let layoutHeightPx = regionRect.height;
-  if (regionAspect > graphAspect) {
-    layoutWidthPx = regionRect.height * graphAspect;
-  } else {
-    layoutHeightPx = regionRect.width / graphAspect;
-  }
-
-  layoutWidthPx = Math.max(1, Math.floor(layoutWidthPx));
-  layoutHeightPx = Math.max(1, Math.floor(layoutHeightPx));
-
-  shell.canvasStack.style.aspectRatio = `${graphHeader.gridWidthPx} / ${graphHeader.gridHeightPx}`;
-  shell.canvasStack.style.width = `${layoutWidthPx}px`;
-  shell.canvasStack.style.height = `${layoutHeightPx}px`;
+  shell.canvasStack.style.setProperty(
+    '--map-aspect-ratio',
+    `${graphHeader.gridWidthPx} / ${graphHeader.gridHeightPx}`,
+  );
+  shell.canvasStack.style.setProperty('--map-aspect-ratio-num', String(graphAspect));
+  shell.canvasStack.style.width = '';
+  shell.canvasStack.style.height = '';
+  shell.canvasStack.style.aspectRatio = '';
 
   return {
-    layoutWidthPx,
-    layoutHeightPx,
+    aspectRatio: graphAspect,
   };
 }
 
@@ -4311,6 +4302,7 @@ function isClosedPath(path) {
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
     const shell = initializeAppShell(globalThis.document);
+    bindHeaderMenuControl(shell);
     if (!ensureWasmSupportOrShowError(shell)) {
       return;
     }
@@ -4445,7 +4437,6 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
       .then((mapData) => {
         initializedMapData = mapData;
         window.addEventListener('resize', () => {
-          layoutMapViewportToContainGraph(shell, mapData.graph.header);
           updateDistanceScaleBar(shell, mapData.graph.header);
         });
         routingBinding = bindCanvasClickRouting(shell, mapData);

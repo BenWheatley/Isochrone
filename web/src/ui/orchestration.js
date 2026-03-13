@@ -26,6 +26,8 @@ export function initializeAppShell(doc) {
     resolvedDocument.getElementById('isochrone') ?? resolvedDocument.getElementById('map');
   const boundaryCanvas = resolvedDocument.getElementById('boundaries');
   const canvasStack = resolvedDocument.getElementById('canvas-stack');
+  const controlsMenu = resolvedDocument.getElementById('controls-menu');
+  const controlsMenuSummary = resolvedDocument.getElementById('controls-menu-summary');
   const loadingOverlay = resolvedDocument.getElementById('loading');
   const loadingText = resolvedDocument.getElementById('loading-text');
   const loadingProgressBar = resolvedDocument.getElementById('loading-progress-bar');
@@ -52,6 +54,12 @@ export function initializeAppShell(doc) {
   }
   if (!canvasStack || canvasStack.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="canvas-stack">');
+  }
+  if (!controlsMenu || controlsMenu.tagName !== 'DETAILS') {
+    throw new Error('index.html is missing <details id="controls-menu">');
+  }
+  if (!controlsMenuSummary || controlsMenuSummary.tagName !== 'SUMMARY') {
+    throw new Error('index.html is missing <summary id="controls-menu-summary">');
   }
   if (!loadingOverlay || loadingOverlay.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="loading">');
@@ -129,6 +137,8 @@ export function initializeAppShell(doc) {
     mapCanvas: isochroneCanvas,
     boundaryCanvas,
     canvasStack,
+    controlsMenu,
+    controlsMenuSummary,
     loadingOverlay,
     loadingText,
     loadingProgressBar,
@@ -145,6 +155,72 @@ export function initializeAppShell(doc) {
     isochroneLegend,
     loadingFadeTimeoutId: null,
     lastRenderedLegendCycleMinutes: null,
+  };
+}
+
+export function bindHeaderMenuControl(shell, options = {}) {
+  if (!shell || typeof shell !== 'object' || !shell.controlsMenu) {
+    throw new Error('shell.controlsMenu is required');
+  }
+  if (shell.controlsMenu.tagName !== 'DETAILS') {
+    throw new Error('shell.controlsMenu must be a <details> element');
+  }
+  if (shell.controlsMenuSummary && shell.controlsMenuSummary.tagName !== 'SUMMARY') {
+    throw new Error('shell.controlsMenuSummary must be a <summary> element when provided');
+  }
+
+  const eventRoot = options.eventRoot ?? globalThis.document ?? null;
+  if (
+    !eventRoot
+    || typeof eventRoot.addEventListener !== 'function'
+    || typeof eventRoot.removeEventListener !== 'function'
+  ) {
+    throw new Error('eventRoot with addEventListener/removeEventListener is required');
+  }
+
+  const closeMenu = () => {
+    if (!shell.controlsMenu.open) {
+      return false;
+    }
+    shell.controlsMenu.open = false;
+    return true;
+  };
+
+  const handlePointerDown = (event) => {
+    if (!shell.controlsMenu.open) {
+      return;
+    }
+    const target = event?.target ?? null;
+    if (target !== null && typeof shell.controlsMenu.contains === 'function') {
+      if (shell.controlsMenu.contains(target)) {
+        return;
+      }
+    }
+    closeMenu();
+  };
+
+  const handleKeyDown = (event) => {
+    if (!shell.controlsMenu.open) {
+      return;
+    }
+    if (event?.key !== 'Escape') {
+      return;
+    }
+    closeMenu();
+    if (shell.controlsMenuSummary && typeof shell.controlsMenuSummary.focus === 'function') {
+      shell.controlsMenuSummary.focus();
+    }
+  };
+
+  eventRoot.addEventListener('pointerdown', handlePointerDown);
+  eventRoot.addEventListener('keydown', handleKeyDown);
+
+  return {
+    closeMenu,
+    dispose() {
+      eventRoot.removeEventListener('pointerdown', handlePointerDown);
+      eventRoot.removeEventListener('keydown', handleKeyDown);
+    },
   };
 }
 
