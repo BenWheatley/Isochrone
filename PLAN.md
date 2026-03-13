@@ -883,7 +883,8 @@ Estimated time: 2 hours
 
 Tasks
 - [x] Add SVG export action for current rendered isochrone output
-- [ ] Ensure exported SVG preserves map extent, legend scale context, and boundary overlay alignment
+- [x] Ensure exported SVG preserves map extent, legend scale context, and boundary overlay alignment
+- [x] Ensure exported SVG background matches current map/canvas background colour
 
 ## 12.4 Expose routability counts
 Estimated time: 45 min

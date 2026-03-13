@@ -36,14 +36,15 @@ npm run --silent bench:routing -- \
 - Supports JS/WASM edge-cost precompute engines (`--edge-kernel js|wasm|auto`).
 - Reports per-mode/per-heap wall-time and CPU-time summaries.
 
-## WASM groundwork
+## WASM runtime build
 
 ```bash
 make wasm-build
 ```
 
 - Builds Rust routing-kernel crate to `web/wasm/routing-kernel.wasm`.
-- Current runtime remains JS-only; this is setup for A/B benchmarking and staged migration.
+- Browser runtime requires this WASM kernel for routing/search execution.
+- Browsers without WASM support are shown: `Your browser does not support WASM, this app requires WASM for performance reasons`.
 - Interface and milestones are documented in `docs/wasm-routing-kernel.md`.
 
 ## Runtime data
@@ -51,7 +52,12 @@ make wasm-build
 - The graph payload is gzip-compressed and decompressed in-browser before parsing.
 - Clicking the map computes a full travel-time field across all reachable graph nodes (no walk-time cap).
 - Last selected start node is persisted in URL query params as `node=<graphNodeId>` and restored on reload.
+- Theme, transport modes, and colour cycle controls are in the header **Options** menu (standard HTML `<details>/<summary>` hamburger).
 - Current binary schema details and compatibility policy: `docs/graph-binary-schema-v2.md`.
+
+## SVG export
+- Export uses vector isochrone edge lines plus the boundary canvas layer.
+- Export background is set to the current map background colour (same palette context as the canvas view).
 
 ## Deployment (GitHub Pages)
 - Workflow: `.github/workflows/pages.yml`

@@ -1,6 +1,6 @@
-# WASM Routing Kernel Setup
+# WASM Routing Kernel
 
-This document tracks the initial WASM groundwork for performance-critical routing code.
+This document tracks the current WASM kernel used for performance-critical routing code.
 
 ## Scope of this setup
 

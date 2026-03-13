@@ -21,6 +21,12 @@ function assertDataUrl(value, name) {
   }
 }
 
+function assertCssColourString(value, name) {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`${name} must be a non-empty CSS colour string`);
+  }
+}
+
 function assertEdgeVertexData(edgeVertexData) {
   if (!(edgeVertexData instanceof Float32Array)) {
     throw new Error('edgeVertexData must be a Float32Array');
@@ -105,6 +111,74 @@ function wrapTextByWords(text, maxCharsPerLine, maxLines) {
     }
   }
   return lines;
+}
+
+function isTransparentCssColour(colourValue) {
+  if (typeof colourValue !== 'string') {
+    return true;
+  }
+  const normalized = colourValue.trim().toLowerCase();
+  if (normalized.length === 0 || normalized === 'transparent') {
+    return true;
+  }
+  if (normalized === 'rgba(0, 0, 0, 0)' || normalized === 'rgba(0,0,0,0)') {
+    return true;
+  }
+  const rgbaMatch = normalized.match(/^rgba\((.+)\)$/);
+  if (!rgbaMatch) {
+    return false;
+  }
+  const channels = rgbaMatch[1].split(',').map((channel) => channel.trim());
+  if (channels.length !== 4) {
+    return false;
+  }
+  const alpha = Number.parseFloat(channels[3]);
+  return Number.isFinite(alpha) && alpha <= 0;
+}
+
+function pickComputedBackgroundColour(computedStyle) {
+  if (!computedStyle || typeof computedStyle.backgroundColor !== 'string') {
+    return null;
+  }
+  const candidate = computedStyle.backgroundColor.trim();
+  if (candidate.length === 0 || isTransparentCssColour(candidate)) {
+    return null;
+  }
+  return candidate;
+}
+
+function resolveSvgBackgroundColour(shell, options = {}) {
+  const explicitColour = options.backgroundColour ?? options.backgroundColor;
+  if (typeof explicitColour === 'string' && explicitColour.trim().length > 0) {
+    return explicitColour.trim();
+  }
+
+  const getComputedStyleImpl = options.getComputedStyleImpl ?? globalThis.getComputedStyle ?? null;
+  if (typeof getComputedStyleImpl !== 'function') {
+    return '#ffffff';
+  }
+
+  const ownerDocument = shell?.isochroneCanvas?.ownerDocument ?? globalThis.document ?? null;
+  const candidateElements = [
+    shell?.isochroneCanvas ?? null,
+    shell?.boundaryCanvas ?? null,
+    shell?.canvasStack ?? null,
+    shell?.mapRegion ?? null,
+    ownerDocument?.documentElement ?? null,
+    ownerDocument?.body ?? null,
+  ];
+
+  for (const candidate of candidateElements) {
+    if (!candidate) {
+      continue;
+    }
+    const computedBackground = pickComputedBackgroundColour(getComputedStyleImpl(candidate));
+    if (computedBackground !== null) {
+      return computedBackground;
+    }
+  }
+
+  return '#ffffff';
 }
 
 export function formatIsochroneExportTitle(locationName, modeLabels) {
@@ -256,6 +330,8 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
 
   const boundaryLayerDataUrl = options.boundaryLayerDataUrl;
   assertDataUrl(boundaryLayerDataUrl, 'boundaryLayerDataUrl');
+  const backgroundColour = options.backgroundColour ?? options.backgroundColor ?? '#ffffff';
+  assertCssColourString(backgroundColour, 'backgroundColour');
   const edgeVertexData = options.edgeVertexData ?? new Float32Array(0);
   assertEdgeVertexData(edgeVertexData);
   const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
@@ -278,6 +354,7 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
       : 'Map data © OpenStreetMap contributors, available under the Open Database License (ODbL): https://www.openstreetmap.org/copyright';
   const escapedTitle = escapeXml(title);
   const escapedBoundaryDataUrl = escapeXml(boundaryLayerDataUrl);
+  const escapedBackgroundColour = escapeXml(backgroundColour);
   const edgeLines = buildIsochroneEdgeLineMarkup(edgeVertexData, { cycleMinutes });
   const titleOverlayMarkup = buildSvgTitleOverlayMarkup(widthPx, title);
   const legendOverlayMarkup = buildSvgLegendOverlayMarkup(widthPx, cycleMinutes);
@@ -287,6 +364,7 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${widthPx}" height="${heightPx}" viewBox="0 0 ${widthPx} ${heightPx}" role="img" aria-label="${escapedTitle}">`,
     `  <title>${escapedTitle}</title>`,
+    `  <rect id="isochrone-background" x="0" y="0" width="${widthPx}" height="${heightPx}" fill="${escapedBackgroundColour}" />`,
     `  <image x="0" y="0" width="${widthPx}" height="${heightPx}" href="${escapedBoundaryDataUrl}" />`,
     '  <g id="isochrone-edges">',
     edgeLines,
@@ -330,10 +408,12 @@ export function exportCurrentRenderedIsochroneSvg(shell, options = {}) {
   assertPositiveInteger(heightPx, 'shell.isochroneCanvas.height');
 
   const boundaryLayerDataUrl = shell.boundaryCanvas.toDataURL('image/png');
+  const backgroundColour = resolveSvgBackgroundColour(shell, options);
   const svgDocument = buildRenderedIsochroneSvgDocument({
     widthPx,
     heightPx,
     boundaryLayerDataUrl,
+    backgroundColour,
     edgeVertexData: options.edgeVertexData ?? new Float32Array(0),
     cycleMinutes: options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
     title: options.title ?? 'Isochrone export',

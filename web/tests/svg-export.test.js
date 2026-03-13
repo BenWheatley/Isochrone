@@ -40,6 +40,7 @@ test('buildRenderedIsochroneSvgDocument layers boundary image and vector isochro
     widthPx: 640,
     heightPx: 480,
     boundaryLayerDataUrl: 'data:image/png;base64,AAA',
+    backgroundColor: 'rgb(17, 24, 32)',
     edgeVertexData: new Float32Array([10, 12, 0, 22, 24, 0]),
     title: 'Isochrone of Berlin, by Car',
     scaleBarLabel: '1 km',
@@ -52,6 +53,8 @@ test('buildRenderedIsochroneSvgDocument layers boundary image and vector isochro
   assert.ok(svg.includes('viewBox="0 0 640 480"'));
   assert.ok(svg.includes('<title>Isochrone of Berlin, by Car</title>'));
   assert.ok(svg.includes('>Isochrone of Berlin, by Car<'));
+  assert.ok(svg.includes('id="isochrone-background"'));
+  assert.ok(svg.includes('fill="rgb(17, 24, 32)"'));
   assert.ok(svg.includes('href="data:image/png;base64,AAA"'));
   assert.ok(svg.includes('<g id="isochrone-edges">'));
   assert.ok(svg.includes('stroke="rgb(0, 255, 255)"'));
@@ -182,11 +185,22 @@ test('exportCurrentRenderedIsochroneSvg emits downloadable vector SVG', () => {
       width: 100,
       height: 80,
     },
+    mapRegion: { id: 'map-region' },
+  };
+  const getComputedStyleImpl = (node) => {
+    if (node === shell.isochroneCanvas) {
+      return { backgroundColor: 'rgba(0, 0, 0, 0)' };
+    }
+    if (node === shell.mapRegion) {
+      return { backgroundColor: 'rgb(17, 24, 32)' };
+    }
+    return { backgroundColor: 'transparent' };
   };
 
   const result = exportCurrentRenderedIsochroneSvg(shell, {
     edgeVertexData: new Float32Array([0, 0, 0, 10, 10, 0]),
     filename: 'isochrone-test.svg',
+    getComputedStyleImpl,
     documentObject,
     urlObject,
     scheduleRevoke(callback) {
@@ -195,6 +209,8 @@ test('exportCurrentRenderedIsochroneSvg emits downloadable vector SVG', () => {
   });
 
   assert.equal(result.filename, 'isochrone-test.svg');
+  assert.ok(result.svgDocument.includes('id="isochrone-background"'));
+  assert.ok(result.svgDocument.includes('fill="rgb(17, 24, 32)"'));
   assert.ok(result.svgDocument.includes('<line'));
   assert.equal(appendedNode, anchor);
   assert.equal(anchor.download, 'isochrone-test.svg');
