@@ -14,7 +14,7 @@ This document tracks the initial WASM groundwork for performance-critical routin
 - Provide JS-side module loading and export validation:
   - `web/src/wasm/routing-kernel.js`
 
-No runtime behavior has been switched to WASM yet. Current app behavior remains JS-only.
+Runtime now attempts to use this kernel for edge-cost precompute during search-state setup when the WASM module is available; it falls back to JS deterministically if unavailable or if kernel invocation fails.
 
 ## Why this shape
 
@@ -36,6 +36,6 @@ If `wasm32-unknown-unknown` stdlib is missing, the script fails fast with instal
 ## Next integration milestones (not implemented yet)
 
 1. Allocate typed-array views in WASM memory and benchmark JS-to-WASM transfer overhead.
-2. Add side-by-side benchmark mode (`js` vs `wasm`) for `precompute_edge_costs`.
+2. Keep side-by-side benchmark mode (`js` vs `wasm`) for `precompute_edge_costs` and enforce parity thresholds.
 3. If transfer overhead is acceptable, move additional kernels (batch edge relaxations / heap operations) behind the same interface.
 4. Keep parity tests for JS and WASM outputs before any default runtime switch.

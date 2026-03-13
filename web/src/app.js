@@ -53,6 +53,11 @@ import {
   validateGraphForRouting,
   validateGraphHeaderForBoundaryAlignment,
 } from './core/graph-validation.js';
+import {
+  createWasmRoutingKernelFacade,
+  hasWebAssemblySupport,
+  instantiateRoutingKernelWasm,
+} from './wasm/routing-kernel.js';
 
 export {
   DEFAULT_BOUNDARY_BASEMAP_URL,
@@ -375,12 +380,18 @@ export async function runWalkingIsochroneFromSourceNode(
 
   const allowedModeMask = options.allowedModeMask ?? EDGE_MODE_CAR_BIT;
   const heapStrategy = options.heapStrategy ?? 'decrease-key';
+  const edgeCostPrecomputeKernel = options.edgeCostPrecomputeKernel
+    ?? mapData.edgeCostPrecomputeKernel
+    ?? null;
   const searchState = createWalkingSearchState(
     mapData.graph,
     sourceNodeIndex,
     timeLimitSeconds,
     allowedModeMask,
-    { heapStrategy },
+    {
+      heapStrategy,
+      edgeCostPrecomputeKernel,
+    },
   );
   const runSummary = await runSearchTimeSlicedWithRendering(shell, mapData, searchState, options);
   if (!runSummary.cancelled) {
@@ -394,6 +405,31 @@ export async function runWalkingIsochroneFromSourceNode(
     runPostMvpTransitStub(mapData.graph, searchState);
   }
   return runSummary;
+}
+
+async function loadEdgeCostPrecomputeKernel(options = {}) {
+  if (!options || typeof options !== 'object') {
+    throw new Error('options must be an object');
+  }
+
+  const enabled = options.enabled ?? true;
+  if (!enabled || !hasWebAssemblySupport()) {
+    return null;
+  }
+
+  try {
+    const loadedWasmKernel = await instantiateRoutingKernelWasm({
+      wasmUrl: options.url,
+      fetchImpl: options.fetchImpl,
+      webAssemblyObject: options.webAssemblyObject,
+    });
+    return createWasmRoutingKernelFacade(loadedWasmKernel.exports);
+  } catch (error) {
+    if (typeof options.onLoadError === 'function') {
+      options.onLoadError(error);
+    }
+    return null;
+  }
 }
 
 function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
@@ -951,14 +987,17 @@ export async function loadGraphBinary(shell, options = {}) {
 export async function initializeMapData(shell, options = {}) {
   const boundaryOptions = options.boundaries ?? {};
   const graphOptions = options.graph ?? {};
+  const wasmKernelOptions = options.wasmKernel ?? {};
   const locationName =
     typeof options.locationName === 'string' && options.locationName.trim().length > 0
       ? options.locationName.trim()
       : DEFAULT_LOCATION_NAME;
 
   try {
+    const edgeCostPrecomputeKernelPromise = loadEdgeCostPrecomputeKernel(wasmKernelOptions);
     const boundaryLoad = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
     const graph = await loadGraphBinary(shell, graphOptions);
+    const edgeCostPrecomputeKernel = await edgeCostPrecomputeKernelPromise;
     shell.isochroneCanvas.width = graph.header.gridWidthPx;
     shell.isochroneCanvas.height = graph.header.gridHeightPx;
     const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
@@ -995,6 +1034,7 @@ export async function initializeMapData(shell, options = {}) {
       nodeSpatialIndex,
       pixelGrid,
       travelTimeGrid,
+      edgeCostPrecomputeKernel,
       lastRoutingSnapshot: null,
       locationName,
     };

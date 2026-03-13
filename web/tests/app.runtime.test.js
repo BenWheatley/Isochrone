@@ -227,6 +227,46 @@ test('createWalkingSearchState precomputes edge traversal cache for active mode'
   }
 });
 
+test('createWalkingSearchState can use provided edge-cost precompute kernel', () => {
+  const graph = createFixtureGraph();
+  let kernelCallCount = 0;
+  const state = createWalkingSearchState(graph, 0, Number.POSITIVE_INFINITY, EDGE_MODE_CAR_BIT, {
+    edgeCostPrecomputeKernel: {
+      precomputeEdgeCostsForGraph({ outCostSeconds }) {
+        kernelCallCount += 1;
+        outCostSeconds.fill(5);
+      },
+    },
+  });
+
+  assert.equal(kernelCallCount, 1);
+  assert.equal(state.edgeTraversalCostSeconds[0], 5);
+  assert.equal(state.edgeTraversalCostSeconds[1], 5);
+});
+
+test('createWalkingSearchState falls back to JS edge-cost precompute on kernel failure', () => {
+  const graph = createFixtureGraph();
+  let kernelFailureCount = 0;
+  const state = createWalkingSearchState(graph, 0, Number.POSITIVE_INFINITY, EDGE_MODE_CAR_BIT, {
+    edgeCostPrecomputeKernel: {
+      precomputeEdgeCostsForGraph() {
+        throw new Error('kernel unavailable');
+      },
+    },
+    onKernelError() {
+      kernelFailureCount += 1;
+    },
+  });
+
+  assert.equal(kernelFailureCount, 1);
+  assert.ok(Number.isFinite(state.edgeTraversalCostSeconds[0]));
+  assert.ok(Number.isFinite(state.edgeTraversalCostSeconds[1]));
+  while (!state.isDone()) {
+    state.expandOne();
+  }
+  assert.ok(Math.abs(state.distSeconds[2] - 12) < 0.05);
+});
+
 test('node spatial index search prefers nearest node with an allowed mode', () => {
   const graph = createFixtureGraph();
   const nodePixels = precomputeNodePixelCoordinates(graph);

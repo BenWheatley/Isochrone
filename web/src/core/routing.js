@@ -11,6 +11,8 @@ import {
 import { DuplicateEntryMinHeap, MinHeap } from './heap.js';
 import { validateGraphForRouting } from './graph-validation.js';
 
+const EDGE_WALK_COST_SECONDS_CACHE_PROPERTY = '__edgeWalkCostSeconds';
+
 export function createWalkingSearchState(
   graph,
   sourceNodeIndex,
@@ -38,6 +40,9 @@ export function createWalkingSearchState(
   if (!options || typeof options !== 'object') {
     throw new Error('options must be an object');
   }
+  if (options.onKernelError !== null && options.onKernelError !== undefined && typeof options.onKernelError !== 'function') {
+    throw new Error('options.onKernelError must be a function when provided');
+  }
 
   const nodeU32 = graph.nodeU32;
   const nodeU16 = graph.nodeU16;
@@ -51,6 +56,11 @@ export function createWalkingSearchState(
   const edgeTraversalCostSeconds = precomputeEdgeTraversalCostSecondsCache(
     graph,
     allowedModeMask,
+    null,
+    {
+      edgeCostPrecomputeKernel: options.edgeCostPrecomputeKernel ?? null,
+      onKernelError: options.onKernelError ?? null,
+    },
   );
   const distSeconds = new Float64Array(nNodes);
   distSeconds.fill(Infinity);
@@ -236,10 +246,14 @@ export function precomputeEdgeTraversalCostSecondsCache(
   graph,
   allowedModeMask,
   edgeTraversalCostSeconds = null,
+  options = {},
 ) {
   validateGraphForRouting(graph);
   if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
     throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+  if (!options || typeof options !== 'object') {
+    throw new Error('options must be an object');
   }
 
   const costSeconds = edgeTraversalCostSeconds
@@ -248,13 +262,61 @@ export function precomputeEdgeTraversalCostSecondsCache(
     throw new Error('edgeTraversalCostSeconds must be a Float32Array covering graph.header.nEdges');
   }
 
+  const edgeCostPrecomputeKernel = options.edgeCostPrecomputeKernel ?? null;
+  let kernelSucceeded = false;
+  if (edgeCostPrecomputeKernel !== null) {
+    if (
+      typeof edgeCostPrecomputeKernel !== 'object'
+      || typeof edgeCostPrecomputeKernel.precomputeEdgeCostsForGraph !== 'function'
+    ) {
+      throw new Error(
+        'options.edgeCostPrecomputeKernel must expose precomputeEdgeCostsForGraph(...)',
+      );
+    }
+
+    try {
+      edgeCostPrecomputeKernel.precomputeEdgeCostsForGraph({
+        edgeModeMask: graph.edgeModeMask,
+        edgeRoadClassId: graph.edgeRoadClassId,
+        edgeMaxspeedKph: graph.edgeMaxspeedKph,
+        edgeWalkCostSeconds: getOrCreateEdgeWalkCostSeconds(graph),
+        outCostSeconds: costSeconds,
+        allowedModeMask,
+      });
+      kernelSucceeded = true;
+    } catch (error) {
+      if (typeof options.onKernelError === 'function') {
+        options.onKernelError(error);
+      }
+      kernelSucceeded = false;
+    }
+  }
+
   for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
-    if (Number.isNaN(costSeconds[edgeIndex])) {
+    const cachedCostSeconds = costSeconds[edgeIndex];
+    const cachedCostIsValid =
+      cachedCostSeconds === Infinity || (Number.isFinite(cachedCostSeconds) && cachedCostSeconds > 0);
+    if (!kernelSucceeded || !cachedCostIsValid) {
       costSeconds[edgeIndex] = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
     }
   }
 
   return costSeconds;
+}
+
+function getOrCreateEdgeWalkCostSeconds(graph) {
+  let edgeWalkCostSeconds = graph[EDGE_WALK_COST_SECONDS_CACHE_PROPERTY];
+  if (
+    !(edgeWalkCostSeconds instanceof Uint16Array)
+    || edgeWalkCostSeconds.length < graph.header.nEdges
+  ) {
+    edgeWalkCostSeconds = new Uint16Array(graph.header.nEdges);
+    for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
+      edgeWalkCostSeconds[edgeIndex] = graph.edgeU16[edgeIndex * 6 + 2];
+    }
+    graph[EDGE_WALK_COST_SECONDS_CACHE_PROPERTY] = edgeWalkCostSeconds;
+  }
+  return edgeWalkCostSeconds;
 }
 
 export function getEdgeTraversalCostSeconds(

@@ -135,6 +135,7 @@ export function runRoutingBenchmark(graph, options = {}) {
     sourceNodeIndices,
     allowedModeMask = EDGE_MODE_CAR_BIT,
     heapStrategy = 'decrease-key',
+    edgeCostPrecomputeKernel = null,
     nowImpl = defaultNowMs,
     cpuUsageImpl = defaultCpuUsage,
     includePerRun = false,
@@ -148,6 +149,17 @@ export function runRoutingBenchmark(graph, options = {}) {
   }
   if (heapStrategy !== 'decrease-key' && heapStrategy !== 'duplicate-push') {
     throw new Error("heapStrategy must be 'decrease-key' or 'duplicate-push'");
+  }
+  if (
+    edgeCostPrecomputeKernel !== null
+    && (
+      typeof edgeCostPrecomputeKernel !== 'object'
+      || typeof edgeCostPrecomputeKernel.precomputeEdgeCostsForGraph !== 'function'
+    )
+  ) {
+    throw new Error(
+      'edgeCostPrecomputeKernel must expose precomputeEdgeCostsForGraph(...) when provided',
+    );
   }
   if (typeof nowImpl !== 'function') {
     throw new Error('nowImpl must be a function');
@@ -184,7 +196,10 @@ export function runRoutingBenchmark(graph, options = {}) {
       sourceNodeIndex,
       Number.POSITIVE_INFINITY,
       allowedModeMask,
-      { heapStrategy },
+      {
+        heapStrategy,
+        edgeCostPrecomputeKernel,
+      },
     );
     const setupWallMs = Math.max(0, nowImpl() - setupWallStartMs);
     const setupCpuMs = setupCpuStart && cpuUsageImpl

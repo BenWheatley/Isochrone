@@ -14,12 +14,18 @@ import {
   runRoutingBenchmark,
   sampleEligibleSourceNodeIndices,
 } from '../src/perf/routing-benchmark.js';
+import {
+  createWasmRoutingKernelFacade,
+  instantiateRoutingKernelWasmFromBytes,
+} from '../src/wasm/routing-kernel.js';
 
 const DEFAULT_GRAPH_PATH = 'data_pipeline/output/graph-walk.bin';
 const DEFAULT_SAMPLE_COUNT = 24;
 const DEFAULT_SEED = 1337;
 const DEFAULT_MODE_LIST = ['car'];
 const DEFAULT_HEAP_STRATEGIES = ['decrease-key', 'duplicate-push'];
+const DEFAULT_EDGE_KERNEL = 'js';
+const DEFAULT_WASM_PATH = 'web/wasm/routing-kernel.wasm';
 
 function parseArgs(argv) {
   const args = {
@@ -28,6 +34,8 @@ function parseArgs(argv) {
     seed: DEFAULT_SEED,
     modes: DEFAULT_MODE_LIST,
     heapStrategies: DEFAULT_HEAP_STRATEGIES,
+    edgeKernel: DEFAULT_EDGE_KERNEL,
+    wasmPath: DEFAULT_WASM_PATH,
     outputJsonPath: null,
     includePerRun: false,
   };
@@ -55,6 +63,14 @@ function parseArgs(argv) {
       if (args.heapStrategies.length === 0) {
         throw new Error('--heap-strategies must contain at least one strategy');
       }
+    } else if (token === '--edge-kernel') {
+      const value = requireArgValue(argv, ++index, token).trim().toLowerCase();
+      if (value !== 'js' && value !== 'wasm' && value !== 'auto') {
+        throw new Error('--edge-kernel must be one of: js, wasm, auto');
+      }
+      args.edgeKernel = value;
+    } else if (token === '--wasm-path') {
+      args.wasmPath = requireArgValue(argv, ++index, token);
     } else if (token === '--output-json') {
       args.outputJsonPath = requireArgValue(argv, ++index, token);
     } else if (token === '--include-per-run') {
@@ -104,6 +120,8 @@ function printUsage() {
     '  --seed <n>                     Integer seed for deterministic sampling (default: 1337)',
     '  --modes <list>                 Comma-separated: walk,bike,car,walk+bike,walk+car,bike+car,all',
     "  --heap-strategies <list>       Comma-separated: decrease-key,duplicate-push",
+    '  --edge-kernel <mode>           js | wasm | auto (default: js)',
+    `  --wasm-path <path>             WASM binary path (default: ${DEFAULT_WASM_PATH})`,
     '  --output-json <path>           Optional JSON report path',
     '  --include-per-run              Include per-run details in JSON report',
     '  --help                         Show this help',
@@ -184,9 +202,34 @@ async function main() {
     mask: parseModeMask(modeToken),
   }));
 
+  let edgeCostPrecomputeKernel = null;
+  let resolvedEdgeKernel = 'js';
+  if (args.edgeKernel === 'wasm' || args.edgeKernel === 'auto') {
+    const wasmPath = path.resolve(process.cwd(), args.wasmPath);
+    try {
+      const wasmPayload = await fs.readFile(wasmPath);
+      const wasmModule = await instantiateRoutingKernelWasmFromBytes(
+        wasmPayload.buffer.slice(
+          wasmPayload.byteOffset,
+          wasmPayload.byteOffset + wasmPayload.byteLength,
+        ),
+      );
+      edgeCostPrecomputeKernel = createWasmRoutingKernelFacade(wasmModule.exports);
+      resolvedEdgeKernel = 'wasm';
+    } catch (error) {
+      if (args.edgeKernel === 'wasm') {
+        throw error;
+      }
+      console.warn('WASM kernel not available for benchmark, falling back to JS.');
+      resolvedEdgeKernel = 'js';
+      edgeCostPrecomputeKernel = null;
+    }
+  }
+
   const report = {
     generatedAtIso: new Date().toISOString(),
     graphPath,
+    edgeKernel: resolvedEdgeKernel,
     graphStats: {
       nNodes: graph.header.nNodes,
       nEdges: graph.header.nEdges,
@@ -198,6 +241,7 @@ async function main() {
   };
 
   console.log(`Loaded graph: nodes=${graph.header.nNodes} edges=${graph.header.nEdges}`);
+  console.log(`Edge-cost precompute kernel: ${resolvedEdgeKernel}`);
 
   for (const mode of modeMasks) {
     const sampled = sampleEligibleSourceNodeIndices(graph, {
@@ -222,6 +266,7 @@ async function main() {
         sourceNodeIndices: sampled.nodeIndices,
         allowedModeMask: mode.mask,
         heapStrategy,
+        edgeCostPrecomputeKernel,
         nowImpl: () => performance.now(),
         cpuUsageImpl: () => process.cpuUsage(),
         includePerRun: args.includePerRun,

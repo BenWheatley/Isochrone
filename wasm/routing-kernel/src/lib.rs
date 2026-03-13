@@ -1,3 +1,5 @@
+use std::alloc::{alloc, dealloc, Layout};
+
 const EDGE_MODE_WALK_BIT: u8 = 1;
 const EDGE_MODE_BIKE_BIT: u8 = 1 << 1;
 const EDGE_MODE_CAR_BIT: u8 = 1 << 2;
@@ -52,6 +54,32 @@ fn edge_cost_seconds(
     }
 
     best_cost
+}
+
+#[no_mangle]
+pub extern "C" fn wasm_alloc(size_bytes: usize) -> *mut u8 {
+    if size_bytes == 0 {
+        return std::ptr::null_mut();
+    }
+
+    let Ok(layout) = Layout::from_size_align(size_bytes, 8) else {
+        return std::ptr::null_mut();
+    };
+
+    unsafe { alloc(layout) }
+}
+
+#[no_mangle]
+pub extern "C" fn wasm_dealloc(ptr: *mut u8, size_bytes: usize) {
+    if ptr.is_null() || size_bytes == 0 {
+        return;
+    }
+
+    let Ok(layout) = Layout::from_size_align(size_bytes, 8) else {
+        return;
+    };
+
+    unsafe { dealloc(ptr, layout) };
 }
 
 #[no_mangle]
