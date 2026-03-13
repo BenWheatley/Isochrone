@@ -568,28 +568,268 @@ export function getOrBuildSnapshotEdgeVertexData(mapData, snapshot, options = {}
 
   const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
     snapshot.edgeTraversalCostSeconds,
+  mapData.graph.header.nEdges,
+  ) ?? precomputeEdgeTraversalCostSecondsCache(mapData.graph, allowedModeMask);
+  const collectEdgeVerticesImpl = options.collectEdgeVerticesImpl ?? null;
+  if (collectEdgeVerticesImpl !== null) {
+    if (typeof collectEdgeVerticesImpl !== 'function') {
+      throw new Error('collectEdgeVerticesImpl must be a function');
+    }
+    const edgeVertexData = collectEdgeVerticesImpl(
+      mapData.graph,
+      mapData.nodePixels,
+      distSeconds,
+      allowedModeMask,
+      { edgeTraversalCostSeconds },
+    );
+    if (!(edgeVertexData instanceof Float32Array)) {
+      throw new Error('collectEdgeVerticesImpl must return a Float32Array');
+    }
+    snapshot.edgeVertexData = edgeVertexData;
+    snapshot.edgeVertexDataModeMask = allowedModeMask;
+    return edgeVertexData;
+  }
+
+  const edgeTemplate = getOrBuildStaticEdgeVertexTemplateForModeFromMapData(
+    mapData,
+    allowedModeMask,
+    edgeTraversalCostSeconds,
+  );
+  updateTravelTimesInStaticEdgeVertexTemplate(
+    edgeTemplate,
+    distSeconds,
+    edgeTraversalCostSeconds,
+    {
+      edgeSlackSeconds: options.edgeSlackSeconds,
+    },
+  );
+  snapshot.edgeVertexData = edgeTemplate.edgeVertexData;
+  snapshot.edgeVertexDataModeMask = allowedModeMask;
+  return edgeTemplate.edgeVertexData;
+}
+
+export function buildStaticEdgeVertexTemplateForMode(
+  graph,
+  nodePixels,
+  allowedModeMask,
+  options = {},
+) {
+  validateGraphForRouting(graph);
+  validateNodePixels(nodePixels);
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+
+  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
+    options.edgeTraversalCostSeconds,
+    graph.header.nEdges,
+  );
+  const edgeCostLookup = edgeTraversalCostSeconds
+    ?? getOrCreateEdgeTraversalCostSecondsCache(graph, allowedModeMask);
+
+  let edgeCount = 0;
+  for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
+    if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
+      continue;
+    }
+    const edgeCostSeconds = edgeCostLookup[edgeIndex];
+    if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
+      continue;
+    }
+    edgeCount += 1;
+  }
+
+  const edgeVertexData = new Float32Array(edgeCount * 6);
+  const sourceNodeIndices = new Uint32Array(edgeCount);
+  const targetNodeIndices = new Uint32Array(edgeCount);
+  const edgeIndices = new Uint32Array(edgeCount);
+  let writeEdgeIndex = 0;
+
+  for (let sourceNodeIndex = 0; sourceNodeIndex < graph.header.nNodes; sourceNodeIndex += 1) {
+    const x0 = nodePixels.nodePixelX[sourceNodeIndex];
+    const y0 = nodePixels.nodePixelY[sourceNodeIndex];
+    const firstEdgeIndex = graph.nodeU32[sourceNodeIndex * 4 + 2];
+    const nodeEdgeCount = graph.nodeU16[sourceNodeIndex * 8 + 6];
+    const endEdgeIndex = firstEdgeIndex + nodeEdgeCount;
+
+    for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
+      if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
+        continue;
+      }
+      const edgeCostSeconds = edgeCostLookup[edgeIndex];
+      if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
+        continue;
+      }
+
+      const targetNodeIndex = graph.edgeU32[edgeIndex * 3];
+      if (targetNodeIndex < 0 || targetNodeIndex >= graph.header.nNodes) {
+        continue;
+      }
+      const x1 = nodePixels.nodePixelX[targetNodeIndex];
+      const y1 = nodePixels.nodePixelY[targetNodeIndex];
+      const base = writeEdgeIndex * 6;
+      edgeVertexData[base] = x0;
+      edgeVertexData[base + 1] = y0;
+      edgeVertexData[base + 2] = -1;
+      edgeVertexData[base + 3] = x1;
+      edgeVertexData[base + 4] = y1;
+      edgeVertexData[base + 5] = -1;
+      sourceNodeIndices[writeEdgeIndex] = sourceNodeIndex;
+      targetNodeIndices[writeEdgeIndex] = targetNodeIndex;
+      edgeIndices[writeEdgeIndex] = edgeIndex;
+      writeEdgeIndex += 1;
+    }
+  }
+
+  return {
+    allowedModeMask,
+    maxNodeIndexExclusive: graph.header.nNodes,
+    edgeCount: writeEdgeIndex,
+    edgeVertexData,
+    sourceNodeIndices,
+    targetNodeIndices,
+    edgeIndices,
+  };
+}
+
+export function updateTravelTimesInStaticEdgeVertexTemplate(
+  template,
+  distSeconds,
+  edgeTraversalCostSeconds,
+  options = {},
+) {
+  if (!template || typeof template !== 'object') {
+    throw new Error('template must be an object');
+  }
+  if (!(template.edgeVertexData instanceof Float32Array)) {
+    throw new Error('template.edgeVertexData must be a Float32Array');
+  }
+  if (!(template.sourceNodeIndices instanceof Uint32Array)) {
+    throw new Error('template.sourceNodeIndices must be a Uint32Array');
+  }
+  if (!(template.targetNodeIndices instanceof Uint32Array)) {
+    throw new Error('template.targetNodeIndices must be a Uint32Array');
+  }
+  if (!(template.edgeIndices instanceof Uint32Array)) {
+    throw new Error('template.edgeIndices must be a Uint32Array');
+  }
+  if (template.sourceNodeIndices.length !== template.targetNodeIndices.length) {
+    throw new Error('template source/target index arrays must have equal lengths');
+  }
+  if (template.sourceNodeIndices.length !== template.edgeIndices.length) {
+    throw new Error('template edge index arrays must have equal lengths');
+  }
+  if (
+    !Number.isInteger(template.edgeCount)
+    || template.edgeCount < 0
+    || template.edgeCount > template.sourceNodeIndices.length
+  ) {
+    throw new Error('template.edgeCount must be a valid edge count');
+  }
+  const maxNodeIndexExclusive = template.maxNodeIndexExclusive ?? 0;
+  if (!Number.isInteger(maxNodeIndexExclusive) || maxNodeIndexExclusive < 0) {
+    throw new Error('template.maxNodeIndexExclusive must be a non-negative integer');
+  }
+  validateDistSeconds(distSeconds, maxNodeIndexExclusive);
+
+  const edgeCosts = validateEdgeTraversalCostSecondsLookup(
+    edgeTraversalCostSeconds,
+    template.edgeIndices.length,
+  );
+  if (!edgeCosts) {
+    throw new Error('edgeTraversalCostSeconds is required');
+  }
+  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
+  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
+    throw new Error('edgeSlackSeconds must be a non-negative finite number');
+  }
+
+  const edgeCount = template.edgeCount;
+  const sourceNodeIndices = template.sourceNodeIndices;
+  const targetNodeIndices = template.targetNodeIndices;
+  const edgeIndices = template.edgeIndices;
+  const edgeVertexData = template.edgeVertexData;
+  let visibleEdgeCount = 0;
+
+  for (let templateEdgeIndex = 0; templateEdgeIndex < edgeCount; templateEdgeIndex += 1) {
+    const base = templateEdgeIndex * 6;
+    const sourceNodeIndex = sourceNodeIndices[templateEdgeIndex];
+    const targetNodeIndex = targetNodeIndices[templateEdgeIndex];
+    const edgeIndex = edgeIndices[templateEdgeIndex];
+
+    const startSeconds = distSeconds[sourceNodeIndex];
+    if (!Number.isFinite(startSeconds)) {
+      edgeVertexData[base + 2] = -1;
+      edgeVertexData[base + 5] = -1;
+      continue;
+    }
+
+    const targetSeconds = distSeconds[targetNodeIndex];
+    if (!Number.isFinite(targetSeconds)) {
+      edgeVertexData[base + 2] = -1;
+      edgeVertexData[base + 5] = -1;
+      continue;
+    }
+
+    const edgeCostSeconds = edgeCosts[edgeIndex];
+    if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
+      edgeVertexData[base + 2] = -1;
+      edgeVertexData[base + 5] = -1;
+      continue;
+    }
+
+    const expectedTargetSeconds = startSeconds + edgeCostSeconds;
+    if (expectedTargetSeconds > targetSeconds + edgeSlackSeconds) {
+      edgeVertexData[base + 2] = -1;
+      edgeVertexData[base + 5] = -1;
+      continue;
+    }
+
+    edgeVertexData[base + 2] = startSeconds;
+    edgeVertexData[base + 5] = expectedTargetSeconds;
+    visibleEdgeCount += 1;
+  }
+
+  return visibleEdgeCount;
+}
+
+function getOrBuildStaticEdgeVertexTemplateForModeFromMapData(
+  mapData,
+  allowedModeMask,
+  edgeTraversalCostSeconds,
+) {
+  if (!mapData || typeof mapData !== 'object' || !mapData.graph || !mapData.nodePixels) {
+    throw new Error('mapData.graph and mapData.nodePixels are required');
+  }
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+  const edgeCosts = validateEdgeTraversalCostSecondsLookup(
+    edgeTraversalCostSeconds,
     mapData.graph.header.nEdges,
   );
-  const collectEdgeVerticesImpl =
-    options.collectEdgeVerticesImpl ?? collectAllReachableTravelTimeEdgeVertices;
-  if (typeof collectEdgeVerticesImpl !== 'function') {
-    throw new Error('collectEdgeVerticesImpl must be a function');
+  if (!edgeCosts) {
+    throw new Error('edgeTraversalCostSeconds is required');
   }
 
-  const edgeVertexData = collectEdgeVerticesImpl(
-    mapData.graph,
-    mapData.nodePixels,
-    distSeconds,
-    allowedModeMask,
-    { edgeTraversalCostSeconds },
-  );
-  if (!(edgeVertexData instanceof Float32Array)) {
-    throw new Error('collectEdgeVerticesImpl must return a Float32Array');
+  let templateByModeMask = mapData.edgeVertexTemplateByModeMask;
+  if (!templateByModeMask || typeof templateByModeMask !== 'object') {
+    templateByModeMask = Object.create(null);
+    mapData.edgeVertexTemplateByModeMask = templateByModeMask;
   }
 
-  snapshot.edgeVertexData = edgeVertexData;
-  snapshot.edgeVertexDataModeMask = allowedModeMask;
-  return edgeVertexData;
+  let template = templateByModeMask[allowedModeMask] ?? null;
+  if (!template || typeof template !== 'object' || !(template.edgeVertexData instanceof Float32Array)) {
+    template = buildStaticEdgeVertexTemplateForMode(
+      mapData.graph,
+      mapData.nodePixels,
+      allowedModeMask,
+      { edgeTraversalCostSeconds: edgeCosts },
+    );
+    templateByModeMask[allowedModeMask] = template;
+  }
+
+  return template;
 }
 
 function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
@@ -3228,7 +3468,6 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
     searchState,
     mapData,
     allowedModeMask,
-    edgeVertexBuilder,
     edgeTraversalCostSeconds,
     renderer,
     colourCycleMinutes,
@@ -3241,21 +3480,26 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
   let edgeVertexData = null;
 
   if (supportsGpuEdgeInterpolation) {
-    const allEdgeVertices = profileMs('finalCollectMs', () =>
-      collectAllReachableTravelTimeEdgeVertices(
-        searchState.graph,
-        mapData.nodePixels,
-        searchState.distSeconds,
+    const edgeTemplate = profileMs('finalCollectMs', () =>
+      getOrBuildStaticEdgeVertexTemplateForModeFromMapData(
+        mapData,
         allowedModeMask,
+        edgeTraversalCostSeconds,
+      ),
+    );
+    paintedEdgeCount = profileMs('finalCollectMs', () =>
+      updateTravelTimesInStaticEdgeVertexTemplate(
+        edgeTemplate,
+        searchState.distSeconds,
+        edgeTraversalCostSeconds,
         {
-          builder: edgeVertexBuilder,
-          edgeTraversalCostSeconds,
+          edgeSlackSeconds: EDGE_INTERPOLATION_SLACK_SECONDS,
         },
       ),
     );
-    edgeVertexData = allEdgeVertices;
-    paintedEdgeCount = profileMs('finalDrawMs', () =>
-      renderer.drawTravelTimeEdges(allEdgeVertices, {
+    edgeVertexData = edgeTemplate.edgeVertexData;
+    profileMs('finalDrawMs', () =>
+      renderer.drawTravelTimeEdges(edgeVertexData, {
         cycleMinutes: colourCycleMinutes,
         colourTheme,
         append: false,

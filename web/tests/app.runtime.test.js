@@ -15,6 +15,8 @@ import {
   parseGraphBinary,
   parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
+  buildStaticEdgeVertexTemplateForMode,
+  updateTravelTimesInStaticEdgeVertexTemplate,
   persistColourCycleMinutesToLocation,
   persistModeValuesToLocation,
   persistNodeIndexToLocation,
@@ -643,4 +645,83 @@ test('shouldUploadEdgeGeometry only skips upload for unchanged reusable full-fra
     }),
     true,
   );
+});
+
+test('buildStaticEdgeVertexTemplateForMode stores reusable x/y geometry and edge metadata', () => {
+  const graph = createFixtureGraph();
+  const nodePixels = precomputeNodePixelCoordinates(graph);
+  const edgeTraversalCostSeconds = new Float32Array([10, 10]);
+
+  const template = buildStaticEdgeVertexTemplateForMode(
+    graph,
+    nodePixels,
+    EDGE_MODE_CAR_BIT,
+    {
+      edgeTraversalCostSeconds,
+    },
+  );
+
+  assert.equal(template.edgeCount, 2);
+  assert.equal(template.sourceNodeIndices.length, 2);
+  assert.equal(template.targetNodeIndices.length, 2);
+  assert.equal(template.edgeIndices.length, 2);
+  assert.equal(template.edgeVertexData.length, 12);
+  assert.deepEqual(Array.from(template.sourceNodeIndices), [0, 1]);
+  assert.deepEqual(Array.from(template.targetNodeIndices), [1, 2]);
+  assert.deepEqual(Array.from(template.edgeIndices), [0, 1]);
+
+  const node0x = nodePixels.nodePixelX[0];
+  const node0y = nodePixels.nodePixelY[0];
+  const node1x = nodePixels.nodePixelX[1];
+  const node1y = nodePixels.nodePixelY[1];
+  assert.equal(template.edgeVertexData[0], node0x);
+  assert.equal(template.edgeVertexData[1], node0y);
+  assert.equal(template.edgeVertexData[3], node1x);
+  assert.equal(template.edgeVertexData[4], node1y);
+});
+
+test('updateTravelTimesInStaticEdgeVertexTemplate updates only t-values and marks unreachable edges', () => {
+  const graph = createFixtureGraph();
+  const nodePixels = precomputeNodePixelCoordinates(graph);
+  const edgeTraversalCostSeconds = new Float32Array([10, 10]);
+  const template = buildStaticEdgeVertexTemplateForMode(
+    graph,
+    nodePixels,
+    EDGE_MODE_CAR_BIT,
+    {
+      edgeTraversalCostSeconds,
+    },
+  );
+  const distSeconds = new Float32Array([0, 10, 20]);
+  const x0Before = template.edgeVertexData[0];
+  const y0Before = template.edgeVertexData[1];
+  const x1Before = template.edgeVertexData[3];
+  const y1Before = template.edgeVertexData[4];
+
+  const visibleEdgeCount = updateTravelTimesInStaticEdgeVertexTemplate(
+    template,
+    distSeconds,
+    edgeTraversalCostSeconds,
+  );
+  assert.equal(visibleEdgeCount, 2);
+  assert.equal(template.edgeVertexData[2], 0);
+  assert.equal(template.edgeVertexData[5], 10);
+  assert.equal(template.edgeVertexData[8], 10);
+  assert.equal(template.edgeVertexData[11], 20);
+  assert.equal(template.edgeVertexData[0], x0Before);
+  assert.equal(template.edgeVertexData[1], y0Before);
+  assert.equal(template.edgeVertexData[3], x1Before);
+  assert.equal(template.edgeVertexData[4], y1Before);
+
+  distSeconds[1] = Number.POSITIVE_INFINITY;
+  const visibleAfterDisconnect = updateTravelTimesInStaticEdgeVertexTemplate(
+    template,
+    distSeconds,
+    edgeTraversalCostSeconds,
+  );
+  assert.equal(visibleAfterDisconnect, 0);
+  assert.equal(template.edgeVertexData[2], -1);
+  assert.equal(template.edgeVertexData[5], -1);
+  assert.equal(template.edgeVertexData[8], -1);
+  assert.equal(template.edgeVertexData[11], -1);
 });
