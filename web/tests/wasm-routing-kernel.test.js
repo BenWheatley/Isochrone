@@ -85,6 +85,39 @@ test('instantiateRoutingKernelWasm uses instantiateStreaming and validates expor
   assert.equal(result.exports, fakeInstance.exports);
 });
 
+test('instantiateRoutingKernelWasm default URL resolves relative to module path', async () => {
+  const fakeInstance = {
+    exports: {
+      memory: {},
+      wasm_alloc() {
+        return 1;
+      },
+      wasm_dealloc() {},
+      precompute_edge_costs() {},
+      compute_travel_time_field() {
+        return 0;
+      },
+    },
+  };
+
+  let requestedUrl = null;
+  await instantiateRoutingKernelWasm({
+    fetchImpl: async (url) => {
+      requestedUrl = String(url);
+      return { ok: true };
+    },
+    webAssemblyObject: {
+      async instantiateStreaming() {
+        return { instance: fakeInstance, module: { id: 'default-path' } };
+      },
+    },
+  });
+
+  assert.ok(requestedUrl !== null);
+  assert.ok(requestedUrl.endsWith('/wasm/routing-kernel.wasm'));
+  assert.notEqual(requestedUrl, '/wasm/routing-kernel.wasm');
+});
+
 test('instantiateRoutingKernelWasmFromBytes validates exports from byte instantiation path', async () => {
   const fakeInstance = {
     exports: {

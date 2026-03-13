@@ -5,6 +5,7 @@ const REQUIRED_EXPORTS = [
   'precompute_edge_costs',
   'compute_travel_time_field',
 ];
+const DEFAULT_WASM_URL = new URL('../../wasm/routing-kernel.wasm', import.meta.url).toString();
 
 export function hasWebAssemblySupport(runtimeGlobal = globalThis) {
   return Boolean(runtimeGlobal && runtimeGlobal.WebAssembly);
@@ -24,7 +25,7 @@ export function validateRoutingKernelExports(exportsObject) {
 
 export async function instantiateRoutingKernelWasm(options = {}) {
   const {
-    wasmUrl = '/wasm/routing-kernel.wasm',
+    wasmUrl = DEFAULT_WASM_URL,
     fetchImpl = globalThis.fetch,
     webAssemblyObject = globalThis.WebAssembly,
   } = options;
