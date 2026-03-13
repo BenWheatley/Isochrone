@@ -22,12 +22,21 @@ jobs:
 
       - uses: actions/configure-pages@v5
 
+      - name: Install Rust toolchain for WASM kernel
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Build routing kernel WASM
+        run: make wasm-build
+
       - name: Prepare static site artifact
         run: |
           set -euxo pipefail
-          mkdir -p site/src site/data_pipeline/output
+          mkdir -p site/src site/wasm site/data_pipeline/output
           cp web/index.html site/index.html
           cp -R web/src/. site/src/
+          cp web/wasm/routing-kernel.wasm site/wasm/
           cp data_pipeline/output/berlin-district-boundaries-canvas.json site/data_pipeline/output/
           cp data_pipeline/output/graph-walk.bin.gz site/data_pipeline/output/
 
