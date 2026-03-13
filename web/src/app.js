@@ -656,6 +656,27 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   return false;
 }
 
+export function rerenderIsochroneFromSnapshotWithStatus(shell, mapData, options = {}) {
+  const nowImpl = options.nowImpl ?? defaultNowMs;
+  if (typeof nowImpl !== 'function') {
+    throw new Error('nowImpl must be a function');
+  }
+  const rerenderImpl = options.rerenderImpl ?? rerenderIsochroneFromSnapshot;
+  if (typeof rerenderImpl !== 'function') {
+    throw new Error('rerenderImpl must be a function');
+  }
+
+  const startMs = nowImpl();
+  const rerendered = rerenderImpl(shell, mapData, options);
+  if (!rerendered) {
+    return false;
+  }
+
+  const elapsedMs = Math.max(0, Math.round(nowImpl() - startMs));
+  setRoutingStatus(shell, formatRoutingStatusDone(elapsedMs));
+  return true;
+}
+
 export function runPostMvpTransitStub(graph, walkingSearchState) {
   validateGraphForRouting(graph);
 
@@ -3962,7 +3983,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         }
         const cycleMinutes = getColourCycleMinutesFromShell(shell);
         renderIsochroneLegendIfNeeded(shell, cycleMinutes, { theme: themeValue });
-        const rerendered = rerenderIsochroneFromSnapshot(shell, initializedMapData, {
+        const rerendered = rerenderIsochroneFromSnapshotWithStatus(shell, initializedMapData, {
           colourTheme: themeValue,
           colourCycleMinutes: cycleMinutes,
         });
@@ -4068,7 +4089,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
     bindModeSelectControl(shell, {
       requestIsochroneRepaint() {
         const cycleMinutes = getColourCycleMinutesFromShell(shell);
-        const rerendered = rerenderIsochroneFromSnapshot(shell, initializedMapData, {
+        const rerendered = rerenderIsochroneFromSnapshotWithStatus(shell, initializedMapData, {
           colourTheme: resolveIsochroneTheme(),
           colourCycleMinutes: cycleMinutes,
         });

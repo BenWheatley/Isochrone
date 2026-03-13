@@ -20,6 +20,7 @@ import {
   persistNodeIndexToLocation,
   precomputeNodeModeMask,
   precomputeNodePixelCoordinates,
+  rerenderIsochroneFromSnapshotWithStatus,
   renderIsochroneLegendIfNeeded,
   updateDistanceScaleBar,
   timeToColour,
@@ -505,4 +506,47 @@ test('persistColourCycleMinutesToLocation writes cycle query value', () => {
   locationObject.href = 'https://example.test/map?foo=bar&cycle=75#viewport';
   const unchanged = persistColourCycleMinutesToLocation(75, { locationObject, historyObject });
   assert.equal(unchanged, false);
+});
+
+test('rerenderIsochroneFromSnapshotWithStatus sets done status with elapsed milliseconds', () => {
+  const shell = {
+    routingStatus: { textContent: 'Ready.' },
+  };
+  const mapData = {};
+  let rerenderCallCount = 0;
+  const nowValues = [100, 147];
+
+  const rerendered = rerenderIsochroneFromSnapshotWithStatus(shell, mapData, {
+    nowImpl() {
+      return nowValues.shift();
+    },
+    rerenderImpl(receivedShell, receivedMapData) {
+      rerenderCallCount += 1;
+      assert.equal(receivedShell, shell);
+      assert.equal(receivedMapData, mapData);
+      return true;
+    },
+  });
+
+  assert.equal(rerendered, true);
+  assert.equal(rerenderCallCount, 1);
+  assert.equal(shell.routingStatus.textContent, 'Done - full travel-time field ready (47 ms)');
+});
+
+test('rerenderIsochroneFromSnapshotWithStatus preserves status when rerender is unavailable', () => {
+  const shell = {
+    routingStatus: { textContent: 'Calculating... (42 nodes settled)' },
+  };
+
+  const rerendered = rerenderIsochroneFromSnapshotWithStatus(shell, {}, {
+    nowImpl() {
+      return 200;
+    },
+    rerenderImpl() {
+      return false;
+    },
+  });
+
+  assert.equal(rerendered, false);
+  assert.equal(shell.routingStatus.textContent, 'Calculating... (42 nodes settled)');
 });
