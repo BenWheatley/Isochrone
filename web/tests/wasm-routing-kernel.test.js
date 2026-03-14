@@ -251,3 +251,146 @@ test('computeTravelTimeFieldForGraph writes back wasm results and settled count'
   assert.equal(outDistSeconds[1], 42);
   assert.equal(outDistSeconds[2], Number.POSITIVE_INFINITY);
 });
+
+test('computeTravelTimeFieldForGraph reuses cached graph buffers across runs', () => {
+  const memory = { buffer: new ArrayBuffer(16384) };
+  let nextPtr = 256;
+  let allocCallCount = 0;
+  let deallocCallCount = 0;
+  const fakeExports = {
+    memory,
+    wasm_alloc(byteLength) {
+      allocCallCount += 1;
+      const ptr = (nextPtr + 7) & ~7;
+      nextPtr = ptr;
+      nextPtr += byteLength;
+      return ptr;
+    },
+    wasm_dealloc() {
+      deallocCallCount += 1;
+    },
+    precompute_edge_costs() {},
+    compute_travel_time_field(
+      outDistSecondsPtr,
+      _nodeFirstEdgeIndexPtr,
+      _nodeEdgeCountPtr,
+      nodeCount,
+      _edgeTargetNodeIndexPtr,
+      _edgeModeMaskPtr,
+      _edgeRoadClassPtr,
+      _edgeMaxspeedKphPtr,
+      _edgeWalkCostSecondsPtr,
+      _edgeCount,
+      sourceNodeIndex,
+    ) {
+      const outView = new Float32Array(memory.buffer, outDistSecondsPtr, nodeCount);
+      for (let nodeIndex = 0; nodeIndex < nodeCount; nodeIndex += 1) {
+        outView[nodeIndex] = Number.POSITIVE_INFINITY;
+      }
+      outView[sourceNodeIndex] = 0;
+      return 1;
+    },
+  };
+  const facade = createWasmRoutingKernelFacade(fakeExports);
+
+  const graphInputs = {
+    nodeFirstEdgeIndex: new Uint32Array([0, 1, 2]),
+    nodeEdgeCount: new Uint16Array([1, 1, 0]),
+    edgeTargetNodeIndex: new Uint32Array([1, 2]),
+    edgeModeMask: new Uint8Array([7, 7]),
+    edgeRoadClassId: new Uint8Array([11, 11]),
+    edgeMaxspeedKph: new Uint16Array([50, 50]),
+    edgeWalkCostSeconds: new Uint16Array([72, 72]),
+  };
+
+  const firstOut = new Float32Array(3);
+  facade.computeTravelTimeFieldForGraph({
+    ...graphInputs,
+    outDistSeconds: firstOut,
+    sourceNodeIndex: 0,
+    allowedModeMask: 4,
+  });
+
+  const allocAfterFirstRun = allocCallCount;
+  const deallocAfterFirstRun = deallocCallCount;
+  assert.equal(allocAfterFirstRun, 8);
+  assert.equal(deallocAfterFirstRun, 1);
+
+  const secondOut = new Float32Array(3);
+  facade.computeTravelTimeFieldForGraph({
+    ...graphInputs,
+    outDistSeconds: secondOut,
+    sourceNodeIndex: 1,
+    allowedModeMask: 4,
+  });
+
+  assert.equal(allocCallCount, allocAfterFirstRun + 1);
+  assert.equal(deallocCallCount, deallocAfterFirstRun + 1);
+  assert.equal(secondOut[1], 0);
+});
+
+test('precomputeEdgeCostsForGraph reuses cached edge metadata buffers across runs', () => {
+  const memory = { buffer: new ArrayBuffer(8192) };
+  let nextPtr = 256;
+  let allocCallCount = 0;
+  let deallocCallCount = 0;
+  const fakeExports = {
+    memory,
+    wasm_alloc(byteLength) {
+      allocCallCount += 1;
+      const ptr = (nextPtr + 7) & ~7;
+      nextPtr = ptr;
+      nextPtr += byteLength;
+      return ptr;
+    },
+    wasm_dealloc() {
+      deallocCallCount += 1;
+    },
+    precompute_edge_costs(
+      outCostSecondsPtr,
+      _edgeModeMaskPtr,
+      _edgeRoadClassPtr,
+      _edgeMaxspeedKphPtr,
+      _edgeWalkCostSecondsPtr,
+      edgeCount,
+      allowedModeMask,
+    ) {
+      const outView = new Float32Array(memory.buffer, outCostSecondsPtr, edgeCount);
+      for (let index = 0; index < edgeCount; index += 1) {
+        outView[index] = allowedModeMask + index;
+      }
+    },
+    compute_travel_time_field() {
+      return 0;
+    },
+  };
+  const facade = createWasmRoutingKernelFacade(fakeExports);
+
+  const edgeInputs = {
+    edgeModeMask: new Uint8Array([1, 2]),
+    edgeRoadClassId: new Uint8Array([3, 4]),
+    edgeMaxspeedKph: new Uint16Array([5, 6]),
+    edgeWalkCostSeconds: new Uint16Array([7, 8]),
+  };
+
+  const firstOut = new Float32Array(2);
+  facade.precomputeEdgeCostsForGraph({
+    ...edgeInputs,
+    outCostSeconds: firstOut,
+    allowedModeMask: 9,
+  });
+  const allocAfterFirstRun = allocCallCount;
+  const deallocAfterFirstRun = deallocCallCount;
+  assert.equal(allocAfterFirstRun, 5);
+  assert.equal(deallocAfterFirstRun, 1);
+
+  const secondOut = new Float32Array(2);
+  facade.precomputeEdgeCostsForGraph({
+    ...edgeInputs,
+    outCostSeconds: secondOut,
+    allowedModeMask: 9,
+  });
+  assert.equal(allocCallCount, allocAfterFirstRun + 1);
+  assert.equal(deallocCallCount, deallocAfterFirstRun + 1);
+  assert.deepEqual(Array.from(secondOut), [9, 10]);
+});

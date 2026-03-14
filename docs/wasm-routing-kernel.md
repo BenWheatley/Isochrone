@@ -25,6 +25,12 @@ Runtime now requires this kernel for routing/search execution and edge-cost prec
 - A clean ABI boundary is required before moving compute kernels into WASM.
 - Edge-cost precomputation is a safe first kernel because it is deterministic and array-oriented.
 
+## Implemented optimization
+
+- Static graph metadata arrays are now cached in WASM memory and reused across repeated route runs.
+- This removes repeated JS→WASM copies of node/edge structure arrays for each new source-node solve.
+- Per-run output buffers are still copied back to JS (`outDistSeconds` / `outCostSeconds`), while static graph buffers stay resident until facade disposal.
+
 ## Build command
 
 ```bash
@@ -36,8 +42,8 @@ Expected output:
 
 If `wasm32-unknown-unknown` stdlib is missing, the script fails fast with install guidance.
 
-## Next integration milestones (not implemented yet)
+## Next integration milestones
 
-1. Allocate typed-array views in WASM memory and benchmark JS-to-WASM transfer overhead.
-2. Reduce JS↔WASM copy overhead with persistent kernel-side buffers for repeated runs.
+1. Allocate typed-array views in WASM memory and benchmark copy-vs-shared-view tradeoffs for output arrays.
+2. Reuse kernel-side scratch buffers (dist/settled/heap workspace) across runs to reduce allocation churn.
 3. Keep parity tests for kernel output stability across map updates and schema changes.
