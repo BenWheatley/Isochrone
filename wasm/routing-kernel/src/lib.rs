@@ -1,4 +1,5 @@
 use std::alloc::{alloc, dealloc, Layout};
+use std::cell::RefCell;
 
 const EDGE_MODE_WALK_BIT: u8 = 1;
 const EDGE_MODE_BIKE_BIT: u8 = 1 << 1;
@@ -86,6 +87,56 @@ impl RadixHeap {
             self.buckets[bucket_index].push((node_index, key));
         }
     }
+
+    fn clear_with_capacity_hint(&mut self, capacity_hint: usize) {
+        for bucket in self.buckets.iter_mut() {
+            bucket.clear();
+        }
+        if let Some(bucket_zero) = self.buckets.get_mut(0) {
+            let additional = capacity_hint.saturating_sub(bucket_zero.capacity());
+            if additional > 0 {
+                bucket_zero.reserve(additional);
+            }
+        }
+        self.last = 0;
+        self.len = 0;
+    }
+}
+
+struct SearchWorkspace {
+    dist_ticks: Vec<u32>,
+    settled: Vec<u8>,
+    heap: RadixHeap,
+}
+
+impl SearchWorkspace {
+    fn new() -> Self {
+        Self {
+            dist_ticks: Vec::new(),
+            settled: Vec::new(),
+            heap: RadixHeap::with_capacity(0),
+        }
+    }
+
+    fn prepare_for_search(&mut self, node_count: usize, heap_capacity_hint: usize) {
+        if self.dist_ticks.len() < node_count {
+            self.dist_ticks.resize(node_count, u32::MAX);
+        } else {
+            self.dist_ticks[..node_count].fill(u32::MAX);
+        }
+
+        if self.settled.len() < node_count {
+            self.settled.resize(node_count, 0);
+        } else {
+            self.settled[..node_count].fill(0);
+        }
+
+        self.heap.clear_with_capacity_hint(heap_capacity_hint);
+    }
+}
+
+thread_local! {
+    static SEARCH_WORKSPACE: RefCell<SearchWorkspace> = RefCell::new(SearchWorkspace::new());
 }
 
 #[inline]
@@ -158,6 +209,89 @@ fn quantize_seconds_to_ticks(seconds: f32) -> Option<u32> {
 #[inline]
 fn ticks_to_seconds(ticks: u32) -> f32 {
     (ticks as f32) / COST_TICK_SCALE
+}
+
+#[inline]
+fn run_travel_time_field_with_workspace(
+    workspace: &mut SearchWorkspace,
+    out_dist_seconds: &mut [f32],
+    node_first_edge_index: &[u32],
+    node_edge_count: &[u16],
+    edge_target_node_index: &[u32],
+    edge_cost_ticks: &[u32],
+    source_index: usize,
+    has_time_limit: bool,
+    clamped_time_limit_ticks: u32,
+) -> u32 {
+    let node_count = out_dist_seconds.len();
+    let edge_count = edge_target_node_index.len();
+    workspace.prepare_for_search(node_count, node_count.min(16_384));
+
+    workspace.dist_ticks[source_index] = 0;
+    workspace.heap.push(source_index as u32, 0);
+
+    let mut settled_count = 0u32;
+
+    while !workspace.heap.is_empty() {
+        let Some((node_index_u32, cost_ticks)) = workspace.heap.pop() else {
+            break;
+        };
+        let node_index = node_index_u32 as usize;
+        if node_index >= node_count {
+            continue;
+        }
+        if cost_ticks > workspace.dist_ticks[node_index] {
+            continue;
+        }
+        if has_time_limit && cost_ticks > clamped_time_limit_ticks {
+            break;
+        }
+        if workspace.settled[node_index] == 1 {
+            continue;
+        }
+
+        workspace.settled[node_index] = 1;
+        settled_count = settled_count.saturating_add(1);
+
+        let first_edge_index = node_first_edge_index[node_index] as usize;
+        if first_edge_index >= edge_count {
+            continue;
+        }
+        let edge_span = node_edge_count[node_index] as usize;
+        let end_edge_index = first_edge_index.saturating_add(edge_span).min(edge_count);
+
+        for edge_index in first_edge_index..end_edge_index {
+            let edge_ticks = edge_cost_ticks[edge_index];
+            if edge_ticks == 0 {
+                continue;
+            }
+
+            let target_node_index = edge_target_node_index[edge_index] as usize;
+            if target_node_index >= node_count {
+                continue;
+            }
+
+            let next_cost_ticks = cost_ticks.saturating_add(edge_ticks);
+            if has_time_limit && next_cost_ticks > clamped_time_limit_ticks {
+                continue;
+            }
+            if next_cost_ticks < workspace.dist_ticks[target_node_index] {
+                workspace.dist_ticks[target_node_index] = next_cost_ticks;
+                workspace.heap.push(target_node_index as u32, next_cost_ticks);
+            }
+        }
+    }
+
+    for index in 0..node_count {
+        let ticks = workspace.dist_ticks[index];
+        out_dist_seconds[index] = if ticks == u32::MAX {
+            f32::INFINITY
+        } else {
+            ticks_to_seconds(ticks)
+        };
+    }
+
+    settled_count
 }
 
 #[no_mangle]
@@ -278,71 +412,39 @@ pub extern "C" fn compute_travel_time_field(
         u32::MAX
     };
 
-    let mut dist_ticks = vec![u32::MAX; node_count];
-    let mut settled = vec![0u8; node_count];
     let mut settled_count = 0u32;
-    let mut heap = RadixHeap::with_capacity(node_count.min(16_384));
+    let mut used_cached_workspace = false;
 
-    dist_ticks[source_index] = 0;
-    heap.push(source_node_index, 0);
-
-    while !heap.is_empty() {
-        let Some((node_index_u32, cost_ticks)) = heap.pop() else {
-            break;
-        };
-        let node_index = node_index_u32 as usize;
-        if node_index >= node_count {
-            continue;
+    SEARCH_WORKSPACE.with(|workspace_cell| {
+        if let Ok(mut workspace) = workspace_cell.try_borrow_mut() {
+            settled_count = run_travel_time_field_with_workspace(
+                &mut workspace,
+                out_dist_seconds,
+                node_first_edge_index,
+                node_edge_count,
+                edge_target_node_index,
+                edge_cost_ticks,
+                source_index,
+                has_time_limit,
+                clamped_time_limit_ticks,
+            );
+            used_cached_workspace = true;
         }
-        if cost_ticks > dist_ticks[node_index] {
-            continue;
-        }
-        if has_time_limit && cost_ticks > clamped_time_limit_ticks {
-            break;
-        }
-        if settled[node_index] == 1 {
-            continue;
-        }
+    });
 
-        settled[node_index] = 1;
-        settled_count = settled_count.saturating_add(1);
-
-        let first_edge_index = node_first_edge_index[node_index] as usize;
-        if first_edge_index >= edge_count {
-            continue;
-        }
-        let edge_span = node_edge_count[node_index] as usize;
-        let end_edge_index = first_edge_index.saturating_add(edge_span).min(edge_count);
-
-        for edge_index in first_edge_index..end_edge_index {
-            let edge_ticks = edge_cost_ticks[edge_index];
-            if edge_ticks == 0 {
-                continue;
-            }
-
-            let target_node_index = edge_target_node_index[edge_index] as usize;
-            if target_node_index >= node_count {
-                continue;
-            }
-
-            let next_cost_ticks = cost_ticks.saturating_add(edge_ticks);
-            if has_time_limit && next_cost_ticks > clamped_time_limit_ticks {
-                continue;
-            }
-            if next_cost_ticks < dist_ticks[target_node_index] {
-                dist_ticks[target_node_index] = next_cost_ticks;
-                heap.push(target_node_index as u32, next_cost_ticks);
-            }
-        }
-    }
-
-    for index in 0..node_count {
-        let ticks = dist_ticks[index];
-        out_dist_seconds[index] = if ticks == u32::MAX {
-            f32::INFINITY
-        } else {
-            ticks_to_seconds(ticks)
-        };
+    if !used_cached_workspace {
+        let mut fallback_workspace = SearchWorkspace::new();
+        settled_count = run_travel_time_field_with_workspace(
+            &mut fallback_workspace,
+            out_dist_seconds,
+            node_first_edge_index,
+            node_edge_count,
+            edge_target_node_index,
+            edge_cost_ticks,
+            source_index,
+            has_time_limit,
+            clamped_time_limit_ticks,
+        );
     }
 
     settled_count
@@ -403,6 +505,45 @@ mod tests {
         assert_eq!(out_dist_seconds[0], 0.0);
         assert_eq!(out_dist_seconds[1], 10.0);
         assert_eq!(out_dist_seconds[2], 20.0);
+    }
+
+    #[test]
+    fn compute_travel_time_field_resets_workspace_between_calls() {
+        let node_first_edge_index = [0u32, 2, 3];
+        let node_edge_count = [2u16, 1, 0];
+        let edge_target_node_index = [1u32, 2, 2];
+        let edge_cost_ticks = [10_000u32, 25_000u32, 10_000u32];
+        let mut out_dist_seconds = [f32::INFINITY; 3];
+
+        let first_settled = compute_travel_time_field(
+            out_dist_seconds.as_mut_ptr(),
+            node_first_edge_index.as_ptr(),
+            node_edge_count.as_ptr(),
+            3,
+            edge_target_node_index.as_ptr(),
+            edge_cost_ticks.as_ptr(),
+            3,
+            0,
+            f32::INFINITY,
+        );
+        assert_eq!(first_settled, 3);
+        assert_eq!(out_dist_seconds, [0.0, 10.0, 20.0]);
+
+        let second_settled = compute_travel_time_field(
+            out_dist_seconds.as_mut_ptr(),
+            node_first_edge_index.as_ptr(),
+            node_edge_count.as_ptr(),
+            3,
+            edge_target_node_index.as_ptr(),
+            edge_cost_ticks.as_ptr(),
+            3,
+            1,
+            f32::INFINITY,
+        );
+        assert_eq!(second_settled, 2);
+        assert_eq!(out_dist_seconds[0], f32::INFINITY);
+        assert_eq!(out_dist_seconds[1], 0.0);
+        assert_eq!(out_dist_seconds[2], 10.0);
     }
 
     #[test]

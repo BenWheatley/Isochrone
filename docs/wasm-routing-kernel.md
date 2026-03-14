@@ -32,6 +32,7 @@ Runtime now requires this kernel for routing/search execution and edge-cost prec
 - Per-run output buffers are still copied back to JS (`outDistSeconds` / `outCostSeconds`), while static graph buffers stay resident until facade disposal.
 - `compute_travel_time_field(...)` now consumes precomputed per-edge traversal ticks (`edgeCostTicks`) directly, so route runs no longer recompute edge mode/speed costs inside the Rust search loop.
 - Tick arrays are built once per mode mask in JS and cached on the loaded graph object for reuse across repeated runs.
+- WASM search workspace buffers (`dist_ticks`, `settled`, radix-heap buckets) are now reused across runs via thread-local workspace storage, reducing repeated allocation/initialization churn per solve.
 
 ## Build command
 
@@ -47,5 +48,4 @@ If `wasm32-unknown-unknown` stdlib is missing, the script fails fast with instal
 ## Next integration milestones
 
 1. Allocate typed-array views in WASM memory and benchmark copy-vs-shared-view tradeoffs for output arrays.
-2. Reuse kernel-side scratch buffers (dist/settled/heap workspace) across runs to reduce allocation churn.
-3. Keep parity tests for kernel output stability across map updates and schema changes.
+2. Keep parity tests for kernel output stability across map updates and schema changes.
