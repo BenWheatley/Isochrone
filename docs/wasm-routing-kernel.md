@@ -35,6 +35,7 @@ Runtime now requires this kernel for routing/search execution and edge-cost prec
 - WASM search workspace buffers (`dist_ticks`, `settled`, radix-heap buckets) are now reused across runs via thread-local workspace storage, reducing repeated allocation/initialization churn per solve.
 - JS-side WASM output buffers are now cached per output typed-array identity, so repeated route runs stop allocating/deallocating output scratch pointers each solve.
 - App-side route output arrays now use a two-buffer rotating scratch strategy, avoiding per-run distance-array allocation while preserving snapshot stability between consecutive runs.
+- Kernel facade now supports shared-output result views (`outDistSecondsView`) so the app can consume solve output directly from WASM memory and skip per-run JS copy-back for route distances.
 
 ## Build command
 

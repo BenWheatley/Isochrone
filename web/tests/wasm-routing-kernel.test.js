@@ -244,6 +244,55 @@ test('computeTravelTimeFieldForGraph writes back wasm results and settled count'
   assert.equal(outDistSeconds[2], Number.POSITIVE_INFINITY);
 });
 
+test('computeTravelTimeFieldForGraph can return shared output view from wasm memory', () => {
+  const memory = { buffer: new ArrayBuffer(8192) };
+  let nextPtr = 256;
+  const fakeExports = {
+    memory,
+    wasm_alloc(byteLength) {
+      const ptr = nextPtr;
+      nextPtr += byteLength;
+      return ptr;
+    },
+    wasm_dealloc() {},
+    precompute_edge_costs() {},
+    compute_travel_time_field(
+      outDistSecondsPtr,
+      _nodeFirstEdgeIndexPtr,
+      _nodeEdgeCountPtr,
+      nodeCount,
+      _edgeTargetNodeIndexPtr,
+      _edgeCostTicksPtr,
+      _edgeCount,
+      sourceNodeIndex,
+    ) {
+      const outView = new Float32Array(memory.buffer, outDistSecondsPtr, nodeCount);
+      outView.fill(Number.POSITIVE_INFINITY);
+      outView[sourceNodeIndex] = 0;
+      return 1;
+    },
+  };
+  const facade = createWasmRoutingKernelFacade(fakeExports);
+
+  const outDistSeconds = new Float32Array(3);
+  outDistSeconds.fill(12345);
+  const result = facade.computeTravelTimeFieldForGraph({
+    nodeFirstEdgeIndex: new Uint32Array([0, 1, 2]),
+    nodeEdgeCount: new Uint16Array([1, 1, 0]),
+    edgeTargetNodeIndex: new Uint32Array([1, 2]),
+    edgeCostTicks: new Uint32Array([72_000, 72_000]),
+    outDistSeconds,
+    sourceNodeIndex: 0,
+    returnSharedOutputView: true,
+  });
+
+  assert.equal(result.settledNodeCount, 1);
+  assert.ok(result.outDistSecondsView instanceof Float32Array);
+  assert.equal(result.outDistSecondsView[0], 0);
+  assert.equal(result.outDistSecondsView[1], Number.POSITIVE_INFINITY);
+  assert.equal(outDistSeconds[0], 12345);
+});
+
 test('computeTravelTimeFieldForGraph reuses cached graph buffers across runs', () => {
   const memory = { buffer: new ArrayBuffer(16384) };
   let nextPtr = 256;
@@ -314,6 +363,64 @@ test('computeTravelTimeFieldForGraph reuses cached graph buffers across runs', (
 
   facade.releaseCachedGraphBuffers();
   assert.equal(deallocCallCount, allocCallCount);
+});
+
+test('computeTravelTimeFieldForGraph shared output views stay stable across alternating output buffers', () => {
+  const memory = { buffer: new ArrayBuffer(16384) };
+  let nextPtr = 256;
+  const fakeExports = {
+    memory,
+    wasm_alloc(byteLength) {
+      const ptr = (nextPtr + 7) & ~7;
+      nextPtr = ptr;
+      nextPtr += byteLength;
+      return ptr;
+    },
+    wasm_dealloc() {},
+    precompute_edge_costs() {},
+    compute_travel_time_field(
+      outDistSecondsPtr,
+      _nodeFirstEdgeIndexPtr,
+      _nodeEdgeCountPtr,
+      nodeCount,
+      _edgeTargetNodeIndexPtr,
+      _edgeCostTicksPtr,
+      _edgeCount,
+      sourceNodeIndex,
+    ) {
+      const outView = new Float32Array(memory.buffer, outDistSecondsPtr, nodeCount);
+      outView.fill(Number.POSITIVE_INFINITY);
+      outView[sourceNodeIndex] = 0;
+      return 1;
+    },
+  };
+  const facade = createWasmRoutingKernelFacade(fakeExports);
+  const graphInputs = {
+    nodeFirstEdgeIndex: new Uint32Array([0, 1, 2]),
+    nodeEdgeCount: new Uint16Array([1, 1, 0]),
+    edgeTargetNodeIndex: new Uint32Array([1, 2]),
+    edgeCostTicks: new Uint32Array([72_000, 72_000]),
+  };
+
+  const resultA = facade.computeTravelTimeFieldForGraph({
+    ...graphInputs,
+    outDistSeconds: new Float32Array(3),
+    sourceNodeIndex: 0,
+    returnSharedOutputView: true,
+  });
+  const resultB = facade.computeTravelTimeFieldForGraph({
+    ...graphInputs,
+    outDistSeconds: new Float32Array(3),
+    sourceNodeIndex: 1,
+    returnSharedOutputView: true,
+  });
+
+  assert.ok(resultA.outDistSecondsView instanceof Float32Array);
+  assert.ok(resultB.outDistSecondsView instanceof Float32Array);
+  assert.equal(resultA.outDistSecondsView[0], 0);
+  assert.equal(resultA.outDistSecondsView[1], Number.POSITIVE_INFINITY);
+  assert.equal(resultB.outDistSecondsView[0], Number.POSITIVE_INFINITY);
+  assert.equal(resultB.outDistSecondsView[1], 0);
 });
 
 test('precomputeEdgeCostsForGraph reuses cached edge metadata buffers across runs', () => {

@@ -233,6 +233,7 @@ export function createWasmRoutingKernelFacade(exportsObject) {
       edgeCostTicks,
       outDistSeconds,
       sourceNodeIndex,
+      returnSharedOutputView = false,
       timeLimitSeconds = Number.POSITIVE_INFINITY,
     }) {
       if (!(nodeFirstEdgeIndex instanceof Uint32Array)) {
@@ -252,6 +253,9 @@ export function createWasmRoutingKernelFacade(exportsObject) {
       }
       if (!Number.isInteger(sourceNodeIndex) || sourceNodeIndex < 0) {
         throw new Error('sourceNodeIndex must be a non-negative integer');
+      }
+      if (typeof returnSharedOutputView !== 'boolean') {
+        throw new Error('returnSharedOutputView must be a boolean');
       }
 
       const nodeCount = outDistSeconds.length;
@@ -288,12 +292,21 @@ export function createWasmRoutingKernelFacade(exportsObject) {
         sourceNodeIndex,
         normalizedTimeLimitSeconds,
       );
-      copyTypedArrayFromWasm(outDistSeconds, outDistSecondsPtr);
-      return {
+      const result = {
         settledNodeCount: Number.isInteger(settledNodeCount) && settledNodeCount >= 0
           ? settledNodeCount
           : 0,
       };
+      if (returnSharedOutputView) {
+        result.outDistSecondsView = new Float32Array(
+          exportsObject.memory.buffer,
+          outDistSecondsPtr,
+          nodeCount,
+        );
+        return result;
+      }
+      copyTypedArrayFromWasm(outDistSeconds, outDistSecondsPtr);
+      return result;
     },
     releaseCachedGraphBuffers() {
       releaseCachedTypedArrayAllocations();

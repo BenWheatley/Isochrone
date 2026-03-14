@@ -487,8 +487,19 @@ export async function runWalkingIsochroneFromSourceNode(
         edgeCostTicks: edgeTraversalCostTicks,
         outDistSeconds: distSeconds,
         sourceNodeIndex,
+        returnSharedOutputView: true,
         timeLimitSeconds,
       });
+      if (
+        kernelResult
+        && typeof kernelResult === 'object'
+        && kernelResult.outDistSecondsView instanceof Float32Array
+        && kernelResult.outDistSecondsView.length === distSeconds.length
+      ) {
+        searchState.distSeconds = kernelResult.outDistSecondsView;
+      } else {
+        searchState.distSeconds = distSeconds;
+      }
       if (
         kernelResult
         && typeof kernelResult === 'object'
@@ -497,7 +508,7 @@ export async function runWalkingIsochroneFromSourceNode(
       ) {
         settledCount = kernelResult.settledNodeCount;
       } else {
-        settledCount = countFiniteTravelTimes(distSeconds);
+        settledCount = countFiniteTravelTimes(searchState.distSeconds);
       }
       done = true;
       return sourceNodeIndex;
@@ -508,7 +519,7 @@ export async function runWalkingIsochroneFromSourceNode(
   if (!runSummary.cancelled) {
     mapData.lastRoutingSnapshot = {
       sourceNodeIndex,
-      distSeconds,
+      distSeconds: searchState.distSeconds,
       allowedModeMask,
       edgeTraversalCostSeconds,
       colourCycleMinutes: options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
@@ -3585,7 +3596,14 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
         heightPx: searchState.graph.header.gridHeightPx,
       }),
     );
-    paintedNodeCount = countFiniteTravelTimes(searchState.distSeconds);
+    if (
+      Number.isInteger(searchState.settledCount)
+      && searchState.settledCount >= 0
+    ) {
+      paintedNodeCount = searchState.settledCount;
+    } else {
+      paintedNodeCount = countFiniteTravelTimes(searchState.distSeconds);
+    }
   } else if (supportsGpuTravelTimeRendering) {
     profileMs('finalDrawMs', () => {
       clearTravelTimeGrid(mapData.travelTimeGrid);
