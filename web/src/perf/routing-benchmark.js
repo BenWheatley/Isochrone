@@ -22,16 +22,7 @@ export function createSeededRng(seed = 0x1234abcd) {
 }
 
 export function summarizeNumberSeries(values) {
-  if (!Array.isArray(values) || values.length === 0) {
-    throw new Error('values must be a non-empty array');
-  }
-
-  const numericValues = values.map((value) => {
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
-      throw new Error('values must contain only finite numbers');
-    }
-    return value;
-  });
+  const numericValues = toFiniteNumberArray(values, 'values');
 
   const sorted = numericValues.slice().sort((a, b) => a - b);
   const count = sorted.length;
@@ -51,6 +42,119 @@ export function summarizeNumberSeries(values) {
   };
 }
 
+export function summarizeStableSeries(values, options = {}) {
+  const numericValues = toFiniteNumberArray(values, 'values');
+  const { maxRelativeMad = 0.05 } = options;
+  if (typeof maxRelativeMad !== 'number' || !Number.isFinite(maxRelativeMad) || maxRelativeMad <= 0) {
+    throw new Error('maxRelativeMad must be a positive finite number');
+  }
+
+  const summary = summarizeNumberSeries(numericValues);
+  const median = summary.p50;
+  const absoluteDeviations = numericValues.map((value) => Math.abs(value - median));
+  const mad = summarizeNumberSeries(absoluteDeviations).p50;
+  const relativeMad = median === 0 ? (mad === 0 ? 0 : Infinity) : mad / Math.abs(median);
+
+  const variance = numericValues.reduce((total, value) => {
+    const delta = value - summary.mean;
+    return total + (delta * delta);
+  }, 0) / numericValues.length;
+  const standardDeviation = Math.sqrt(variance);
+  const coefficientOfVariation =
+    summary.mean === 0 ? (standardDeviation === 0 ? 0 : Infinity) : standardDeviation / Math.abs(summary.mean);
+
+  return {
+    ...summary,
+    median,
+    mad,
+    relativeMad,
+    standardDeviation,
+    coefficientOfVariation,
+    maxRelativeMad,
+    isStable: relativeMad <= maxRelativeMad,
+  };
+}
+
+export function summarizePairedDeltas(baselineValues, candidateValues, options = {}) {
+  const baseline = toFiniteNumberArray(baselineValues, 'baselineValues');
+  const candidate = toFiniteNumberArray(candidateValues, 'candidateValues');
+  if (baseline.length !== candidate.length) {
+    throw new Error('baselineValues and candidateValues must have identical length');
+  }
+
+  const {
+    significanceThresholdPct = 0.03,
+    classificationWinRatio = 0.7,
+  } = options;
+  if (
+    typeof significanceThresholdPct !== 'number'
+    || !Number.isFinite(significanceThresholdPct)
+    || significanceThresholdPct < 0
+  ) {
+    throw new Error('significanceThresholdPct must be a non-negative finite number');
+  }
+  if (
+    typeof classificationWinRatio !== 'number'
+    || !Number.isFinite(classificationWinRatio)
+    || classificationWinRatio < 0.5
+    || classificationWinRatio > 1
+  ) {
+    throw new Error('classificationWinRatio must be a finite number between 0.5 and 1');
+  }
+
+  const deltaMsValues = [];
+  const deltaPctValues = [];
+  let fasterCount = 0;
+  let slowerCount = 0;
+  let unchangedCount = 0;
+
+  for (let index = 0; index < baseline.length; index += 1) {
+    const baselineValue = baseline[index];
+    if (baselineValue <= 0) {
+      throw new Error('baselineValues must contain only positive numbers');
+    }
+    const candidateValue = candidate[index];
+    const deltaMs = candidateValue - baselineValue;
+    const deltaPct = deltaMs / baselineValue;
+    deltaMsValues.push(deltaMs);
+    deltaPctValues.push(deltaPct);
+    if (deltaMs < 0) {
+      fasterCount += 1;
+    } else if (deltaMs > 0) {
+      slowerCount += 1;
+    } else {
+      unchangedCount += 1;
+    }
+  }
+
+  const runCount = baseline.length;
+  const fasterRatio = fasterCount / runCount;
+  const slowerRatio = slowerCount / runCount;
+  const deltaMs = summarizeNumberSeries(deltaMsValues);
+  const deltaPct = summarizeNumberSeries(deltaPctValues);
+
+  let classification = 'inconclusive';
+  if (fasterRatio >= classificationWinRatio && deltaPct.p50 <= -significanceThresholdPct) {
+    classification = 'faster';
+  } else if (slowerRatio >= classificationWinRatio && deltaPct.p50 >= significanceThresholdPct) {
+    classification = 'slower';
+  }
+
+  return {
+    runCount,
+    significanceThresholdPct,
+    classificationWinRatio,
+    fasterCount,
+    slowerCount,
+    unchangedCount,
+    fasterRatio,
+    slowerRatio,
+    deltaMs,
+    deltaPct,
+    classification,
+  };
+}
+
 function quantileFromSorted(sortedValues, quantile) {
   if (!Array.isArray(sortedValues) || sortedValues.length === 0) {
     throw new Error('sortedValues must be a non-empty array');
@@ -60,6 +164,18 @@ function quantileFromSorted(sortedValues, quantile) {
   }
   const index = Math.floor((sortedValues.length - 1) * quantile);
   return sortedValues[index];
+}
+
+function toFiniteNumberArray(values, label) {
+  if (!Array.isArray(values) || values.length === 0) {
+    throw new Error(`${label} must be a non-empty array`);
+  }
+  return values.map((value) => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new Error(`${label} must contain only finite numbers`);
+    }
+    return value;
+  });
 }
 
 export function sampleEligibleSourceNodeIndices(graph, options = {}) {

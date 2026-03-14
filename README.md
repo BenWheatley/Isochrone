@@ -26,14 +26,32 @@ npm run --silent bench:routing -- \
   --graph data_pipeline/output/graph-walk.bin \
   --samples 24 \
   --modes walk,bike,car,all \
-  --heap-strategies decrease-key,duplicate-push \
   --output-json data_pipeline/output/routing-benchmark.json
 ```
 
 - Uses deterministic random source-node sampling (`--seed`, default `1337`).
 - Runs routing headlessly in Node to isolate CPU/search behavior from browser rendering.
 - Requires the WASM routing kernel (`web/wasm/routing-kernel.wasm`) for edge-cost precompute.
-- Reports per-mode/per-heap wall-time and CPU-time summaries.
+- Reports per-mode phase timings: `precompute`, `tick-pack`, `search`, `dist-output`, and `total`.
+
+Stable/low-variance benchmark mode:
+
+```bash
+npm run --silent bench:routing -- \
+  --graph data_pipeline/output/graph-walk.bin \
+  --samples 24 \
+  --modes walk,bike,car,all \
+  --stable \
+  --warmup-rounds 3 \
+  --measurement-rounds 5 \
+  --max-relative-mad 0.05 \
+  --output-json data_pipeline/output/routing-benchmark-stable.json
+```
+
+- Reuses the exact same sampled source nodes for all rounds.
+- Discards warmup rounds and evaluates measured-round stability with median absolute deviation (MAD).
+- Emits a `Stability gate: PASS|FAIL` summary per run and in JSON output.
+- Optional paired baseline comparison: `--baseline-json <stable-report.json>`.
 
 ## WASM runtime build
 
@@ -41,7 +59,8 @@ npm run --silent bench:routing -- \
 make wasm-build
 ```
 
-- Builds Rust routing-kernel crate to `web/wasm/routing-kernel.wasm`.
+- Builds and post-optimizes Rust routing-kernel crate to `web/wasm/routing-kernel.wasm` (`wasm-opt -O4 --all-features`).
+- Requires `wasm-opt` (`binaryen`) on PATH; install with `brew install binaryen` on macOS.
 - Browser runtime requires this WASM kernel for routing/search execution.
 - Browsers without WASM support are shown: `Your browser does not support WASM, this app requires WASM for performance reasons`.
 - Interface and milestones are documented in `docs/wasm-routing-kernel.md`.

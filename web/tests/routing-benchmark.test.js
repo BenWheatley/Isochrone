@@ -5,7 +5,9 @@ import {
   createSeededRng,
   runRoutingBenchmark,
   sampleEligibleSourceNodeIndices,
+  summarizePairedDeltas,
   summarizeNumberSeries,
+  summarizeStableSeries,
 } from '../src/perf/routing-benchmark.js';
 import {
   EDGE_MODE_CAR_BIT,
@@ -120,6 +122,51 @@ test('summarizeNumberSeries returns expected summary stats', () => {
   assert.equal(summary.p50, 3);
   assert.equal(summary.p95, 4);
   assert.equal(summary.p99, 4);
+});
+
+test('summarizeStableSeries reports stable when relative MAD is below threshold', () => {
+  const summary = summarizeStableSeries([100, 101, 99, 100.5, 100], {
+    maxRelativeMad: 0.03,
+  });
+
+  assert.equal(summary.isStable, true);
+  assert.ok(summary.relativeMad <= 0.03);
+});
+
+test('summarizeStableSeries reports unstable when relative MAD exceeds threshold', () => {
+  const summary = summarizeStableSeries([100, 140, 70, 130, 60], {
+    maxRelativeMad: 0.05,
+  });
+
+  assert.equal(summary.isStable, false);
+  assert.ok(summary.relativeMad > 0.05);
+});
+
+test('summarizePairedDeltas classifies faster/slower/inconclusive runs', () => {
+  const faster = summarizePairedDeltas(
+    [100, 102, 98, 101],
+    [90, 92, 89, 95],
+    { significanceThresholdPct: 0.05 },
+  );
+  assert.equal(faster.classification, 'faster');
+  assert.ok(faster.fasterCount > faster.slowerCount);
+  assert.ok(faster.deltaPct.mean < 0);
+
+  const slower = summarizePairedDeltas(
+    [100, 102, 98, 101],
+    [111, 112, 109, 110],
+    { significanceThresholdPct: 0.05 },
+  );
+  assert.equal(slower.classification, 'slower');
+  assert.ok(slower.slowerCount > slower.fasterCount);
+  assert.ok(slower.deltaPct.mean > 0);
+
+  const inconclusive = summarizePairedDeltas(
+    [100, 100, 100, 100],
+    [99, 101, 100, 100],
+    { significanceThresholdPct: 0.05 },
+  );
+  assert.equal(inconclusive.classification, 'inconclusive');
 });
 
 test('sampleEligibleSourceNodeIndices honors deterministic seeded eligibility sampling', () => {
