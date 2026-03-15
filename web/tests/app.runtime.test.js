@@ -25,6 +25,7 @@ import {
   getOrBuildSnapshotEdgeVertexData,
   getOrBuildEdgeTraversalCostTicksForMode,
   getOrRotateRoutingDistScratchBuffer,
+  buildModeSpecificKernelGraphViews,
   buildStaticEdgeNodeIndexedVertexData,
   rerenderIsochroneFromSnapshotWithStatus,
   renderIsochroneLegendIfNeeded,
@@ -393,6 +394,54 @@ test('precomputeEdgeTraversalCostSecondsCache requires kernel and validates outp
       }),
     /produced invalid cost at edge 0/,
   );
+});
+
+test('precomputeEdgeTraversalCostSecondsCache skips repeat kernel runs for same mode and output buffer', () => {
+  const graph = createFixtureGraph();
+  let kernelCallCount = 0;
+  const kernel = {
+    precomputeEdgeCostsForGraph({ outCostSeconds }) {
+      kernelCallCount += 1;
+      outCostSeconds.fill(7);
+    },
+  };
+
+  const cachedA = precomputeEdgeTraversalCostSecondsCache(graph, EDGE_MODE_CAR_BIT, null, {
+    edgeCostPrecomputeKernel: kernel,
+  });
+  const cachedB = precomputeEdgeTraversalCostSecondsCache(graph, EDGE_MODE_CAR_BIT, null, {
+    edgeCostPrecomputeKernel: kernel,
+  });
+  const external = new Float32Array(graph.header.nEdges);
+  precomputeEdgeTraversalCostSecondsCache(graph, EDGE_MODE_CAR_BIT, external, {
+    edgeCostPrecomputeKernel: kernel,
+  });
+  precomputeEdgeTraversalCostSecondsCache(graph, EDGE_MODE_CAR_BIT, external, {
+    edgeCostPrecomputeKernel: kernel,
+  });
+
+  assert.equal(cachedA, cachedB);
+  assert.equal(kernelCallCount, 2);
+});
+
+test('buildModeSpecificKernelGraphViews compacts adjacency to finite tick edges only', () => {
+  const graph = createFixtureGraph();
+  const edgeTraversalCostTicks = new Uint32Array([1000, 0]);
+
+  const compactViews = buildModeSpecificKernelGraphViews(
+    graph,
+    EDGE_MODE_CAR_BIT,
+    edgeTraversalCostTicks,
+  );
+
+  assert.equal(compactViews.nodeFirstEdgeIndex.length, graph.header.nNodes);
+  assert.equal(compactViews.nodeEdgeCount.length, graph.header.nNodes);
+  assert.equal(compactViews.edgeTargetNodeIndex.length, 1);
+  assert.equal(compactViews.edgeCostTicks.length, 1);
+  assert.deepEqual(Array.from(compactViews.nodeFirstEdgeIndex), [0, 1, 1]);
+  assert.deepEqual(Array.from(compactViews.nodeEdgeCount), [1, 0, 0]);
+  assert.deepEqual(Array.from(compactViews.edgeTargetNodeIndex), [1]);
+  assert.deepEqual(Array.from(compactViews.edgeCostTicks), [1000]);
 });
 
 test('node spatial index search prefers nearest node with an allowed mode', () => {

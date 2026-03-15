@@ -12,6 +12,7 @@ import { DuplicateEntryMinHeap, MinHeap } from './heap.js';
 import { validateGraphForRouting } from './graph-validation.js';
 
 const EDGE_WALK_COST_SECONDS_CACHE_PROPERTY = '__edgeWalkCostSeconds';
+const EDGE_TRAVERSAL_COST_READY_CACHE_PROPERTY = '__edgeTraversalCostReadyByModeMask';
 
 export function createWalkingSearchState(
   graph,
@@ -247,6 +248,8 @@ export function getOrCreateEdgeTraversalCostSecondsCache(graph, allowedModeMask)
     edgeTraversalCostSeconds = new Float32Array(graph.header.nEdges);
     edgeTraversalCostSeconds.fill(Number.NaN);
     edgeTraversalCostCacheByModeMask[allowedModeMask] = edgeTraversalCostSeconds;
+    const readyCacheByModeMask = getOrCreateEdgeTraversalCostReadyCacheByModeMask(graph);
+    delete readyCacheByModeMask[allowedModeMask];
   }
 
   return edgeTraversalCostSeconds;
@@ -283,6 +286,11 @@ export function precomputeEdgeTraversalCostSecondsCache(
     );
   }
 
+  const readyCacheByModeMask = getOrCreateEdgeTraversalCostReadyCacheByModeMask(graph);
+  if (readyCacheByModeMask[allowedModeMask] === costSeconds) {
+    return costSeconds;
+  }
+
   try {
     edgeCostPrecomputeKernel.precomputeEdgeCostsForGraph({
       edgeModeMask: graph.edgeModeMask,
@@ -308,7 +316,18 @@ export function precomputeEdgeTraversalCostSecondsCache(
     }
   }
 
+  readyCacheByModeMask[allowedModeMask] = costSeconds;
+
   return costSeconds;
+}
+
+function getOrCreateEdgeTraversalCostReadyCacheByModeMask(graph) {
+  let readyCacheByModeMask = graph[EDGE_TRAVERSAL_COST_READY_CACHE_PROPERTY];
+  if (!readyCacheByModeMask || typeof readyCacheByModeMask !== 'object') {
+    readyCacheByModeMask = Object.create(null);
+    graph[EDGE_TRAVERSAL_COST_READY_CACHE_PROPERTY] = readyCacheByModeMask;
+  }
+  return readyCacheByModeMask;
 }
 
 function getOrCreateEdgeWalkCostSeconds(graph) {

@@ -282,6 +282,9 @@ fn run_travel_time_field_with_workspace(
             if target_node_index >= node_count {
                 continue;
             }
+            if workspace.settled[target_node_index] == 1 {
+                continue;
+            }
 
             let next_cost_ticks = cost_ticks.saturating_add(edge_ticks);
             if has_time_limit && next_cost_ticks > clamped_time_limit_ticks {

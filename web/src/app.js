@@ -96,6 +96,7 @@ export const WASM_REQUIRED_MESSAGE =
   'Your browser does not support WASM, this app requires WASM for performance reasons';
 const WASM_EDGE_COST_TICK_SCALE = 1_000;
 const EDGE_TRAVERSAL_COST_TICK_CACHE_PROPERTY = '__edgeTraversalCostTicksByModeMask';
+const MODE_SPECIFIC_KERNEL_GRAPH_VIEWS_CACHE_PROPERTY = '__modeSpecificKernelGraphViewsByModeMask';
 const ROUTING_DIST_SCRATCH_BUFFERS_PROPERTY = '__routingDistScratchBuffers';
 const ROUTING_DIST_SCRATCH_NEXT_INDEX_PROPERTY = '__routingDistScratchNextIndex';
 export function precomputeNodeModeMask(graph) {
@@ -146,6 +147,114 @@ export function precomputeKernelGraphViews(graph) {
     edgeTargetNodeIndex,
     edgeWalkCostSeconds,
   };
+}
+
+export function buildModeSpecificKernelGraphViews(graph, allowedModeMask, edgeCostTicks) {
+  validateGraphForRouting(graph);
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+  if (!(edgeCostTicks instanceof Uint32Array)) {
+    throw new Error('edgeCostTicks must be a Uint32Array');
+  }
+  if (edgeCostTicks.length < graph.header.nEdges) {
+    throw new Error('edgeCostTicks must cover graph.header.nEdges');
+  }
+
+  const nodeCount = graph.header.nNodes;
+  const nodeFirstEdgeIndex = new Uint32Array(nodeCount);
+  const nodeEdgeCount = new Uint16Array(nodeCount);
+
+  let compactEdgeCount = 0;
+  for (let nodeIndex = 0; nodeIndex < nodeCount; nodeIndex += 1) {
+    nodeFirstEdgeIndex[nodeIndex] = compactEdgeCount;
+    const firstEdgeIndex = graph.nodeU32[nodeIndex * 4 + 2];
+    const outgoingEdgeCount = graph.nodeU16[nodeIndex * 8 + 6];
+    const endEdgeIndex = firstEdgeIndex + outgoingEdgeCount;
+    let eligibleEdgeCount = 0;
+
+    for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
+      if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
+        continue;
+      }
+      if (edgeCostTicks[edgeIndex] === 0) {
+        continue;
+      }
+      eligibleEdgeCount += 1;
+    }
+
+    if (eligibleEdgeCount > 0xffff) {
+      throw new Error(`node ${nodeIndex} has too many eligible outgoing edges for Uint16 count`);
+    }
+    nodeEdgeCount[nodeIndex] = eligibleEdgeCount;
+    compactEdgeCount += eligibleEdgeCount;
+  }
+
+  const edgeTargetNodeIndex = new Uint32Array(compactEdgeCount);
+  const compactEdgeCostTicks = new Uint32Array(compactEdgeCount);
+  let writeEdgeIndex = 0;
+  for (let nodeIndex = 0; nodeIndex < nodeCount; nodeIndex += 1) {
+    const firstEdgeIndex = graph.nodeU32[nodeIndex * 4 + 2];
+    const outgoingEdgeCount = graph.nodeU16[nodeIndex * 8 + 6];
+    const endEdgeIndex = firstEdgeIndex + outgoingEdgeCount;
+
+    for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
+      if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
+        continue;
+      }
+      const edgeTickCost = edgeCostTicks[edgeIndex];
+      if (edgeTickCost === 0) {
+        continue;
+      }
+      edgeTargetNodeIndex[writeEdgeIndex] = graph.edgeU32[edgeIndex * 3];
+      compactEdgeCostTicks[writeEdgeIndex] = edgeTickCost;
+      writeEdgeIndex += 1;
+    }
+  }
+
+  return {
+    allowedModeMask,
+    nodeFirstEdgeIndex,
+    nodeEdgeCount,
+    edgeTargetNodeIndex,
+    edgeCostTicks: compactEdgeCostTicks,
+    edgeCostTicksRef: edgeCostTicks,
+  };
+}
+
+function getOrBuildModeSpecificKernelGraphViews(mapData, allowedModeMask, edgeCostTicks) {
+  if (!mapData || typeof mapData !== 'object' || !mapData.graph) {
+    throw new Error('mapData.graph is required');
+  }
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+  if (!(edgeCostTicks instanceof Uint32Array)) {
+    throw new Error('edgeCostTicks must be a Uint32Array');
+  }
+
+  let cacheByModeMask = mapData[MODE_SPECIFIC_KERNEL_GRAPH_VIEWS_CACHE_PROPERTY];
+  if (!cacheByModeMask || typeof cacheByModeMask !== 'object') {
+    cacheByModeMask = Object.create(null);
+    mapData[MODE_SPECIFIC_KERNEL_GRAPH_VIEWS_CACHE_PROPERTY] = cacheByModeMask;
+  }
+
+  const cached = cacheByModeMask[allowedModeMask];
+  if (
+    cached
+    && typeof cached === 'object'
+    && cached.edgeCostTicksRef === edgeCostTicks
+    && cached.nodeFirstEdgeIndex instanceof Uint32Array
+    && cached.nodeEdgeCount instanceof Uint16Array
+    && cached.edgeTargetNodeIndex instanceof Uint32Array
+    && cached.edgeCostTicks instanceof Uint32Array
+  ) {
+    return cached;
+  }
+
+  const built = buildModeSpecificKernelGraphViews(mapData.graph, allowedModeMask, edgeCostTicks);
+  cacheByModeMask[allowedModeMask] = built;
+  return built;
 }
 
 export function createNodeSpatialIndex(graph, nodePixels) {
@@ -410,9 +519,6 @@ export async function runWalkingIsochroneFromSourceNode(
   if (!mapData || typeof mapData !== 'object' || !mapData.graph) {
     throw new Error('mapData.graph is required');
   }
-  if (!mapData.kernelGraphViews || typeof mapData.kernelGraphViews !== 'object') {
-    throw new Error('mapData.kernelGraphViews is required');
-  }
   if (
     !Number.isInteger(sourceNodeIndex)
     || sourceNodeIndex < 0
@@ -451,6 +557,11 @@ export async function runWalkingIsochroneFromSourceNode(
     allowedModeMask,
     edgeTraversalCostSeconds,
   );
+  const kernelGraphViews = getOrBuildModeSpecificKernelGraphViews(
+    mapData,
+    allowedModeMask,
+    edgeTraversalCostTicks,
+  );
   const distSeconds = getOrRotateRoutingDistScratchBuffer(
     mapData,
     mapData.graph.header.nNodes,
@@ -480,10 +591,10 @@ export async function runWalkingIsochroneFromSourceNode(
         return -1;
       }
       const kernelResult = edgeCostPrecomputeKernel.computeTravelTimeFieldForGraph({
-        nodeFirstEdgeIndex: mapData.kernelGraphViews.nodeFirstEdgeIndex,
-        nodeEdgeCount: mapData.kernelGraphViews.nodeEdgeCount,
-        edgeTargetNodeIndex: mapData.kernelGraphViews.edgeTargetNodeIndex,
-        edgeCostTicks: edgeTraversalCostTicks,
+        nodeFirstEdgeIndex: kernelGraphViews.nodeFirstEdgeIndex,
+        nodeEdgeCount: kernelGraphViews.nodeEdgeCount,
+        edgeTargetNodeIndex: kernelGraphViews.edgeTargetNodeIndex,
+        edgeCostTicks: kernelGraphViews.edgeCostTicks,
         outDistSeconds: distSeconds,
         sourceNodeIndex,
         returnSharedOutputView: true,
@@ -1684,7 +1795,6 @@ export async function initializeMapData(shell, options = {}) {
     const nodePixels = precomputeNodePixelCoordinates(graph);
     const nodeModeMask = precomputeNodeModeMask(graph);
     const nodeSpatialIndex = createNodeSpatialIndex(graph, nodePixels);
-    const kernelGraphViews = precomputeKernelGraphViews(graph);
     const pixelGrid = createPixelGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
     const travelTimeGrid = createTravelTimeGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
     clearGrid(pixelGrid);
@@ -1698,7 +1808,6 @@ export async function initializeMapData(shell, options = {}) {
       nodePixels,
       nodeModeMask,
       nodeSpatialIndex,
-      kernelGraphViews,
       pixelGrid,
       travelTimeGrid,
       edgeCostPrecomputeKernel,

@@ -25,4 +25,4 @@ web/dist/
 *.log
 .cache/
 target/
-web/wasm/*.wasm
+# Keep web/wasm/*.wasm so that GitHub Pages works
