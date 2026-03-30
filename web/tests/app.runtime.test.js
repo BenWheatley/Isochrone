@@ -27,6 +27,7 @@ import {
   getOrRotateRoutingDistScratchBuffer,
   buildModeSpecificKernelGraphViews,
   buildStaticEdgeNodeIndexedVertexData,
+  layoutMapViewportToContainGraph,
   rerenderIsochroneFromSnapshotWithStatus,
   renderIsochroneLegendIfNeeded,
   shouldUploadEdgeGeometry,
@@ -596,6 +597,45 @@ test('updateDistanceScaleBar reflects zoomed viewport scale', () => {
   assert.equal(shell.distanceScaleLine.style.width, '100px');
   assert.equal(shell.distanceScaleLabel.textContent, '500 m');
   assert.equal(shell.distanceScaleLine.style.values['--scale-segment-width-px'], '20px');
+});
+
+test('layoutMapViewportToContainGraph clears legacy contained-layout sizing', () => {
+  const style = {
+    values: {
+      '--map-aspect-ratio': '4 / 3',
+      '--map-aspect-ratio-num': '1.333333',
+    },
+    width: '400px',
+    height: '300px',
+    aspectRatio: '4 / 3',
+    transform: 'scale(2)',
+    transformOrigin: '0 0',
+    setProperty(name, value) {
+      this.values[name] = value;
+    },
+  };
+  const shell = {
+    canvasStack: {
+      style,
+    },
+  };
+
+  const result = layoutMapViewportToContainGraph(shell, {
+    originEasting: 0,
+    originNorthing: 0,
+    gridWidthPx: 4575,
+    gridHeightPx: 3743,
+    pixelSizeM: 10,
+  });
+
+  assert.equal(result.aspectRatio, 4575 / 3743);
+  assert.equal(style.values['--map-aspect-ratio'], '');
+  assert.equal(style.values['--map-aspect-ratio-num'], '');
+  assert.equal(style.width, '');
+  assert.equal(style.height, '');
+  assert.equal(style.aspectRatio, '');
+  assert.equal(style.transform, '');
+  assert.equal(style.transformOrigin, '');
 });
 
 test('parseNodeIndexFromLocationSearch validates and clamps invalid params', () => {

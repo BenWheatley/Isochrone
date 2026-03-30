@@ -41,6 +41,11 @@ import {
   initializeAppShell,
   bindModeSelectControl as bindModeSelectControlInternal,
 } from './ui/orchestration.js';
+import {
+  formatCommonMessage,
+  getCommonMessage,
+  loadCommonLocaleBundle,
+} from './ui/localization.js';
 import { bindCanvasClickRouting as bindCanvasClickRoutingInternal } from './interaction/canvas-routing.js';
 import {
   bindSvgExportControl,
@@ -505,6 +510,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     findNearestNodeForCanvasPixel,
     getAllowedModeMaskFromShell,
     getColourCycleMinutesFromShell,
+    getRoutingFailedStatusText,
     mapClientPointToCanvasPixel,
     parseNodeIndexFromLocationSearch,
     persistNodeIndexToLocation,
@@ -1260,7 +1266,10 @@ export function rerenderIsochroneFromSnapshotWithStatus(shell, mapData, options 
   }
 
   const elapsedMs = Math.max(0, Math.round(nowImpl() - startMs));
-  setRoutingStatus(shell, formatRoutingStatusDone(elapsedMs));
+  setRoutingStatus(
+    shell,
+    formatRoutingStatusDone(elapsedMs, { messages: getShellLocaleMessages(shell) }),
+  );
   return true;
 }
 
@@ -1570,7 +1579,11 @@ export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
     throw new Error('fetch is not available');
   }
 
-  showLoadingOverlay(shell, 'Loading district boundaries...', 0);
+  showLoadingOverlay(
+    shell,
+    getLocalizedShellText(shell, 'body.loading.boundaries', 'Loading district boundaries...'),
+    0,
+  );
 
   try {
     const response = await fetchImpl(url);
@@ -1585,7 +1598,7 @@ export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
       pathCount += feature.paths.length;
     }
 
-    showLoadingOverlay(shell, 'Loading graph: 0.00 MB', 0);
+    showLoadingOverlay(shell, formatInitialGraphLoadingText(shell), 0);
     return {
       boundaryPayload: payload,
       boundarySummary: {
@@ -1594,7 +1607,11 @@ export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
       },
     };
   } catch (error) {
-    showLoadingOverlay(shell, 'Failed to load district boundaries.', 0);
+    showLoadingOverlay(
+      shell,
+      getLocalizedShellText(shell, 'error.boundaries.load', 'Failed to load district boundaries.'),
+      0,
+    );
     throw error;
   }
 }
@@ -1784,7 +1801,7 @@ export async function loadGraphBinary(shell, options = {}) {
   const url = options.url ?? DEFAULT_GRAPH_BINARY_URL;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
 
-  showLoadingOverlay(shell, 'Loading graph: 0.00 MB', 0);
+  showLoadingOverlay(shell, formatInitialGraphLoadingText(shell), 0);
 
   try {
     const buffer = await fetchBinaryWithProgress(url, {
@@ -1802,7 +1819,11 @@ export async function loadGraphBinary(shell, options = {}) {
   } catch (error) {
     shell.isochroneCanvas.style.pointerEvents = 'none';
     shell.isochroneCanvas.dataset.graphLoaded = 'false';
-    showLoadingOverlay(shell, 'Failed to load graph binary.', 0);
+    showLoadingOverlay(
+      shell,
+      getLocalizedShellText(shell, 'error.graph.load', 'Failed to load graph binary.'),
+      0,
+    );
     throw error;
   }
 }
@@ -1886,11 +1907,8 @@ export function layoutMapViewportToContainGraph(shell, graphHeader) {
 
   validateGraphHeaderForBoundaryAlignment(graphHeader);
   const graphAspect = graphHeader.gridWidthPx / graphHeader.gridHeightPx;
-  shell.canvasStack.style.setProperty(
-    '--map-aspect-ratio',
-    `${graphHeader.gridWidthPx} / ${graphHeader.gridHeightPx}`,
-  );
-  shell.canvasStack.style.setProperty('--map-aspect-ratio-num', String(graphAspect));
+  shell.canvasStack.style.setProperty('--map-aspect-ratio', '');
+  shell.canvasStack.style.setProperty('--map-aspect-ratio-num', '');
   shell.canvasStack.style.width = '';
   shell.canvasStack.style.height = '';
   shell.canvasStack.style.aspectRatio = '';
@@ -3459,11 +3477,36 @@ export function createIsochroneRenderer(canvas, options = {}) {
   }
 }
 
-export function formatRenderBackendBadgeText(rendererMode) {
+function getShellLocaleMessages(shell) {
+  return shell?.localeMessages && typeof shell.localeMessages === 'object' ? shell.localeMessages : null;
+}
+
+function getLocalizedShellText(shell, key, fallbackValue, values = {}) {
+  return formatCommonMessage(getShellLocaleMessages(shell), key, values, fallbackValue);
+}
+
+function getWasmRequiredMessage(shell) {
+  return getCommonMessage(
+    getShellLocaleMessages(shell),
+    'error.wasm.required',
+    WASM_REQUIRED_MESSAGE,
+  );
+}
+
+function formatInitialGraphLoadingText(shell) {
+  return getLocalizedShellText(shell, 'loading.graph.initial', 'Loading graph: 0.00 MB');
+}
+
+export function getRoutingFailedStatusText(shell) {
+  return getLocalizedShellText(shell, 'error.routing.failed', 'Routing failed.');
+}
+
+export function formatRenderBackendBadgeText(rendererMode, options = {}) {
+  const messages = options.messages ?? null;
   if (rendererMode === 'webgl') {
-    return 'Renderer: WebGL';
+    return formatCommonMessage(messages, 'status.renderer.webgl', {}, 'Renderer: WebGL');
   }
-  return 'Renderer: CPU';
+  return formatCommonMessage(messages, 'status.renderer.cpu', {}, 'Renderer: CPU');
 }
 
 function updateRenderBackendBadge(shell, renderer) {
@@ -3472,7 +3515,9 @@ function updateRenderBackendBadge(shell, renderer) {
   }
 
   const rendererMode = renderer?.mode === 'webgl' ? 'webgl' : 'cpu';
-  const nextText = formatRenderBackendBadgeText(rendererMode);
+  const nextText = formatRenderBackendBadgeText(rendererMode, {
+    messages: getShellLocaleMessages(shell),
+  });
   if (shell.renderBackendBadge.textContent !== nextText) {
     shell.renderBackendBadge.textContent = nextText;
   }
@@ -4620,7 +4665,10 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   profileMs('initialPassMs', () => {
     renderInitialPassByBackend(renderContext);
   });
-  setRoutingStatus(shell, formatRoutingStatusCalculating(0));
+  setRoutingStatus(
+    shell,
+    formatRoutingStatusCalculating(0, { messages: getShellLocaleMessages(shell) }),
+  );
 
   const routeStartMs = nowImpl();
   let lastStatusUpdateMs = routeStartMs;
@@ -4664,12 +4712,22 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
       paintedNodeCount = incrementalPaintCounts.paintedNodeCount;
       paintedEdgeCount = incrementalPaintCounts.paintedEdgeCount;
       if (normalizedStatusUpdateIntervalMs <= 0) {
-        setRoutingStatus(shell, formatRoutingStatusCalculating(settledNodeCount));
+        setRoutingStatus(
+          shell,
+          formatRoutingStatusCalculating(settledNodeCount, {
+            messages: getShellLocaleMessages(shell),
+          }),
+        );
         lastStatusUpdateMs = nowImpl();
       } else {
         const nowMs = nowImpl();
         if (nowMs - lastStatusUpdateMs >= statusUpdateIntervalMs) {
-          setRoutingStatus(shell, formatRoutingStatusCalculating(settledNodeCount));
+          setRoutingStatus(
+            shell,
+            formatRoutingStatusCalculating(settledNodeCount, {
+              messages: getShellLocaleMessages(shell),
+            }),
+          );
           lastStatusUpdateMs = nowMs;
         }
       }
@@ -4722,12 +4780,23 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
 
     if (!skipFinalFullPass) {
       if (paintedNodeCount <= 1) {
-        setRoutingStatus(shell, formatRoutingStatusNoReachable(routeElapsedMs));
+        setRoutingStatus(
+          shell,
+          formatRoutingStatusNoReachable(routeElapsedMs, {
+            messages: getShellLocaleMessages(shell),
+          }),
+        );
       } else {
-        setRoutingStatus(shell, formatRoutingStatusDone(routeElapsedMs));
+        setRoutingStatus(
+          shell,
+          formatRoutingStatusDone(routeElapsedMs, { messages: getShellLocaleMessages(shell) }),
+        );
       }
     } else {
-      setRoutingStatus(shell, formatRoutingStatusPreview(routeElapsedMs));
+      setRoutingStatus(
+        shell,
+        formatRoutingStatusPreview(routeElapsedMs, { messages: getShellLocaleMessages(shell) }),
+      );
     }
   }
 
@@ -4909,29 +4978,54 @@ export function runGpuCpuParityDiagnostic(renderer, mapData, searchState, option
   };
 }
 
-export function formatRoutingStatusCalculating(settledCount) {
+export function formatRoutingStatusCalculating(settledCount, options = {}) {
   const safeCount = Math.max(0, Math.floor(settledCount));
-  return `Calculating... (${safeCount} nodes settled)`;
+  return formatCommonMessage(
+    options.messages ?? null,
+    'routing.calculating',
+    { settledCount: safeCount },
+    `Calculating... (${safeCount} nodes settled)`,
+  );
 }
 
-function formatRoutingDurationSuffix(durationMs) {
+function formatRoutingDurationSuffix(durationMs, options = {}) {
   if (!Number.isFinite(durationMs) || durationMs < 0) {
     return '';
   }
   const roundedDurationMs = Math.max(0, Math.round(durationMs));
-  return ` (${roundedDurationMs} ms)`;
+  return formatCommonMessage(
+    options.messages ?? null,
+    'routing.durationSuffix',
+    { durationMs: roundedDurationMs },
+    ` (${roundedDurationMs} ms)`,
+  );
 }
 
-export function formatRoutingStatusDone(durationMs = null) {
-  return `Done - full travel-time field ready${formatRoutingDurationSuffix(durationMs)}`;
+export function formatRoutingStatusDone(durationMs = null, options = {}) {
+  return formatCommonMessage(
+    options.messages ?? null,
+    'routing.done',
+    { durationSuffix: formatRoutingDurationSuffix(durationMs, options) },
+    `Done - full travel-time field ready${formatRoutingDurationSuffix(durationMs, options)}`,
+  );
 }
 
-export function formatRoutingStatusPreview(durationMs = null) {
-  return `Done - preview updated${formatRoutingDurationSuffix(durationMs)}`;
+export function formatRoutingStatusPreview(durationMs = null, options = {}) {
+  return formatCommonMessage(
+    options.messages ?? null,
+    'routing.preview',
+    { durationSuffix: formatRoutingDurationSuffix(durationMs, options) },
+    `Done - preview updated${formatRoutingDurationSuffix(durationMs, options)}`,
+  );
 }
 
-export function formatRoutingStatusNoReachable(durationMs = null) {
-  return `Done - no reachable network for selected mode at this start point${formatRoutingDurationSuffix(durationMs)}`;
+export function formatRoutingStatusNoReachable(durationMs = null, options = {}) {
+  return formatCommonMessage(
+    options.messages ?? null,
+    'routing.none',
+    { durationSuffix: formatRoutingDurationSuffix(durationMs, options) },
+    `Done - no reachable network for selected mode at this start point${formatRoutingDurationSuffix(durationMs, options)}`,
+  );
 }
 
 function getSelectedTransportModeLabels(shell) {
@@ -4968,21 +5062,32 @@ export function ensureWasmSupportOrShowError(shell, options = {}) {
 
   shell.isochroneCanvas.style.pointerEvents = 'none';
   shell.isochroneCanvas.dataset.graphLoaded = 'false';
-  showLoadingOverlay(shell, WASM_REQUIRED_MESSAGE, 0);
-  setRoutingStatus(shell, WASM_REQUIRED_MESSAGE);
+  const wasmRequiredMessage = getWasmRequiredMessage(shell);
+  showLoadingOverlay(shell, wasmRequiredMessage, 0);
+  setRoutingStatus(shell, wasmRequiredMessage);
   return false;
 }
 
 function updateGraphLoadingText(shell, receivedBytes, totalBytes) {
   const receivedText = formatMebibytes(receivedBytes);
   if (totalBytes === null || totalBytes <= 0) {
-    shell.loadingText.textContent = `Loading graph: ${receivedText}`;
+    shell.loadingText.textContent = getLocalizedShellText(
+      shell,
+      'loading.graph.received',
+      `Loading graph: ${receivedText}`,
+      { received: receivedText },
+    );
     return;
   }
 
   const totalText = formatMebibytes(totalBytes);
   const percent = Math.min(100, Math.round((receivedBytes / totalBytes) * 100));
-  shell.loadingText.textContent = `Loading graph: ${receivedText} / ${totalText} (${percent}%)`;
+  shell.loadingText.textContent = getLocalizedShellText(
+    shell,
+    'loading.graph.progress',
+    `Loading graph: ${receivedText} / ${totalText} (${percent}%)`,
+    { received: receivedText, total: totalText, percent },
+  );
   setLoadingProgressBar(shell.loadingProgressBar, percent);
 }
 
@@ -5234,8 +5339,9 @@ function isClosedPath(path) {
 }
 
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
-  window.addEventListener('DOMContentLoaded', () => {
-    const shell = initializeAppShell(globalThis.document);
+  window.addEventListener('DOMContentLoaded', async () => {
+    const localeBundle = await loadCommonLocaleBundle();
+    const shell = initializeAppShell(globalThis.document, { localeBundle });
     bindHeaderMenuControl(shell);
     bindPointerButtonInversionControl(shell);
     if (!ensureWasmSupportOrShowError(shell)) {
@@ -5350,10 +5456,18 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         });
       },
       onExportSuccess(result) {
-        setRoutingStatus(shell, `Exported SVG: ${result.filename}`);
+        setRoutingStatus(
+          shell,
+          getLocalizedShellText(shell, 'routing.exportedSvg', `Exported SVG: ${result.filename}`, {
+            filename: result.filename,
+          }),
+        );
       },
       onExportError() {
-        setRoutingStatus(shell, 'SVG export failed.');
+        setRoutingStatus(
+          shell,
+          getLocalizedShellText(shell, 'routing.exportFailed', 'SVG export failed.'),
+        );
       },
     });
     bindModeSelectControl(shell, {

@@ -10,13 +10,17 @@ import {
   persistColourCycleMinutesToLocation,
   persistModeValuesToLocation,
 } from '../core/coords.js';
+import {
+  applyCommonMessagesToDocument,
+  getCommonMessage,
+} from './localization.js';
 
 const CANONICAL_MODE_VALUES = ['walk', 'bike', 'car'];
 const CANONICAL_THEME_VALUES = ['light', 'dark'];
 const THEME_STORAGE_KEY = 'isochrone-theme';
 const POINTER_BUTTON_INVERSION_STORAGE_KEY = 'isochrone-invert-pointer-buttons';
 
-export function initializeAppShell(doc) {
+export function initializeAppShell(doc, options = {}) {
   const resolvedDocument = doc ?? globalThis.document;
   if (!resolvedDocument) {
     throw new Error('document is not available');
@@ -109,6 +113,8 @@ export function initializeAppShell(doc) {
     throw new Error('index.html is missing <div id="isochrone-legend">');
   }
 
+  const localeBundle = applyCommonMessagesToDocument(resolvedDocument, options.localeBundle);
+
   sizeCanvasToCssPixels(isochroneCanvas);
   sizeCanvasToCssPixels(boundaryCanvas);
 
@@ -116,10 +122,18 @@ export function initializeAppShell(doc) {
   isochroneCanvas.dataset.graphLoaded = 'false';
   loadingOverlay.hidden = false;
   loadingOverlay.classList.remove('is-fading');
-  loadingText.textContent = 'Loading district boundaries...';
+  loadingText.textContent = getCommonMessage(
+    localeBundle.messages,
+    'body.loading.boundaries',
+    loadingText.textContent,
+  );
   setLoadingProgressBar(loadingProgressBar, 0);
-  routingStatus.textContent = 'Ready.';
-  renderBackendBadge.textContent = 'Renderer: Detecting...';
+  routingStatus.textContent = getCommonMessage(localeBundle.messages, 'status.ready', routingStatus.textContent);
+  renderBackendBadge.textContent = getCommonMessage(
+    localeBundle.messages,
+    'status.renderer.detecting',
+    renderBackendBadge.textContent,
+  );
   exportSvgButton.disabled = true;
   const locationSearch = globalThis.location?.search ?? '';
   const persistedModeValues = parseModeValuesFromLocationSearch(locationSearch);
@@ -159,6 +173,8 @@ export function initializeAppShell(doc) {
     distanceScaleLine,
     distanceScaleLabel,
     isochroneLegend,
+    locale: localeBundle.locale,
+    localeMessages: localeBundle.messages,
     loadingFadeTimeoutId: null,
     lastRenderedLegendCycleMinutes: null,
   };

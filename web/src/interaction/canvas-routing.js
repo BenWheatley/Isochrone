@@ -22,6 +22,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     findNearestNodeForCanvasPixel,
     getAllowedModeMaskFromShell,
     getColourCycleMinutesFromShell,
+    getRoutingFailedStatusText,
     mapClientPointToCanvasPixel,
     parseNodeIndexFromLocationSearch,
     persistNodeIndexToLocation,
@@ -40,6 +41,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   }
   if (typeof getColourCycleMinutesFromShell !== 'function') {
     throw new Error('dependencies.getColourCycleMinutesFromShell must be a function');
+  }
+  if (getRoutingFailedStatusText !== undefined && typeof getRoutingFailedStatusText !== 'function') {
+    throw new Error('dependencies.getRoutingFailedStatusText must be a function when provided');
   }
   if (typeof mapClientPointToCanvasPixel !== 'function') {
     throw new Error('dependencies.mapClientPointToCanvasPixel must be a function');
@@ -208,7 +212,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     }
 
     await queuedRunPromise.catch((error) => {
-      setRoutingStatus(shell, 'Routing failed.');
+      setRoutingStatus(shell, getRoutingFailedStatusText?.(shell) ?? 'Routing failed.');
       console.error(error);
     });
 
@@ -452,7 +456,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   if (initialNodeIndex !== null) {
     const allowedModeMask = getAllowedModeMaskFromShell(shell);
     void runFromNodeIndex(initialNodeIndex, allowedModeMask).catch((error) => {
-      setRoutingStatus(shell, 'Routing failed.');
+      setRoutingStatus(shell, getRoutingFailedStatusText?.(shell) ?? 'Routing failed.');
       console.error(error);
     });
   }

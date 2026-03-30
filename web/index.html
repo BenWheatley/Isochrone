@@ -9,22 +9,28 @@
   <body>
     <main class="app-shell">
       <header class="app-header">
-        <h1>Isochrone</h1>
+        <h1 data-i18n="body.title">Isochrone</h1>
         <details id="controls-menu" class="controls-menu">
-          <summary id="controls-menu-summary" aria-label="Open options menu">
+          <summary
+            id="controls-menu-summary"
+            aria-label="Open options menu"
+            data-i18n-attr-aria-label="body.options.open"
+          >
             <span aria-hidden="true">☰</span>
-            <span>Options</span>
+            <span data-i18n="body.options">Options</span>
           </summary>
           <div class="controls-menu-panel">
             <div class="control-row">
-              <label for="theme-select">Theme</label>
+              <label for="theme-select" data-i18n="body.options.theme">Theme</label>
               <select id="theme-select" name="theme-select">
-                <option value="light" selected>Light</option>
-                <option value="dark">Dark</option>
+                <option value="light" selected data-i18n="body.options.theme.light">Light</option>
+                <option value="dark" data-i18n="body.options.theme.dark">Dark</option>
               </select>
             </div>
             <div class="control-row control-row-checkbox">
-              <label for="invert-pointer-buttons">Invert primary/secondary mouse buttons</label>
+              <label for="invert-pointer-buttons" data-i18n="body.options.invertPointerButtons">
+                Invert primary/secondary mouse buttons
+              </label>
               <input
                 id="invert-pointer-buttons"
                 name="invert-pointer-buttons"
@@ -32,15 +38,17 @@
               />
             </div>
             <div class="control-row">
-              <label for="mode-select">Transport modes</label>
+              <label for="mode-select" data-i18n="body.options.mode">Transport modes</label>
               <select id="mode-select" name="mode-select" multiple size="3">
-                <option value="walk">Walk</option>
-                <option value="bike">Bike</option>
-                <option value="car" selected>Car</option>
+                <option value="walk" data-i18n="body.options.mode.walk">Walk</option>
+                <option value="bike" data-i18n="body.options.mode.bike">Bike</option>
+                <option value="car" selected data-i18n="body.options.mode.car">Car</option>
               </select>
             </div>
             <div class="control-row">
-              <label for="colour-cycle-minutes">Colour cycle (min)</label>
+              <label for="colour-cycle-minutes" data-i18n="body.options.colourCycle">
+                Colour cycle (min)
+              </label>
               <input
                 id="colour-cycle-minutes"
                 name="colour-cycle-minutes"
@@ -51,17 +59,24 @@
               />
             </div>
             <div class="control-row">
-              <label for="departure-time">Departure time</label>
+              <label for="departure-time" data-i18n="body.options.departureTime">Departure time</label>
               <input id="departure-time" name="departure-time" type="time" value="08:00" step="60" />
             </div>
             <div class="control-row">
-              <button id="export-svg-button" type="button" disabled>Export SVG</button>
+              <button id="export-svg-button" type="button" disabled data-i18n="body.options.exportSvg">
+                Export SVG
+              </button>
             </div>
           </div>
         </details>
       </header>
 
-      <section id="map-region" class="map-region" aria-label="Map viewport">
+      <section
+        id="map-region"
+        class="map-region"
+        aria-label="Map viewport"
+        data-i18n-attr-aria-label="body.map.aria"
+      >
         <div id="canvas-stack" class="canvas-stack">
           <canvas
             id="boundaries"
@@ -72,24 +87,41 @@
           <canvas id="isochrone" width="1024" height="768" aria-label="Berlin map canvas"></canvas>
         </div>
         <div id="loading" role="status" aria-live="polite">
-          <div id="loading-text">Loading district boundaries...</div>
+          <div id="loading-text" data-i18n="body.loading.boundaries">Loading district boundaries...</div>
           <div id="loading-progress" aria-hidden="true">
             <div id="loading-progress-bar"></div>
           </div>
         </div>
         <div id="isochrone-legend" aria-live="polite"></div>
-        <div id="distance-scale" aria-label="Distance scale bar">
+        <div
+          id="distance-scale"
+          aria-label="Distance scale bar"
+          data-i18n-attr-aria-label="body.distanceScale.aria"
+        >
           <div id="distance-scale-line"></div>
           <div id="distance-scale-label">1 km</div>
         </div>
       </section>
       <footer id="info-bar">
-        <div id="routing-status" role="status" aria-live="polite">Ready.</div>
-        <div id="render-backend-badge" aria-live="polite">Renderer: Detecting...</div>
+        <div id="routing-status" role="status" aria-live="polite" data-i18n="status.ready">Ready.</div>
+        <div
+          id="render-backend-badge"
+          aria-live="polite"
+          data-i18n="status.renderer.detecting"
+        >
+          Renderer: Detecting...
+        </div>
         <div id="routing-disclaimer">
-          Note: OSM data can include isolated disconnected route segments. Map data © OpenStreetMap
-          contributors, available under the Open Database License (ODbL):
-          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">
+          <span data-i18n="body.disclaimer">
+            Note: OSM data can include isolated disconnected route segments. Map data © OpenStreetMap
+            contributors, available under the Open Database License (ODbL):
+          </span>
+          <a
+            href="https://www.openstreetmap.org/copyright"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-i18n="body.disclaimer.link"
+          >
             https://www.openstreetmap.org/copyright
           </a>
         </div>

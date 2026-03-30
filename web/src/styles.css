@@ -243,26 +243,14 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   background: var(--map-bg);
-  display: grid;
-  place-items: center;
   overflow: hidden;
-  container-type: size;
 }
 
 .canvas-stack {
-  position: relative;
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: auto;
-  max-width: 100%;
-  max-height: 100%;
-  aspect-ratio: var(--map-aspect-ratio, 4 / 3);
-}
-
-@supports (width: 1cqw) {
-  .canvas-stack {
-    width: min(100cqw, calc(100cqh * var(--map-aspect-ratio-num, 1.333333)));
-    height: min(100cqh, calc(100cqw / var(--map-aspect-ratio-num, 1.333333)));
-  }
+  height: 100%;
 }
 
 #boundaries,
