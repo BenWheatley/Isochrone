@@ -122,3 +122,46 @@ test('resolveViewportFrame centers the graph inside a wider display frame and pr
   assert.equal(zoomedFrame.effectiveScale, 2);
   assert.equal(zoomedFrame.offsetXPx, 0);
 });
+
+test('zoomMapViewportAtCanvasPixel keeps the anchor fixed when already clamped at max zoom', () => {
+  const graphHeader = createGraphHeader();
+  const viewport = {
+    scale: 8,
+    offsetXPx: 100,
+    offsetYPx: 80,
+  };
+  const anchorCanvasX = 275;
+  const anchorCanvasY = 180;
+  const frameBefore = resolveViewportFrame(graphHeader, viewport, {
+    frameWidthPx: 400,
+    frameHeightPx: 300,
+    minScale: 1,
+    maxScale: 8,
+  });
+  const anchorBefore = mapScreenCanvasPixelToGraphPixel(frameBefore, anchorCanvasX, anchorCanvasY);
+
+  const zoomedViewport = zoomMapViewportAtCanvasPixel(
+    graphHeader,
+    viewport,
+    anchorCanvasX,
+    anchorCanvasY,
+    1.25,
+    {
+      frameWidthPx: 400,
+      frameHeightPx: 300,
+      minScale: 1,
+      maxScale: 8,
+    },
+  );
+  const frameAfter = resolveViewportFrame(graphHeader, zoomedViewport, {
+    frameWidthPx: 400,
+    frameHeightPx: 300,
+    minScale: 1,
+    maxScale: 8,
+  });
+  const anchorAfter = mapScreenCanvasPixelToGraphPixel(frameAfter, anchorCanvasX, anchorCanvasY);
+
+  assert.equal(zoomedViewport.scale, 8);
+  assert.equal(anchorAfter.xPx, anchorBefore.xPx);
+  assert.equal(anchorAfter.yPx, anchorBefore.yPx);
+});

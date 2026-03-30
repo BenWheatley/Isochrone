@@ -2595,7 +2595,7 @@ export function createWebGlIsochroneRenderer(canvas, options = {}) {
 
   const contextAttributes = {
     alpha: true,
-    antialias: false,
+    antialias: true,
     depth: false,
     stencil: false,
     premultipliedAlpha: false,

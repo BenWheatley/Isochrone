@@ -6,6 +6,7 @@ import {
   MinHeap,
   WASM_REQUIRED_MESSAGE,
   computeEdgeTraversalCostSeconds,
+  createWebGlIsochroneRenderer,
   createNodeSpatialIndex,
   createWalkingSearchState,
   ensureWasmSupportOrShowError,
@@ -710,6 +711,31 @@ test('drawBoundaryBasemapAlignedToGraphGrid sizes canvas to display frame and pr
     [1, 0, 0, 1, 200, 0],
   );
   assert.equal(context.lineWidth, 1.2);
+});
+
+test('createWebGlIsochroneRenderer requests an anti-aliased WebGL context', () => {
+  const requestedContexts = [];
+  const canvas = {
+    getContext(kind, attributes) {
+      requestedContexts.push({ kind, attributes });
+      return null;
+    },
+  };
+
+  const renderer = createWebGlIsochroneRenderer(canvas);
+
+  assert.equal(renderer, null);
+  assert.deepEqual(
+    requestedContexts.map(({ kind, attributes }) => ({
+      kind,
+      antialias: attributes.antialias,
+      alpha: attributes.alpha,
+    })),
+    [
+      { kind: 'webgl2', antialias: true, alpha: true },
+      { kind: 'webgl', antialias: true, alpha: true },
+    ],
+  );
 });
 
 test('parseNodeIndexFromLocationSearch validates and clamps invalid params', () => {

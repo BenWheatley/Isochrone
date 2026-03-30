@@ -113,9 +113,15 @@ export function zoomMapViewportAtCanvasPixel(
     throw new Error('zoomFactor must be a positive finite number');
   }
 
+  const minScale = Number.isFinite(options.minScale) ? options.minScale : DEFAULT_MIN_VIEWPORT_SCALE;
+  const maxScale = Number.isFinite(options.maxScale) ? options.maxScale : DEFAULT_MAX_VIEWPORT_SCALE;
+  if (!(minScale > 0) || !(maxScale >= minScale)) {
+    throw new Error('viewport scale bounds are invalid');
+  }
+
   const frame = resolveViewportFrame(graphHeader, viewport, options);
   const anchorGraphPx = mapScreenCanvasPixelToGraphPixel(frame, anchorCanvasX, anchorCanvasY);
-  const nextScale = frame.scale * zoomFactor;
+  const nextScale = clamp(frame.scale * zoomFactor, minScale, maxScale);
   const nextFitScale = frame.fitScale * nextScale;
   return normalizeMapViewport(
     graphHeader,
