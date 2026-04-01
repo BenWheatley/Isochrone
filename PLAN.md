@@ -866,9 +866,9 @@ Tasks
 
 ---
 
-# Phase 12 — Post-MVP: UX and Sharing Enhancements (Deferred)
+# Phase 12 — Post-MVP: UX and Sharing Enhancements
 
-*This phase is explicitly deferred. Additions here are planned for later, not immediate implementation.*
+*This phase was originally deferred. Based on user feedback, `12.6` (map zoom/pan) is now the next planned UX task; the rest remain lower-priority follow-up items.*
 
 ## 12.1 Clarify cyclic legend semantics
 Estimated time: 45 min
@@ -911,6 +911,64 @@ Tasks
 - [x] On page load, read `node` from URL and restore that start node if valid for current graph
 - [x] Keep URL updates deterministic and bookmark/share safe (`history.replaceState`, preserve other params/hash)
 
+## 12.6 Add map zoom and pan controls
+Estimated time: 4 hours
+
+*Goal: add standard camera controls without conflating camera movement with origin selection. Routing remains world-space; pan/zoom must only change view state.*
+
+### 12.6.1 Define camera model and transform boundaries
+Estimated time: 45 min
+
+Tasks
+- [ ] Add explicit camera/view state: map center in world coordinates, zoom scale, min/max zoom, and viewport size.
+- [x] Centralize screen-to-world and world-to-screen transforms so basemap, graph render, hit-testing, and scale bar use the same math.
+- [x] Preserve projection correctness and aspect ratio under zoom; do not stretch the map independently in X/Y.
+- [x] Clamp or damp pan/zoom so the user cannot lose the dataset entirely off-screen.
+
+### 12.6.2 Re-separate camera movement from origin selection
+Estimated time: 35 min
+
+Tasks
+- [ ] Replace map-wide drag-to-reroute behavior with distinct interaction rules: click/tap selects origin; camera gestures pan/zoom.
+- [ ] Add a movement threshold so press-drag-release pans, while click/tap without meaningful movement selects a new origin.
+- [x] Keep re-routing tied to completed origin selection, not camera movement.
+- [ ] Reserve origin-marker drag as an optional later enhancement instead of overloading whole-map drag.
+
+### 12.6.3 Desktop/laptop gesture plan
+Estimated time: 55 min
+
+Tasks
+- [x] Mouse/trackpad scroll (`wheel`) zooms in/out around the pointer position, so the location under the cursor stays visually anchored.
+- [ ] Primary-button drag pans the map; update cursor affordances (`grab`/`grabbing`) to make the mode obvious.
+- [x] Single click selects a new origin only if no pan gesture was recognized.
+- [ ] Confirm behavior on both physical mouse wheels and laptop trackpads that surface pinch/scroll as wheel events.
+
+### 12.6.4 Mobile/tablet gesture plan
+Estimated time: 55 min
+
+Tasks
+- [x] Single tap selects a new origin.
+- [ ] Two-finger pinch zooms around the gesture centroid.
+- [ ] Two-finger drag pans the map without selecting a new origin.
+- [x] Lock page scrolling/viewport movement during active map gestures (`touch-action` / pointer-event handling), while leaving top/bottom bars usable.
+
+### 12.6.5 Rendering and UI integration
+Estimated time: 30 min
+
+Tasks
+- [ ] Apply the camera transform consistently to district boundaries, graph edges/nodes, origin marker, and any future transit overlays.
+- [x] Keep UI chrome (top bar, bottom bar, legend, transport controls) in screen space; only the map canvas content moves.
+- [x] Recompute distance scale bar from current zoom level so it remains truthful after pan/zoom changes.
+- [x] Ensure zoom/pan redraws reuse the current routing snapshot and never trigger a fresh route solve.
+
+### 12.6.6 State persistence, tests, and verification
+Estimated time: 20 min
+
+Tasks
+- [ ] Add automated tests for camera transforms, click-vs-pan threshold logic, and pinch centroid math.
+- [ ] Add manual verification checklist for desktop mouse, desktop trackpad, iPad touch, and mobile Safari/Chrome.
+- [ ] Decide whether camera state should also become URL-shareable (`x`, `y`, `z`) after the interaction model is stable; do not bundle that into the first implementation step.
+
 ---
 
 # Architectural Notes
@@ -944,7 +1002,7 @@ Post-MVP adds approximately **26–28 hours** of development:
 - [ ] Phase 10.4 (multimodal road schema + extraction): ~4.5 hours
 - [ ] Phase 10.6 (multi-location OSM fetch generalization): ~3.75 hours
 - [ ] Phase 11 (global public transit pipeline): ~12.25 hours
-- [ ] Phase 12 (UX and sharing enhancements): ~5.5 hours
+- [ ] Phase 12 (UX and sharing enhancements): ~9.5 hours
 - [ ] Plus variable time to obtain/validate feed licences and feed-specific integration constraints.
 
 ---
