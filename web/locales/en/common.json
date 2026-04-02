@@ -6,7 +6,7 @@
   "body.options.theme": "Theme",
   "body.options.theme.light": "Light",
   "body.options.theme.dark": "Dark",
-  "body.options.invertPointerButtons": "Invert primary/secondary mouse buttons",
+  "body.options.invertPointerButtons": "Left mouse button to move start/right mouse button to move map",
   "body.options.mode": "Transport modes",
   "body.options.mode.walk": "Walk",
   "body.options.mode.bike": "Bike",
