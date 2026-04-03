@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import stat
 import subprocess
@@ -61,7 +62,7 @@ def test_boundary_query_script_renders_location_selector_and_admin_level() -> No
     assert "out body geom qt;" in result.stdout
 
 
-def test_fetch_data_script_loops_default_locations_and_writes_outputs(tmp_path: Path) -> None:
+def test_fetch_data_script_fetches_selected_locations_from_external_config(tmp_path: Path) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     fake_curl = fake_bin / "curl"
@@ -92,25 +93,53 @@ def test_fetch_data_script_loops_default_locations_and_writes_outputs(tmp_path: 
     )
     fake_curl.chmod(fake_curl.stat().st_mode | stat.S_IXUSR)
 
+    locations_file = tmp_path / "regions.json"
+    locations_file.write_text(
+        json.dumps(
+            {
+                "locations": [
+                    {
+                        "id": "berlin",
+                        "name": "Berlin",
+                        "graphFileName": "graph-walk.bin.gz",
+                        "boundaryFileName": "berlin-district-boundaries-canvas.json",
+                        "locationRelation": 'rel(62422)["name"="Berlin"]["wikidata"="Q64"]',
+                        "subdivisionAdminLevel": "9",
+                        "epsg": 25833,
+                    },
+                    {
+                        "id": "paris",
+                        "name": "Paris",
+                        "graphFileName": "paris-graph.bin.gz",
+                        "boundaryFileName": "paris-district-boundaries-canvas.json",
+                        "locationRelation": 'rel["boundary"="administrative"]["wikidata"="Q90"]',
+                        "subdivisionAdminLevel": "9",
+                        "epsg": 2154,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
     input_dir = tmp_path / "input"
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
     env["INPUT_DIR"] = str(input_dir)
-    result = _run_zsh_script(PIPELINE_ROOT / "fetch-data.sh", env=env)
+    result = _run_zsh_script(
+        PIPELINE_ROOT / "fetch-data.sh",
+        "--locations-file",
+        str(locations_file),
+        "--only",
+        "paris",
+        env=env,
+    )
 
     assert result.returncode == 0, result.stderr
 
     expected_outputs = [
-        input_dir / "berlin-routing.osm.json",
-        input_dir / "berlin-district-boundaries.osm.json",
         input_dir / "paris-routing.osm.json",
         input_dir / "paris-district-boundaries.osm.json",
-        input_dir / "london-routing.osm.json",
-        input_dir / "london-district-boundaries.osm.json",
-        input_dir / "rome-routing.osm.json",
-        input_dir / "rome-district-boundaries.osm.json",
-        input_dir / "luxembourg-country-routing.osm.json",
-        input_dir / "luxembourg-country-district-boundaries.osm.json",
     ]
 
     for output_path in expected_outputs:

@@ -2,21 +2,24 @@
 
 This document describes the full pipeline for turning a place in OpenStreetMap into web-loadable assets for this app.
 
-It is intentionally explicit because `data_pipeline/fetch-data.sh` is only the first stage. Running it does not create `.bin.gz` graph artifacts or canvas-ready boundary JSON by itself.
+The pipeline now has one external source-of-truth config file and one Python entry point:
+- config: `data_pipeline/regions.json`
+- main command: `data_pipeline/region-data.py`
+
+`data_pipeline/fetch-data.sh` remains only as a compatibility wrapper around `region-data.py fetch`.
 
 ## What Exists Today
 
 Implemented:
-- Raw Overpass download for routing and subdivision-boundary JSON via `data_pipeline/fetch-data.sh`
-- Boundary simplification to canvas JSON via `data_pipeline/scripts/simplify_boundary_json.py`
-- Routing graph extraction and binary export via `data_pipeline/scripts/export_graph_binary.py`
-- Browser loading of per-location asset filenames from `web/src/data/locations.json`
+- External region configuration in `data_pipeline/regions.json`
+- Raw Overpass download for routing and subdivision-boundary JSON via `data_pipeline/region-data.py fetch`
+- Boundary simplification, graph export, and gzip packaging via `data_pipeline/region-data.py build`
+- Combined fetch + build via `data_pipeline/region-data.py all`
+- UI manifest emission on stdout in the format consumed by `web/src/data/locations.json`
 
 Still manual:
-- Choosing the correct projection (`--epsg`) per region
-- Running the transform/export commands per region
-- Gzipping each binary graph
-- Adding the new region to `web/src/data/locations.json`
+- Choosing the correct projection (`epsg`) per region
+- Copying or redirecting the generated manifest JSON into `web/src/data/locations.json`
 - Publishing the new artifacts in `.github/workflows/pages.yml`
 
 ## Stage 1: Fetch Raw OSM JSON
@@ -26,6 +29,14 @@ Run:
 ```bash
 ./data_pipeline/fetch-data.sh
 ```
+
+Equivalent direct Python command:
+
+```bash
+./data_pipeline/region-data.py fetch
+```
+
+The location list is loaded from `data_pipeline/regions.json`.
 
 Outputs go to `data_pipeline/input/` and are named:
 - `<slug>-routing.osm.json`
@@ -37,79 +48,44 @@ Examples:
 
 This stage only downloads raw Overpass API responses.
 
-## Stage 2: Simplify Boundaries For Canvas Rendering
-
-For each fetched region, convert the subdivision-boundary extract into the simplified JSON consumed by the browser basemap renderer.
-
-Command shape:
+To avoid fetching every configured region, filter by id:
 
 ```bash
-.venv/bin/python data_pipeline/scripts/simplify_boundary_json.py \
-  --input data_pipeline/input/<slug>-district-boundaries.osm.json \
-  --output data_pipeline/output/<slug>-district-boundaries-canvas.json \
-  --resolution 25 \
-  --units meters \
-  --epsg <projected-epsg> \
-  --admin-level <same admin_level used by the boundary query>
+./data_pipeline/region-data.py fetch --only paris
+```
+
+## Stage 2-4: Build Renderable And Deployable Artifacts
+
+One command now performs:
+- boundary simplification
+- routing graph export
+- gzip packaging for web delivery
+
+Run:
+
+```bash
+./data_pipeline/region-data.py build > web/src/data/locations.json
 ```
 
 Notes:
-- `--epsg` must be a projected CRS suitable for the region. This is not inferred automatically today.
-- `--admin-level` should match the subdivision level passed to the boundary query generator for that place.
-- The output file is what the web app loads as the basemap for that region.
+- `build` reads raw inputs from `data_pipeline/input/`
+- `build` writes generated artifacts to `data_pipeline/output/`
+- `build` prints only the UI-ready locations manifest JSON to stdout
+- progress logging goes to stderr
+- `epsg`, `subdivisionAdminLevel`, output filenames, and relation selectors come from `data_pipeline/regions.json`
+- Berlin still uses the legacy `graph-walk.bin` / `graph-walk.bin.gz` filenames because that is what the web runtime currently references by default
 
-## Stage 3: Export Routing Graph Binary
+## Stage 5: Register The Region In The UI
 
-For each fetched region, convert the routing extract into the compact binary graph used by the browser.
-
-For new regions, use region-specific output filenames. Berlin currently still uses the legacy names `graph-walk.bin` and `graph-walk.bin.gz`.
-
-Command shape:
-
-```bash
-.venv/bin/python data_pipeline/scripts/export_graph_binary.py \
-  --input data_pipeline/input/<slug>-routing.osm.json \
-  --binary-output data_pipeline/output/<slug>-graph.bin \
-  --summary-output data_pipeline/output/<slug>-graph-summary.json \
-  --epsg <projected-epsg>
-```
-
-Notes:
-- `--epsg` must match the projected coordinate system you want for that region.
-- The `.json` summary is inspection/debug output; the browser does not load it directly.
-
-## Stage 4: Gzip The Graph For Web Delivery
-
-The browser currently loads gzip-compressed graph binaries.
-
-Command:
-
-```bash
-gzip -c data_pipeline/output/<slug>-graph.bin > data_pipeline/output/<slug>-graph.bin.gz
-```
+The `build` and `all` commands already emit the correct manifest JSON for `web/src/data/locations.json`.
 
 Example:
 
 ```bash
-gzip -c data_pipeline/output/paris-graph.bin > data_pipeline/output/paris-graph.bin.gz
+./data_pipeline/region-data.py build > web/src/data/locations.json
 ```
 
-If this step has not been run, you will not see a new gzipped graph artifact for that region.
-
-## Stage 5: Register The Region In The UI
-
-Add an entry to `web/src/data/locations.json`:
-
-```json
-{
-  "id": "paris",
-  "name": "Paris",
-  "graphFileName": "paris-graph.bin.gz",
-  "boundaryFileName": "paris-district-boundaries-canvas.json"
-}
-```
-
-The top-bar location menu reads this file and loads the matching graph and boundary assets.
+The top-bar location menu reads that file and loads the matching graph and boundary assets.
 
 ## Stage 6: Publish The New Assets
 
@@ -125,41 +101,42 @@ For a new region such as Paris, add copies for:
 
 ## Paris Example
 
-Assuming `fetch-data.sh` has produced:
-- `data_pipeline/input/paris-routing.osm.json`
-- `data_pipeline/input/paris-district-boundaries.osm.json`
-
-The remaining manual steps are:
+Assuming you only want Paris:
 
 ```bash
-.venv/bin/python data_pipeline/scripts/simplify_boundary_json.py \
-  --input data_pipeline/input/paris-district-boundaries.osm.json \
-  --output data_pipeline/output/paris-district-boundaries-canvas.json \
-  --resolution 25 \
-  --units meters \
-  --epsg <paris-projected-epsg> \
-  --admin-level 9
-
-.venv/bin/python data_pipeline/scripts/export_graph_binary.py \
-  --input data_pipeline/input/paris-routing.osm.json \
-  --binary-output data_pipeline/output/paris-graph.bin \
-  --summary-output data_pipeline/output/paris-graph-summary.json \
-  --epsg <paris-projected-epsg>
-
-gzip -c data_pipeline/output/paris-graph.bin > data_pipeline/output/paris-graph.bin.gz
+./data_pipeline/fetch-data.sh --only paris
+./data_pipeline/region-data.py build --only paris > web/src/data/locations.json
 ```
 
-Then:
-- add Paris to `web/src/data/locations.json`
-- update `.github/workflows/pages.yml` if Paris should be deployed
+This produces:
+- `data_pipeline/input/paris-routing.osm.json`
+- `data_pipeline/input/paris-district-boundaries.osm.json`
+- `data_pipeline/output/paris-district-boundaries-canvas.json`
+- `data_pipeline/output/paris-graph.bin`
+- `data_pipeline/output/paris-graph.bin.gz`
+- `data_pipeline/output/paris-graph-summary.json`
+
+And `web/src/data/locations.json` receives:
+
+```json
+{
+  "locations": [
+    {
+      "id": "paris",
+      "name": "Paris",
+      "graphFileName": "paris-graph.bin.gz",
+      "boundaryFileName": "paris-district-boundaries-canvas.json"
+    }
+  ]
+}
+```
 
 ## Full Process Checklist
 
-1. Fetch raw Overpass JSON with `./data_pipeline/fetch-data.sh`
-2. Simplify boundaries into `<slug>-district-boundaries-canvas.json`
-3. Export routing graph into `<slug>-graph.bin`
-4. Gzip graph into `<slug>-graph.bin.gz`
-5. Add the region entry to `web/src/data/locations.json`
-6. Update GitHub Pages workflow if the region should ship in the deployed site
+1. Edit `data_pipeline/regions.json` if the configured region list or per-region metadata should change
+2. Fetch raw Overpass JSON with `./data_pipeline/fetch-data.sh` or `./data_pipeline/region-data.py fetch`
+3. Build canvas basemaps, binary graphs, gzip artifacts, and stdout manifest with `./data_pipeline/region-data.py build`
+4. Redirect stdout to `web/src/data/locations.json` when the UI should load those regions
+5. Update GitHub Pages workflow if the region should ship in the deployed site
 
 That is the full process as the repository currently stands.

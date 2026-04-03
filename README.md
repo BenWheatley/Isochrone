@@ -25,13 +25,32 @@ make review
 ./data_pipeline/fetch-data.sh
 ```
 
-- Renders the parameterized query scripts in `docs/` and downloads raw Overpass JSON for both routing and subdivision-boundary extracts.
-- Default place list is: Berlin, Paris, London, Rome, and Luxembourg (country).
-- Writes flat input files under `data_pipeline/input/`, for example:
+- Compatibility wrapper for `./data_pipeline/region-data.py fetch`.
+- Region configuration lives in `data_pipeline/regions.json`.
+- Default configured locations are: Berlin, Paris, London, Rome, and Luxembourg (country).
+- Fetch writes raw Overpass JSON under `data_pipeline/input/`, for example:
   - `berlin-routing.osm.json`
   - `berlin-district-boundaries.osm.json`
   - `luxembourg-country-routing.osm.json`
-- This fetch step does not generate canvas basemap JSON, binary routing graphs, or `.bin.gz` web artifacts.
+- To avoid hitting every configured region, filter with `--only`, for example:
+
+```bash
+./data_pipeline/fetch-data.sh --only paris
+```
+
+- Build canvas basemaps, binary graphs, and `.bin.gz` artifacts from the fetched inputs with:
+
+```bash
+./data_pipeline/region-data.py build > web/src/data/locations.json
+```
+
+- Or fetch and build in one run with:
+
+```bash
+./data_pipeline/region-data.py all > web/src/data/locations.json
+```
+
+- `build` and `all` print the UI-ready location manifest JSON to stdout.
 - Full end-to-end process for turning a fetched region into web-loadable assets is documented in `docs/region-data-pipeline.md`.
 
 ## Headless routing benchmark

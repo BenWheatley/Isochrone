@@ -1,0 +1,50 @@
+{
+  "locations": [
+    {
+      "id": "berlin",
+      "name": "Berlin",
+      "graphFileName": "graph-walk.bin.gz",
+      "boundaryFileName": "berlin-district-boundaries-canvas.json",
+      "graphSummaryFileName": "graph-binary-summary.json",
+      "locationRelation": "rel(62422)[\"name\"=\"Berlin\"][\"wikidata\"=\"Q64\"]",
+      "subdivisionAdminLevel": "9",
+      "epsg": 25833
+    },
+    {
+      "id": "paris",
+      "name": "Paris",
+      "graphFileName": "paris-graph.bin.gz",
+      "boundaryFileName": "paris-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q90\"]",
+      "subdivisionAdminLevel": "9",
+      "epsg": 2154
+    },
+    {
+      "id": "london",
+      "name": "London",
+      "graphFileName": "london-graph.bin.gz",
+      "boundaryFileName": "london-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q23306\"]",
+      "subdivisionAdminLevel": "8",
+      "epsg": 27700
+    },
+    {
+      "id": "rome",
+      "name": "Rome",
+      "graphFileName": "rome-graph.bin.gz",
+      "boundaryFileName": "rome-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q220\"]",
+      "subdivisionAdminLevel": "10",
+      "epsg": 32633
+    },
+    {
+      "id": "luxembourg-country",
+      "name": "Luxembourg (country)",
+      "graphFileName": "luxembourg-country-graph.bin.gz",
+      "boundaryFileName": "luxembourg-country-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q32\"]",
+      "subdivisionAdminLevel": "8",
+      "epsg": 2169
+    }
+  ]
+}

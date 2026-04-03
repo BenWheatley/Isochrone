@@ -4,11 +4,9 @@
 from __future__ import annotations
 
 import argparse
-import json
-from datetime import UTC, datetime
 from pathlib import Path
 
-from isochrone_pipeline.boundary_canvas import simplify_overpass_boundaries_for_canvas
+from isochrone_pipeline.artifacts import write_simplified_boundary_canvas
 
 
 def main() -> int:
@@ -50,23 +48,14 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    overpass_json = json.loads(args.input.read_text(encoding="utf-8"))
-    payload = simplify_overpass_boundaries_for_canvas(
-        overpass_json,
-        tolerance=args.resolution,
+    output = write_simplified_boundary_canvas(
+        input_path=args.input,
+        output_path=args.output,
+        resolution=args.resolution,
         units=args.units,
-        epsg_code=args.epsg,
+        epsg=args.epsg,
         admin_level=args.admin_level,
     )
-
-    output = {
-        "generated_at_utc": datetime.now(UTC).isoformat(),
-        "input": str(args.input),
-        **payload,
-    }
-
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(output, indent=2), encoding="utf-8")
 
     print(f"Wrote {args.output}")
     print(f"feature_count={output['stats']['feature_count']}")
