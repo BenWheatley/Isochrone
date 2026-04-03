@@ -1,6 +1,6 @@
 # Runtime dependencies for the data pipeline (Phase 1.2)
 # Note: pyosmium is distributed on PyPI under the package name "osmium".
-numpy==2.4.2
+numpy==2.4.4
 osmium==4.3.0
 pyproj==3.7.2
 requests==2.32.5
