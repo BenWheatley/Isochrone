@@ -4,6 +4,7 @@ import json
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +19,21 @@ def _run_zsh_script(
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["zsh", str(script_path), *args],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        env=env,
+    )
+
+
+def _run_python_script(
+    script_path: Path,
+    *args: str,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(script_path), *args],
         check=False,
         capture_output=True,
         text=True,
@@ -62,7 +78,9 @@ def test_boundary_query_script_renders_location_selector_and_admin_level() -> No
     assert "out body geom qt;" in result.stdout
 
 
-def test_fetch_data_script_fetches_selected_locations_from_external_config(tmp_path: Path) -> None:
+def test_region_data_fetch_command_fetches_selected_locations_from_external_config(
+    tmp_path: Path,
+) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     fake_curl = fake_bin / "curl"
@@ -125,11 +143,13 @@ def test_fetch_data_script_fetches_selected_locations_from_external_config(tmp_p
     input_dir = tmp_path / "input"
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
-    env["INPUT_DIR"] = str(input_dir)
-    result = _run_zsh_script(
-        PIPELINE_ROOT / "fetch-data.sh",
+    result = _run_python_script(
+        PIPELINE_ROOT / "region-data.py",
+        "fetch",
         "--locations-file",
         str(locations_file),
+        "--input-dir",
+        str(input_dir),
         "--only",
         "paris",
         env=env,

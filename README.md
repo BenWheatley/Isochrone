@@ -2,6 +2,8 @@
 
 Berlin isochrone web application with a Python preprocessing pipeline and a browser-based renderer.
 
+[Live App](https://benwheatley.github.io/Isochrone/)
+
 ## Quick start
 
 ```bash
@@ -22,10 +24,9 @@ make review
 ## OSM data pipeline
 
 ```bash
-./data_pipeline/fetch-data.sh
+./data_pipeline/region-data.py fetch
 ```
 
-- Compatibility wrapper for `./data_pipeline/region-data.py fetch`.
 - Region configuration lives in `data_pipeline/regions.json`.
 - Default configured locations are: Berlin, Paris, London, Rome, and Luxembourg (country).
 - Fetch writes raw Overpass JSON under `data_pipeline/input/`, for example:
@@ -35,7 +36,7 @@ make review
 - To avoid hitting every configured region, filter with `--only`, for example:
 
 ```bash
-./data_pipeline/fetch-data.sh --only paris
+./data_pipeline/region-data.py fetch --only paris
 ```
 
 - Build canvas basemaps, binary graphs, and `.bin.gz` artifacts from the fetched inputs with:
@@ -51,7 +52,7 @@ make review
 ```
 
 - `build` and `all` print the UI-ready location manifest JSON to stdout.
-- Full end-to-end process for turning a fetched region into web-loadable assets is documented in `docs/region-data-pipeline.md`.
+- Full end-to-end process for turning a fetched region into web-loadable assets is documented in [Region Data Pipeline](docs/region-data-pipeline.md).
 
 ## Headless routing benchmark
 
@@ -97,7 +98,7 @@ make wasm-build
 - Requires `wasm-opt` (`binaryen`) on PATH; install with `brew install binaryen` on macOS.
 - Browser runtime requires this WASM kernel for routing/search execution.
 - Browsers without WASM support are shown: `Your browser does not support WASM, this app requires WASM for performance reasons`.
-- Interface and milestones are documented in `docs/wasm-routing-kernel.md`.
+- Interface and milestones are documented in [WASM Routing Kernel](docs/wasm-routing-kernel.md).
 
 ## Runtime data
 - Web runtime loads `data_pipeline/output/graph-walk.bin.gz` by default.
@@ -114,7 +115,7 @@ make wasm-build
 - Selected transport modes and colour-cycle duration are also persisted in the URL as `modes=` and `cycle=`.
 - Theme, pointer-button inversion, transport modes, and colour cycle controls are in the header **Options** menu.
 - Page scrolling is disabled while interacting with the map viewport so touch gestures stay attached to the map.
-- Current binary schema details and compatibility policy: `docs/graph-binary-schema-v2.md`.
+- Current binary schema details and compatibility policy: [Graph Binary Schema v2](docs/graph-binary-schema-v2.md).
 
 ## SVG export
 - Export uses vector isochrone edge lines plus the boundary canvas layer.

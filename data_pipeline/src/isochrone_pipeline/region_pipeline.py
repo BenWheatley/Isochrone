@@ -12,13 +12,7 @@ import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TextIO, cast
-
-from isochrone_pipeline.artifacts import (
-    write_graph_binary_artifacts,
-    write_simplified_boundary_canvas,
-)
-from isochrone_pipeline.boundary_canvas import ResolutionUnits
+from typing import Any, Literal, TextIO, cast
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_LOCATIONS_FILE = REPO_ROOT / "data_pipeline" / "regions.json"
@@ -31,6 +25,7 @@ DEFAULT_BOUNDARY_UNITS = "meters"
 ROUTING_QUERY_SCRIPT = REPO_ROOT / "docs" / "berlin_overpass_routing_query.ql"
 BOUNDARY_QUERY_SCRIPT = REPO_ROOT / "docs" / "berlin_district_boundaries_query.ql"
 
+BoundaryUnits = Literal["meters", "degrees"]
 BoundaryBuilder = Callable[..., dict[str, Any]]
 GraphBuilder = Callable[..., dict[str, Any]]
 
@@ -47,7 +42,7 @@ class RegionSpec:
     graph_binary_file_name: str
     graph_summary_file_name: str
     boundary_resolution: float
-    boundary_units: ResolutionUnits
+    boundary_units: BoundaryUnits
 
     @property
     def routing_input_file_name(self) -> str:
@@ -118,7 +113,7 @@ def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
         )
         if boundary_units not in {"meters", "degrees"}:
             raise ValueError(f"locations[{index}].boundaryUnits must be 'meters' or 'degrees'")
-        normalized_boundary_units = cast(ResolutionUnits, boundary_units)
+        normalized_boundary_units = cast(BoundaryUnits, boundary_units)
 
         region_specs.append(
             RegionSpec(
@@ -226,12 +221,21 @@ def run_build_pipeline(
     *,
     input_dir: Path,
     output_dir: Path,
-    simplify_boundaries: BoundaryBuilder = write_simplified_boundary_canvas,
-    export_graph_binary: GraphBuilder = write_graph_binary_artifacts,
+    simplify_boundaries: BoundaryBuilder | None = None,
+    export_graph_binary: GraphBuilder | None = None,
     stderr: TextIO | None = None,
 ) -> dict[str, Any]:
     stderr = stderr or sys.stderr
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if simplify_boundaries is None or export_graph_binary is None:
+        from isochrone_pipeline.artifacts import (
+            write_graph_binary_artifacts,
+            write_simplified_boundary_canvas,
+        )
+
+        simplify_boundaries = simplify_boundaries or write_simplified_boundary_canvas
+        export_graph_binary = export_graph_binary or write_graph_binary_artifacts
 
     for spec in region_specs:
         routing_input_path = input_dir / spec.routing_input_file_name

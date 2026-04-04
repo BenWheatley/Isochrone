@@ -6,8 +6,6 @@ The pipeline now has one external source-of-truth config file and one Python ent
 - config: `data_pipeline/regions.json`
 - main command: `data_pipeline/region-data.py`
 
-`data_pipeline/fetch-data.sh` remains only as a compatibility wrapper around `region-data.py fetch`.
-
 ## What Exists Today
 
 Implemented:
@@ -25,12 +23,6 @@ Still manual:
 ## Stage 1: Fetch Raw OSM JSON
 
 Run:
-
-```bash
-./data_pipeline/fetch-data.sh
-```
-
-Equivalent direct Python command:
 
 ```bash
 ./data_pipeline/region-data.py fetch
@@ -104,7 +96,7 @@ For a new region such as Paris, add copies for:
 Assuming you only want Paris:
 
 ```bash
-./data_pipeline/fetch-data.sh --only paris
+./data_pipeline/region-data.py fetch --only paris
 ./data_pipeline/region-data.py build --only paris > web/src/data/locations.json
 ```
 
@@ -134,7 +126,7 @@ And `web/src/data/locations.json` receives:
 ## Full Process Checklist
 
 1. Edit `data_pipeline/regions.json` if the configured region list or per-region metadata should change
-2. Fetch raw Overpass JSON with `./data_pipeline/fetch-data.sh` or `./data_pipeline/region-data.py fetch`
+2. Fetch raw Overpass JSON with `./data_pipeline/region-data.py fetch`
 3. Build canvas basemaps, binary graphs, gzip artifacts, and stdout manifest with `./data_pipeline/region-data.py build`
 4. Redirect stdout to `web/src/data/locations.json` when the UI should load those regions
 5. Update GitHub Pages workflow if the region should ship in the deployed site
