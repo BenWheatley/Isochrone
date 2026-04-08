@@ -244,4 +244,6 @@ def test_region_data_fetch_command_fetches_selected_locations_from_external_conf
         for line in fake_log.read_text(encoding="utf-8").splitlines()
         if line.startswith("OUTPUT=")
     ]
-    assert logged_outputs == [str(path) for path in expected_outputs]
+    assert len(logged_outputs) == 2
+    assert all(Path(path).name.startswith("overpass-response-") for path in logged_outputs)
+    assert all(Path(path).suffix == ".tmp" for path in logged_outputs)

@@ -344,11 +344,18 @@ def test_fetch_overpass_json_failure_writes_debug_bundle(tmp_path: Path, monkeyp
         capture_output: bool,
     ) -> subprocess.CompletedProcess[str]:
         del check, text, capture_output
+        output_arg_index = args.index("-o") + 1
+        Path(args[output_arg_index]).write_text('{"remark":"gateway timeout"}\n', encoding="utf-8")
+        header_arg_index = args.index("--dump-header") + 1
+        Path(args[header_arg_index]).write_text(
+            "HTTP/1.1 504 Gateway Timeout\nContent-Type: application/json\n",
+            encoding="utf-8",
+        )
         return subprocess.CompletedProcess(
             args=args,
-            returncode=22,
-            stdout="",
-            stderr="curl: (22) The requested URL returned error: 504\n",
+            returncode=0,
+            stdout="504",
+            stderr="",
         )
 
     monkeypatch.setattr("isochrone_pipeline.region_pipeline.subprocess.run", fake_run)
@@ -368,10 +375,15 @@ def test_fetch_overpass_json_failure_writes_debug_bundle(tmp_path: Path, monkeyp
         raise AssertionError("expected fetch_overpass_json to fail")
 
     assert "routing extract for London" in message
-    assert "curl_exit_code=22" in message
+    assert "curl_exit_code=0" in message
+    assert "http_status=504" in message
     assert "https://overpass.example/api/interpreter" in message
     assert str(output_path) in message
     assert str(output_path.with_name("london-routing.osm.json.failed-query.ql")) in message
+    assert str(output_path.with_name("london-routing.osm.json.failed-response-body.txt")) in message
+    assert (
+        str(output_path.with_name("london-routing.osm.json.failed-response-headers.txt")) in message
+    )
     assert (
         output_path.with_name("london-routing.osm.json.failed-query.ql").read_text(encoding="utf-8")
         == '[out:json];way["highway"](0,0,1,1);out body qt;'
@@ -380,7 +392,19 @@ def test_fetch_overpass_json_failure_writes_debug_bundle(tmp_path: Path, monkeyp
         output_path.with_name("london-routing.osm.json.failed-curl-stderr.txt").read_text(
             encoding="utf-8"
         )
-        == "curl: (22) The requested URL returned error: 504\n"
+        == ""
+    )
+    assert (
+        output_path.with_name("london-routing.osm.json.failed-response-body.txt").read_text(
+            encoding="utf-8"
+        )
+        == '{"remark":"gateway timeout"}\n'
+    )
+    assert (
+        output_path.with_name("london-routing.osm.json.failed-response-headers.txt").read_text(
+            encoding="utf-8"
+        )
+        == "HTTP/1.1 504 Gateway Timeout\nContent-Type: application/json\n"
     )
     assert not output_path.exists()
     assert "Rendered routing extract for London" in stderr.getvalue()

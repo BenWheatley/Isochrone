@@ -352,32 +352,52 @@ def fetch_overpass_json(
     ) as temp_query:
         temp_query.write(query_text)
         temp_query_path = Path(temp_query.name)
+    with tempfile.NamedTemporaryFile(
+        mode="wb",
+        prefix="overpass-response-",
+        suffix=".tmp",
+        delete=False,
+    ) as temp_response:
+        temp_response_path = Path(temp_response.name)
+    with tempfile.NamedTemporaryFile(
+        mode="wb",
+        prefix="overpass-headers-",
+        suffix=".tmp",
+        delete=False,
+    ) as temp_headers:
+        temp_headers_path = Path(temp_headers.name)
 
     try:
         result = subprocess.run(
             [
                 "curl",
                 "--show-error",
-                "--fail",
                 "--max-time",
                 str(max_time_seconds),
+                "--dump-header",
+                str(temp_headers_path),
                 "--data-urlencode",
                 f"data@{temp_query_path}",
                 overpass_url,
                 "-o",
-                str(output_path),
+                str(temp_response_path),
+                "--write-out",
+                "%{http_code}",
             ],
             check=False,
             text=True,
             capture_output=True,
         )
-        if result.returncode != 0:
+        http_status = _parse_curl_http_status(result.stdout)
+        if result.returncode != 0 or http_status >= 400:
             output_path.unlink(missing_ok=True)
             debug_bundle = _write_failed_overpass_debug_bundle(
                 output_path=output_path,
                 query_text=query_text,
                 curl_stdout=result.stdout,
                 curl_stderr=result.stderr,
+                response_body_path=temp_response_path,
+                response_headers_path=temp_headers_path,
             )
             raise RuntimeError(
                 _format_overpass_failure_message(
@@ -386,12 +406,16 @@ def fetch_overpass_json(
                     overpass_url=overpass_url,
                     max_time_seconds=max_time_seconds,
                     curl_exit_code=result.returncode,
+                    http_status=http_status,
                     debug_bundle=debug_bundle,
                 )
             )
+        temp_response_path.replace(output_path)
         _remove_failed_overpass_debug_bundle(output_path)
     finally:
         temp_query_path.unlink(missing_ok=True)
+        temp_response_path.unlink(missing_ok=True)
+        temp_headers_path.unlink(missing_ok=True)
 
 
 def gzip_file(input_path: Path, output_path: Path) -> None:
@@ -427,14 +451,24 @@ def _write_failed_overpass_debug_bundle(
     query_text: str,
     curl_stdout: str,
     curl_stderr: str,
+    response_body_path: Path,
+    response_headers_path: Path,
 ) -> dict[str, Path]:
     query_path = output_path.with_name(f"{output_path.name}.failed-query.ql")
     stderr_path = output_path.with_name(f"{output_path.name}.failed-curl-stderr.txt")
+    response_body_debug_path = output_path.with_name(f"{output_path.name}.failed-response-body.txt")
+    response_headers_debug_path = output_path.with_name(
+        f"{output_path.name}.failed-response-headers.txt"
+    )
     query_path.write_text(query_text, encoding="utf-8")
     stderr_path.write_text(curl_stderr, encoding="utf-8")
+    shutil.copyfile(response_body_path, response_body_debug_path)
+    shutil.copyfile(response_headers_path, response_headers_debug_path)
     debug_bundle = {
         "query": query_path,
         "stderr": stderr_path,
+        "response_body": response_body_debug_path,
+        "response_headers": response_headers_debug_path,
     }
     if curl_stdout:
         stdout_path = output_path.with_name(f"{output_path.name}.failed-curl-stdout.txt")
@@ -448,6 +482,8 @@ def _remove_failed_overpass_debug_bundle(output_path: Path) -> None:
         ".failed-query.ql",
         ".failed-curl-stderr.txt",
         ".failed-curl-stdout.txt",
+        ".failed-response-body.txt",
+        ".failed-response-headers.txt",
     ):
         output_path.with_name(f"{output_path.name}{suffix}").unlink(missing_ok=True)
 
@@ -459,6 +495,7 @@ def _format_overpass_failure_message(
     overpass_url: str,
     max_time_seconds: int,
     curl_exit_code: int,
+    http_status: int,
     debug_bundle: dict[str, Path],
 ) -> str:
     message_lines = [
@@ -467,13 +504,26 @@ def _format_overpass_failure_message(
         f"overpass_url={overpass_url}",
         f"max_time_seconds={max_time_seconds}",
         f"curl_exit_code={curl_exit_code}",
+        f"http_status={http_status}",
         f"saved_query={debug_bundle['query']}",
         f"saved_curl_stderr={debug_bundle['stderr']}",
+        f"saved_response_body={debug_bundle['response_body']}",
+        f"saved_response_headers={debug_bundle['response_headers']}",
     ]
     stdout_path = debug_bundle.get("stdout")
     if stdout_path is not None:
         message_lines.append(f"saved_curl_stdout={stdout_path}")
     return "\n".join(message_lines)
+
+
+def _parse_curl_http_status(stdout_text: str) -> int:
+    status_text = stdout_text.strip()
+    if not status_text:
+        return 0
+    try:
+        return int(status_text.splitlines()[-1].strip())
+    except ValueError:
+        return 0
 
 
 def main(

@@ -39,6 +39,8 @@ make review
 - If a fetch fails, the pipeline writes debug artifacts next to the intended output path:
   - `<output>.failed-query.ql`
   - `<output>.failed-curl-stderr.txt`
+  - `<output>.failed-response-body.txt`
+  - `<output>.failed-response-headers.txt`
   - `<output>.failed-curl-stdout.txt` when curl emitted stdout
 - The query renderer templates live at:
   - `docs/overpass_routing_query.sh`
