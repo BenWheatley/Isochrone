@@ -27,6 +27,7 @@
       "locationRelation": "rel(175342)[\"name\"=\"Greater London\"][\"wikidata\"=\"Q84\"]",
       "subdivisionAdminLevel": "8",
       "subdivisionDiscoveryModes": ["subarea"],
+      "routingTileSizeDegrees": 0.2,
       "epsg": 27700
     },
     {

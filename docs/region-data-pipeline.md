@@ -42,6 +42,17 @@ administrative relations:
 If omitted, both modes are used. Regions whose parent area scans are expensive can
 disable `"area"` and use only `"subarea"`, which is how London is configured.
 
+Large routing extracts can also opt into tiling with `routingTileSizeDegrees`.
+When present, the fetch step:
+
+- fetches the parent relation bounds using a lightweight `out bb;` query
+- splits that bounding box into deterministic degree tiles
+- runs the routing query once per tile using `--bbox`
+- merges duplicate OSM elements by `(type, id)` while preserving richer tagged data
+
+This keeps the final raw JSON in the same shape as the non-tiled fetch path while
+avoiding single giant Overpass routing queries for large regions such as London.
+
 Outputs go to `data_pipeline/input/` and are named:
 - `<slug>-routing.osm.json`
 - `<slug>-district-boundaries.osm.json`
