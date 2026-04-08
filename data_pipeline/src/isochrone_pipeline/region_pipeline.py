@@ -30,6 +30,8 @@ BoundaryBuilder = Callable[..., dict[str, Any]]
 GraphBuilder = Callable[..., dict[str, Any]]
 QueryRenderer = Callable[..., str]
 OverpassFetcher = Callable[..., None]
+DEFAULT_FETCH_COMPONENTS: frozenset[str] = frozenset({"routing", "boundary"})
+DEFAULT_BUILD_COMPONENTS: frozenset[str] = frozenset({"graph", "boundary"})
 
 
 @dataclass(frozen=True)
@@ -187,6 +189,7 @@ def run_fetch_pipeline(
     boundary_query_script: Path = BOUNDARY_QUERY_SCRIPT,
     render_query_fn: QueryRenderer | None = None,
     fetch_overpass_json_fn: OverpassFetcher | None = None,
+    fetch_components: frozenset[str] = DEFAULT_FETCH_COMPONENTS,
     stderr: TextIO | None = None,
 ) -> None:
     stderr = stderr or sys.stderr
@@ -195,59 +198,61 @@ def run_fetch_pipeline(
     fetch_overpass_json_fn = fetch_overpass_json_fn or fetch_overpass_json
 
     for spec in region_specs:
-        _log(stderr, f"Fetching routing extract for {spec.name}")
-        routing_output_path = input_dir / spec.routing_input_file_name
-        routing_query = render_query_fn(
-            routing_query_script,
-            "--location-label",
-            spec.name,
-            "--location-relation",
-            spec.location_relation,
-        )
-        _log_rendered_query(
-            stderr,
-            label=f"routing query for {spec.name}",
-            query_text=routing_query,
-            output_path=routing_output_path,
-            overpass_url=overpass_url,
-            max_time_seconds=max_time_seconds,
-        )
-        fetch_overpass_json_fn(
-            query_text=routing_query,
-            output_path=routing_output_path,
-            overpass_url=overpass_url,
-            max_time_seconds=max_time_seconds,
-            request_label=f"routing extract for {spec.name}",
-        )
+        if "routing" in fetch_components:
+            _log(stderr, f"Fetching routing extract for {spec.name}")
+            routing_output_path = input_dir / spec.routing_input_file_name
+            routing_query = render_query_fn(
+                routing_query_script,
+                "--location-label",
+                spec.name,
+                "--location-relation",
+                spec.location_relation,
+            )
+            _log_rendered_query(
+                stderr,
+                label=f"routing query for {spec.name}",
+                query_text=routing_query,
+                output_path=routing_output_path,
+                overpass_url=overpass_url,
+                max_time_seconds=max_time_seconds,
+            )
+            fetch_overpass_json_fn(
+                query_text=routing_query,
+                output_path=routing_output_path,
+                overpass_url=overpass_url,
+                max_time_seconds=max_time_seconds,
+                request_label=f"routing extract for {spec.name}",
+            )
 
-        _log(stderr, f"Fetching boundary extract for {spec.name}")
-        boundary_output_path = input_dir / spec.boundary_input_file_name
-        boundary_query = render_query_fn(
-            boundary_query_script,
-            "--location-label",
-            spec.name,
-            "--location-relation",
-            spec.location_relation,
-            "--subdivision-admin-level",
-            spec.subdivision_admin_level,
-            "--subdivision-discovery-modes",
-            ",".join(spec.subdivision_discovery_modes),
-        )
-        _log_rendered_query(
-            stderr,
-            label=f"boundary query for {spec.name}",
-            query_text=boundary_query,
-            output_path=boundary_output_path,
-            overpass_url=overpass_url,
-            max_time_seconds=max_time_seconds,
-        )
-        fetch_overpass_json_fn(
-            query_text=boundary_query,
-            output_path=boundary_output_path,
-            overpass_url=overpass_url,
-            max_time_seconds=max_time_seconds,
-            request_label=f"boundary extract for {spec.name}",
-        )
+        if "boundary" in fetch_components:
+            _log(stderr, f"Fetching boundary extract for {spec.name}")
+            boundary_output_path = input_dir / spec.boundary_input_file_name
+            boundary_query = render_query_fn(
+                boundary_query_script,
+                "--location-label",
+                spec.name,
+                "--location-relation",
+                spec.location_relation,
+                "--subdivision-admin-level",
+                spec.subdivision_admin_level,
+                "--subdivision-discovery-modes",
+                ",".join(spec.subdivision_discovery_modes),
+            )
+            _log_rendered_query(
+                stderr,
+                label=f"boundary query for {spec.name}",
+                query_text=boundary_query,
+                output_path=boundary_output_path,
+                overpass_url=overpass_url,
+                max_time_seconds=max_time_seconds,
+            )
+            fetch_overpass_json_fn(
+                query_text=boundary_query,
+                output_path=boundary_output_path,
+                overpass_url=overpass_url,
+                max_time_seconds=max_time_seconds,
+                request_label=f"boundary extract for {spec.name}",
+            )
 
 
 def run_build_pipeline(
@@ -255,6 +260,7 @@ def run_build_pipeline(
     *,
     input_dir: Path,
     output_dir: Path,
+    build_components: frozenset[str] = DEFAULT_BUILD_COMPONENTS,
     simplify_boundaries: BoundaryBuilder | None = None,
     export_graph_binary: GraphBuilder | None = None,
     stderr: TextIO | None = None,
@@ -274,35 +280,36 @@ def run_build_pipeline(
     for spec in region_specs:
         routing_input_path = input_dir / spec.routing_input_file_name
         boundary_input_path = input_dir / spec.boundary_input_file_name
-        if not routing_input_path.is_file():
-            raise FileNotFoundError(f"routing input not found: {routing_input_path}")
-        if not boundary_input_path.is_file():
-            raise FileNotFoundError(f"boundary input not found: {boundary_input_path}")
+        if "boundary" in build_components:
+            if not boundary_input_path.is_file():
+                raise FileNotFoundError(f"boundary input not found: {boundary_input_path}")
+            boundary_output_path = output_dir / spec.boundary_file_name
+            _log(stderr, f"Building boundary canvas JSON for {spec.name}")
+            simplify_boundaries(
+                input_path=boundary_input_path,
+                output_path=boundary_output_path,
+                resolution=spec.boundary_resolution,
+                units=spec.boundary_units,
+                epsg=spec.epsg,
+                admin_level=spec.subdivision_admin_level,
+            )
 
-        boundary_output_path = output_dir / spec.boundary_file_name
-        _log(stderr, f"Building boundary canvas JSON for {spec.name}")
-        simplify_boundaries(
-            input_path=boundary_input_path,
-            output_path=boundary_output_path,
-            resolution=spec.boundary_resolution,
-            units=spec.boundary_units,
-            epsg=spec.epsg,
-            admin_level=spec.subdivision_admin_level,
-        )
+        if "graph" in build_components:
+            if not routing_input_path.is_file():
+                raise FileNotFoundError(f"routing input not found: {routing_input_path}")
+            graph_binary_path = output_dir / spec.graph_binary_file_name
+            graph_summary_path = output_dir / spec.graph_summary_file_name
+            _log(stderr, f"Building routing graph binary for {spec.name}")
+            export_graph_binary(
+                input_path=routing_input_path,
+                binary_output=graph_binary_path,
+                summary_output=graph_summary_path,
+                epsg=spec.epsg,
+            )
 
-        graph_binary_path = output_dir / spec.graph_binary_file_name
-        graph_summary_path = output_dir / spec.graph_summary_file_name
-        _log(stderr, f"Building routing graph binary for {spec.name}")
-        export_graph_binary(
-            input_path=routing_input_path,
-            binary_output=graph_binary_path,
-            summary_output=graph_summary_path,
-            epsg=spec.epsg,
-        )
-
-        gz_output_path = output_dir / spec.graph_file_name
-        _log(stderr, f"Gzipping routing graph for {spec.name}")
-        gzip_file(graph_binary_path, gz_output_path)
+            gz_output_path = output_dir / spec.graph_file_name
+            _log(stderr, f"Gzipping routing graph for {spec.name}")
+            gzip_file(graph_binary_path, gz_output_path)
 
     return build_location_manifest(region_specs)
 
@@ -543,12 +550,23 @@ def main(
         args.only,
     )
 
+    fetch_components = DEFAULT_FETCH_COMPONENTS
+    build_components = DEFAULT_BUILD_COMPONENTS
+    if args.command == "fetch":
+        fetch_components = _normalize_fetch_components(args.components)
+    elif args.command == "build":
+        build_components = _normalize_build_components(args.components)
+    elif args.command == "all":
+        fetch_components = _normalize_fetch_components(args.fetch_components)
+        build_components = _normalize_build_components(args.build_components)
+
     if args.command in {"fetch", "all"}:
         run_fetch_pipeline(
             region_specs,
             input_dir=args.input_dir,
             overpass_url=args.overpass_url,
             max_time_seconds=args.max_time_seconds,
+            fetch_components=fetch_components,
             stderr=stderr,
         )
 
@@ -557,6 +575,7 @@ def main(
             region_specs,
             input_dir=args.input_dir,
             output_dir=args.output_dir,
+            build_components=build_components,
             stderr=stderr,
         )
         json.dump(manifest, stdout, indent=2)
@@ -602,10 +621,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Maximum curl transfer time in seconds.",
     )
 
-    subparsers.add_parser(
+    fetch_parser = subparsers.add_parser(
         "fetch",
         parents=[common_parser, fetch_common_parser],
         help="Download raw Overpass JSON only.",
+    )
+    fetch_parser.add_argument(
+        "--components",
+        default="routing,boundary",
+        help="Comma-separated fetch components: routing, boundary.",
     )
 
     build_parser = subparsers.add_parser(
@@ -619,6 +643,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=DEFAULT_OUTPUT_DIR,
         help="Directory for generated artifact outputs.",
     )
+    build_parser.add_argument(
+        "--components",
+        default="graph,boundary",
+        help="Comma-separated build components: graph, boundary.",
+    )
 
     all_parser = subparsers.add_parser(
         "all",
@@ -630,6 +659,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
         help="Directory for generated artifact outputs.",
+    )
+    all_parser.add_argument(
+        "--fetch-components",
+        default="routing,boundary",
+        help="Comma-separated fetch components: routing, boundary.",
+    )
+    all_parser.add_argument(
+        "--build-components",
+        default="graph,boundary",
+        help="Comma-separated build components: graph, boundary.",
     )
 
     return parser
@@ -665,6 +704,61 @@ def _normalize_subdivision_discovery_modes(value: object, *, field_name: str) ->
     if not normalized_modes:
         raise ValueError(f"{field_name} must include at least one supported mode")
     return tuple(normalized_modes)
+
+
+def _normalize_fetch_components(value: object) -> frozenset[str]:
+    tokens = _parse_component_tokens(value, field_name="components")
+    alias_map = {
+        "routing": "routing",
+        "way": "routing",
+        "ways": "routing",
+        "boundary": "boundary",
+        "boundaries": "boundary",
+    }
+    return frozenset(_normalize_component_aliases(tokens, alias_map, field_name="components"))
+
+
+def _normalize_build_components(value: object) -> frozenset[str]:
+    tokens = _parse_component_tokens(value, field_name="components")
+    alias_map = {
+        "graph": "graph",
+        "routing": "graph",
+        "way": "graph",
+        "ways": "graph",
+        "boundary": "boundary",
+        "boundaries": "boundary",
+    }
+    return frozenset(_normalize_component_aliases(tokens, alias_map, field_name="components"))
+
+
+def _parse_component_tokens(value: object, *, field_name: str) -> tuple[str, ...]:
+    raw_value = _require_non_empty_string(value, field_name)
+    tokens = tuple(part.strip().lower() for part in raw_value.split(",") if part.strip())
+    if not tokens:
+        raise ValueError(f"{field_name} must contain at least one component")
+    return tokens
+
+
+def _normalize_component_aliases(
+    tokens: Sequence[str],
+    alias_map: dict[str, str],
+    *,
+    field_name: str,
+) -> tuple[str, ...]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        canonical = alias_map.get(token)
+        if canonical is None:
+            allowed = ", ".join(sorted(alias_map))
+            raise ValueError(
+                f"{field_name} contains unsupported component '{token}' (allowed: {allowed})"
+            )
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        normalized.append(canonical)
+    return tuple(normalized)
 
 
 def _require_int(value: object, field_name: str) -> int:

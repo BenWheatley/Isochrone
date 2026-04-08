@@ -18,6 +18,28 @@ from isochrone_pipeline.region_pipeline import (
 )
 
 
+def _make_region_spec(
+    *,
+    region_id: str = "paris",
+    name: str = "Paris",
+    epsg: int = 2154,
+) -> RegionSpec:
+    return RegionSpec(
+        id=region_id,
+        name=name,
+        graph_file_name=f"{region_id}-graph.bin.gz",
+        boundary_file_name=f"{region_id}-district-boundaries-canvas.json",
+        location_relation='rel["boundary"="administrative"]["wikidata"="Q90"]',
+        subdivision_admin_level="9",
+        subdivision_discovery_modes=("area", "subarea"),
+        epsg=epsg,
+        graph_binary_file_name=f"{region_id}-graph.bin",
+        graph_summary_file_name=f"{region_id}-graph-summary.json",
+        boundary_resolution=25.0,
+        boundary_units="meters",
+    )
+
+
 def test_load_region_specs_reads_external_json_config(tmp_path: Path) -> None:
     locations_file = tmp_path / "regions.json"
     locations_file.write_text(
@@ -213,6 +235,7 @@ def test_build_cli_writes_ui_manifest_json_to_stdout(
         *,
         input_dir: Path,
         output_dir: Path,
+        build_components: frozenset[str],
         simplify_boundaries=None,
         export_graph_binary=None,
         stderr=None,
@@ -220,6 +243,7 @@ def test_build_cli_writes_ui_manifest_json_to_stdout(
         captured_specs.append(tuple(spec.id for spec in region_specs))
         assert input_dir == tmp_path / "input"
         assert output_dir == tmp_path / "output"
+        assert build_components == frozenset({"graph", "boundary"})
         return build_location_manifest(region_specs)
 
     monkeypatch.setattr(
@@ -259,6 +283,134 @@ def test_build_cli_writes_ui_manifest_json_to_stdout(
     }
 
 
+def test_build_cli_can_limit_to_graph_component(tmp_path: Path, monkeypatch) -> None:
+    locations_file = tmp_path / "regions.json"
+    locations_file.write_text(
+        json.dumps(
+            {
+                "locations": [
+                    {
+                        "id": "paris",
+                        "name": "Paris",
+                        "graphFileName": "paris-graph.bin.gz",
+                        "boundaryFileName": "paris-district-boundaries-canvas.json",
+                        "locationRelation": 'rel["boundary"="administrative"]["wikidata"="Q90"]',
+                        "subdivisionAdminLevel": "9",
+                        "epsg": 2154,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    captured_components: list[frozenset[str]] = []
+
+    def fake_run_build_pipeline(
+        region_specs: list[RegionSpec],
+        *,
+        input_dir: Path,
+        output_dir: Path,
+        build_components: frozenset[str],
+        simplify_boundaries=None,
+        export_graph_binary=None,
+        stderr=None,
+    ) -> dict[str, object]:
+        del region_specs, input_dir, output_dir, simplify_boundaries, export_graph_binary, stderr
+        captured_components.append(build_components)
+        return {"locations": []}
+
+    monkeypatch.setattr(
+        "isochrone_pipeline.region_pipeline.run_build_pipeline",
+        fake_run_build_pipeline,
+    )
+
+    exit_code = main(
+        [
+            "build",
+            "--locations-file",
+            str(locations_file),
+            "--components",
+            "ways",
+        ],
+        stdout=StringIO(),
+        stderr=StringIO(),
+    )
+
+    assert exit_code == 0
+    assert captured_components == [frozenset({"graph"})]
+
+
+def test_fetch_cli_can_limit_to_boundary_component(tmp_path: Path, monkeypatch) -> None:
+    locations_file = tmp_path / "regions.json"
+    locations_file.write_text(
+        json.dumps(
+            {
+                "locations": [
+                    {
+                        "id": "paris",
+                        "name": "Paris",
+                        "graphFileName": "paris-graph.bin.gz",
+                        "boundaryFileName": "paris-district-boundaries-canvas.json",
+                        "locationRelation": 'rel["boundary"="administrative"]["wikidata"="Q90"]',
+                        "subdivisionAdminLevel": "9",
+                        "epsg": 2154,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    captured_components: list[frozenset[str]] = []
+
+    def fake_run_fetch_pipeline(
+        region_specs: list[RegionSpec],
+        *,
+        input_dir: Path,
+        overpass_url: str,
+        max_time_seconds: int,
+        routing_query_script=None,
+        boundary_query_script=None,
+        render_query_fn=None,
+        fetch_overpass_json_fn=None,
+        fetch_components: frozenset[str],
+        stderr=None,
+    ) -> None:
+        del (
+            region_specs,
+            input_dir,
+            overpass_url,
+            max_time_seconds,
+            routing_query_script,
+            boundary_query_script,
+            render_query_fn,
+            fetch_overpass_json_fn,
+            stderr,
+        )
+        captured_components.append(fetch_components)
+
+    monkeypatch.setattr(
+        "isochrone_pipeline.region_pipeline.run_fetch_pipeline",
+        fake_run_fetch_pipeline,
+    )
+
+    exit_code = main(
+        [
+            "fetch",
+            "--locations-file",
+            str(locations_file),
+            "--components",
+            "boundaries",
+        ],
+        stdout=StringIO(),
+        stderr=StringIO(),
+    )
+
+    assert exit_code == 0
+    assert captured_components == [frozenset({"boundary"})]
+
+
 def test_default_regions_config_uses_deterministic_greater_london_relation() -> None:
     specs = load_region_specs(DEFAULT_LOCATIONS_FILE)
     london = next(spec for spec in specs if spec.id == "london")
@@ -266,6 +418,112 @@ def test_default_regions_config_uses_deterministic_greater_london_relation() -> 
     assert london.location_relation == 'rel(175342)["name"="Greater London"]["wikidata"="Q84"]'
     assert london.subdivision_admin_level == "8"
     assert london.subdivision_discovery_modes == ("subarea",)
+
+
+def test_run_fetch_pipeline_can_limit_to_routing_component_only(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    stderr = StringIO()
+    fetch_calls: list[str] = []
+    spec = _make_region_spec()
+
+    def fake_render_query(query_script: Path, *args: str) -> str:
+        return f"/* {query_script.name} */\n" + " ".join(args) + "\n"
+
+    def fake_fetch_overpass_json(
+        *,
+        query_text: str,
+        output_path: Path,
+        overpass_url: str,
+        max_time_seconds: int,
+        stderr=None,
+        request_label: str | None = None,
+    ) -> None:
+        del query_text, output_path, overpass_url, max_time_seconds, stderr
+        assert request_label is not None
+        fetch_calls.append(request_label)
+
+    run_fetch_pipeline(
+        [spec],
+        input_dir=input_dir,
+        overpass_url="https://overpass.example/api/interpreter",
+        max_time_seconds=600,
+        render_query_fn=fake_render_query,
+        fetch_overpass_json_fn=fake_fetch_overpass_json,
+        fetch_components=frozenset({"routing"}),
+        stderr=stderr,
+    )
+
+    assert fetch_calls == ["routing extract for Paris"]
+    assert "Fetching boundary extract for Paris" not in stderr.getvalue()
+
+
+def test_run_build_pipeline_can_build_graph_without_boundary_input(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    spec = _make_region_spec()
+    (input_dir / spec.routing_input_file_name).write_text('{"elements": []}\n', encoding="utf-8")
+
+    def fake_export(
+        *,
+        input_path: Path,
+        binary_output: Path,
+        summary_output: Path,
+        epsg: int,
+    ) -> dict[str, object]:
+        del input_path, epsg
+        binary_output.write_bytes(b"graph-bytes")
+        summary_output.write_text('{"ok": true}\n', encoding="utf-8")
+        return {"ok": True}
+
+    manifest = run_build_pipeline(
+        [spec],
+        input_dir=input_dir,
+        output_dir=output_dir,
+        export_graph_binary=fake_export,
+        build_components=frozenset({"graph"}),
+    )
+
+    assert (output_dir / spec.graph_binary_file_name).read_bytes() == b"graph-bytes"
+    assert (output_dir / spec.graph_file_name).is_file()
+    assert not (output_dir / spec.boundary_file_name).exists()
+    assert manifest["locations"][0]["id"] == "paris"
+
+
+def test_run_build_pipeline_can_build_boundaries_without_routing_input(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    spec = _make_region_spec()
+    (input_dir / spec.boundary_input_file_name).write_text('{"elements": []}\n', encoding="utf-8")
+
+    def fake_simplify(
+        *,
+        input_path: Path,
+        output_path: Path,
+        resolution: float,
+        units: str,
+        epsg: int,
+        admin_level: str,
+    ) -> dict[str, object]:
+        del input_path, resolution, units, epsg, admin_level
+        output_path.write_text('{"format":"isochrone-canvas-boundaries-v1"}\n', encoding="utf-8")
+        return {"ok": True}
+
+    manifest = run_build_pipeline(
+        [spec],
+        input_dir=input_dir,
+        output_dir=output_dir,
+        simplify_boundaries=fake_simplify,
+        build_components=frozenset({"boundary"}),
+    )
+
+    assert (output_dir / spec.boundary_file_name).is_file()
+    assert not (output_dir / spec.graph_binary_file_name).exists()
+    assert not (output_dir / spec.graph_file_name).exists()
+    assert manifest["locations"][0]["id"] == "paris"
 
 
 def test_run_fetch_pipeline_logs_rendered_queries_before_fetching(

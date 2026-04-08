@@ -52,10 +52,34 @@ make review
 ./data_pipeline/region-data.py fetch --only paris
 ```
 
+- Fetch routing ways only:
+
+```bash
+./data_pipeline/region-data.py fetch --only luxembourg-country --components ways
+```
+
+- Fetch subdivision boundaries only:
+
+```bash
+./data_pipeline/region-data.py fetch --only luxembourg-country --components boundaries
+```
+
 - Build canvas basemaps, binary graphs, and `.bin.gz` artifacts from the fetched inputs with:
 
 ```bash
 ./data_pipeline/region-data.py build > web/src/data/locations.json
+```
+
+- Build the routing graph only from an already-fetched routing extract:
+
+```bash
+./data_pipeline/region-data.py build --only luxembourg-country --components graph
+```
+
+- Build the boundary canvas JSON only from an already-fetched boundary extract:
+
+```bash
+./data_pipeline/region-data.py build --only luxembourg-country --components boundary
 ```
 
 - Or fetch and build in one run with:
@@ -63,6 +87,8 @@ make review
 ```bash
 ./data_pipeline/region-data.py all > web/src/data/locations.json
 ```
+
+- `all` also supports partial runs via `--fetch-components` and `--build-components`.
 
 - `build` and `all` print the UI-ready location manifest JSON to stdout.
 - Full end-to-end process for turning a fetched region into web-loadable assets is documented in [Region Data Pipeline](docs/region-data-pipeline.md).

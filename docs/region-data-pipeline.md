@@ -80,6 +80,13 @@ To avoid fetching every configured region, filter by id:
 ./data_pipeline/region-data.py fetch --only paris
 ```
 
+To fetch only one raw input class:
+
+```bash
+./data_pipeline/region-data.py fetch --only luxembourg-country --components ways
+./data_pipeline/region-data.py fetch --only luxembourg-country --components boundaries
+```
+
 ## Stage 2-4: Build Renderable And Deployable Artifacts
 
 One command now performs:
@@ -98,6 +105,19 @@ Notes:
 - `build` writes generated artifacts to `data_pipeline/output/`
 - `build` prints only the UI-ready locations manifest JSON to stdout
 - progress logging goes to stderr
+
+To build only one artifact class:
+
+```bash
+./data_pipeline/region-data.py build --only luxembourg-country --components graph
+./data_pipeline/region-data.py build --only luxembourg-country --components boundary
+```
+
+The combined command also supports partial selection:
+
+```bash
+./data_pipeline/region-data.py all --only luxembourg-country --fetch-components ways --build-components graph
+```
 - `epsg`, `subdivisionAdminLevel`, output filenames, and relation selectors come from `data_pipeline/regions.json`
 - Berlin still uses the legacy `graph-walk.bin` / `graph-walk.bin.gz` filenames because that is what the web runtime currently references by default
 
