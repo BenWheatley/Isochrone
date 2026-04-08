@@ -122,7 +122,9 @@ def test_boundary_query_script_renders_location_selector_and_admin_level() -> No
     assert result.returncode == 0, result.stderr
     assert "Luxembourg (country) subdivision boundaries" in result.stdout
     assert 'rel["boundary"="administrative"]["wikidata"="Q32"]->.placeRel;' in result.stdout
-    assert '["admin_level"="8"]->.subdivisions;' in result.stdout
+    assert 'rel(r.placeRel:"subarea")' in result.stdout
+    assert '["admin_level"="8"];' in result.stdout
+    assert ")->.subdivisions;" in result.stdout
     assert "out body qt;" in result.stdout
     assert "out skel qt;" in result.stdout
 

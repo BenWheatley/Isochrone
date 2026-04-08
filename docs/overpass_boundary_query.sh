@@ -61,15 +61,25 @@ for the relation selector and admin level you pass in.
 Output: JSON with relation members, way node refs, and referenced node coordinates.
 The build step reconstructs boundary polylines from those refs, which is smaller
 and more robust across regions than relying on inline way geometry.
+
+Subdivision discovery uses both:
+- area containment within the selected place area
+- explicit subarea relation membership from the selected place relation
 */
 
 ${location_relation}->.placeRel;
 .placeRel map_to_area->.placeArea;
 
-rel(area.placeArea)
-  ["boundary"="administrative"]
-  ["type"="boundary"]
-  ["admin_level"="${subdivision_admin_level}"]->.subdivisions;
+(
+  rel(area.placeArea)
+    ["boundary"="administrative"]
+    ["type"="boundary"]
+    ["admin_level"="${subdivision_admin_level}"];
+  rel(r.placeRel:"subarea")
+    ["boundary"="administrative"]
+    ["type"="boundary"]
+    ["admin_level"="${subdivision_admin_level}"];
+)->.subdivisions;
 
 (.subdivisions;>;);
 out body qt;

@@ -6,6 +6,7 @@ from io import StringIO
 from pathlib import Path
 
 from isochrone_pipeline.region_pipeline import (
+    DEFAULT_LOCATIONS_FILE,
     RegionSpec,
     build_location_manifest,
     load_region_specs,
@@ -249,3 +250,11 @@ def test_build_cli_writes_ui_manifest_json_to_stdout(
             }
         ]
     }
+
+
+def test_default_regions_config_uses_deterministic_greater_london_relation() -> None:
+    specs = load_region_specs(DEFAULT_LOCATIONS_FILE)
+    london = next(spec for spec in specs if spec.id == "london")
+
+    assert london.location_relation == 'rel(175342)["name"="Greater London"]["wikidata"="Q84"]'
+    assert london.subdivision_admin_level == "8"

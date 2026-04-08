@@ -192,9 +192,9 @@ def test_extract_overpass_boundary_features_reconstructs_way_geometry_from_node_
     assert features[0].relation_id == 103
     assert features[0].paths_lat_lon == (
         (
-            (41.8890, 12.4680),
-            (41.8900, 12.4690),
-            (41.8910, 12.4700),
+            (12.4680, 41.8890),
+            (12.4690, 41.8900),
+            (12.4700, 41.8910),
         ),
     )
 

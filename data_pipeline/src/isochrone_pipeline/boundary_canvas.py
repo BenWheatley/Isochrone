@@ -29,7 +29,7 @@ def extract_overpass_boundary_features(
         raise ValueError("Overpass JSON must contain an 'elements' list")
 
     features: list[BoundaryFeature] = []
-    node_lat_lon_by_id: dict[int, tuple[float, float]] = {}
+    node_lon_lat_by_id: dict[int, tuple[float, float]] = {}
     way_geometry_by_id: dict[int, tuple[tuple[float, float], ...]] = {}
 
     for element in elements:
@@ -46,7 +46,7 @@ def extract_overpass_boundary_features(
             and isinstance(lat, int | float)
             and isinstance(lon, int | float)
         ):
-            node_lat_lon_by_id[node_id] = (float(lat), float(lon))
+            node_lon_lat_by_id[node_id] = (float(lon), float(lat))
 
     for element in elements:
         if not isinstance(element, dict):
@@ -63,9 +63,9 @@ def extract_overpass_boundary_features(
             node_refs = element.get("nodes")
             if isinstance(node_refs, list):
                 reconstructed_geometry = tuple(
-                    node_lat_lon_by_id[node_id]
+                    node_lon_lat_by_id[node_id]
                     for node_id in node_refs
-                    if isinstance(node_id, int) and node_id in node_lat_lon_by_id
+                    if isinstance(node_id, int) and node_id in node_lon_lat_by_id
                 )
                 if len(reconstructed_geometry) == len(node_refs):
                     way_geometry = reconstructed_geometry

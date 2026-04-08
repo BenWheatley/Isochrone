@@ -52,6 +52,7 @@ Boundary extracts are written in a download-friendly shape:
 - nodes with coordinates
 
 The build step reconstructs boundary polylines from those refs, so fetch does not depend on inline way geometry being present in the Overpass response.
+The boundary query discovers subdivisions using both area containment and explicit `subarea` membership so it is more robust across regions whose administrative relations are modeled differently.
 
 To avoid fetching every configured region, filter by id:
 

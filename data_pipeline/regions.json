@@ -24,7 +24,7 @@
       "name": "London",
       "graphFileName": "london-graph.bin.gz",
       "boundaryFileName": "london-district-boundaries-canvas.json",
-      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q23306\"]",
+      "locationRelation": "rel(175342)[\"name\"=\"Greater London\"][\"wikidata\"=\"Q84\"]",
       "subdivisionAdminLevel": "8",
       "epsg": 27700
     },
