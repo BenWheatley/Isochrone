@@ -107,27 +107,6 @@ def test_routing_query_script_can_scope_extract_to_bbox_tile() -> None:
     )
 
 
-def test_routing_query_script_can_render_bbox_only_scope_for_tiled_fetches() -> None:
-    script_path = DOCS_ROOT / "overpass_routing_query.sh"
-    result = _run_shell_script(
-        script_path,
-        "--location-label",
-        "London",
-        "--location-relation",
-        'rel(175342)["name"="Greater London"]["wikidata"="Q84"]',
-        "--scope",
-        "bbox",
-        "--bbox",
-        "51.000000,-0.400000,51.200000,-0.200000",
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert ".placeRel map_to_area->.searchArea;" not in result.stdout
-    assert "area.searchArea" not in result.stdout
-    assert 'way(51.000000,-0.400000,51.200000,-0.200000)["highway"];' in result.stdout
-    assert 'node(51.000000,-0.400000,51.200000,-0.200000)["barrier"];' in result.stdout
-
-
 def test_boundary_query_script_renders_location_selector_and_admin_level() -> None:
     script_path = DOCS_ROOT / "overpass_boundary_query.sh"
     result = _run_shell_script(
@@ -265,6 +244,4 @@ def test_region_data_fetch_command_fetches_selected_locations_from_external_conf
         for line in fake_log.read_text(encoding="utf-8").splitlines()
         if line.startswith("OUTPUT=")
     ]
-    assert [Path(path).name for path in logged_outputs] == [
-        f".{path.name}.tmp" for path in expected_outputs
-    ]
+    assert logged_outputs == [str(path) for path in expected_outputs]

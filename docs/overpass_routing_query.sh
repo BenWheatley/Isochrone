@@ -7,7 +7,6 @@ Usage:
   overpass_routing_query.sh \
     --location-label "<human readable place>" \
     --location-relation '<Overpass relation selector>' \
-    [--scope 'area|bbox'] \
     [--bbox 'south,west,north,east']
 
 Example:
@@ -20,7 +19,6 @@ EOF
 
 location_label=""
 location_relation=""
-routing_scope="area"
 bbox_clause=""
 
 while (($# > 0)); do
@@ -33,11 +31,6 @@ while (($# > 0)); do
     --location-relation)
       [[ $# -ge 2 ]] || usage
       location_relation="$2"
-      shift 2
-      ;;
-    --scope)
-      [[ $# -ge 2 ]] || usage
-      routing_scope="$2"
       shift 2
       ;;
     --bbox)
@@ -53,35 +46,6 @@ done
 
 [[ -n "${location_label}" ]] || usage
 [[ -n "${location_relation}" ]] || usage
-
-case "${routing_scope}" in
-  area|bbox)
-    ;;
-  *)
-    usage
-    ;;
-esac
-
-if [[ "${routing_scope}" == "bbox" && -z "${bbox_clause}" ]]; then
-  usage
-fi
-
-selector_preamble=""
-way_selector="way(area.searchArea)${bbox_clause}"
-node_selector="node(area.searchArea)${bbox_clause}"
-relation_selector="relation(area.searchArea)${bbox_clause}"
-if [[ "${routing_scope}" == "area" ]]; then
-  selector_preamble=$(cat <<EOF
-/* Deterministic place selector */
-${location_relation}->.placeRel;
-.placeRel map_to_area->.searchArea;
-EOF
-)
-else
-  way_selector="way${bbox_clause}"
-  node_selector="node${bbox_clause}"
-  relation_selector="relation${bbox_clause}"
-fi
 
 cat <<EOF
 /*
@@ -101,24 +65,26 @@ Output: JSON with tags + node references + referenced node coordinates (no dupli
 
 [out:json][timeout:300];
 
-${selector_preamble}
+/* Deterministic place selector */
+${location_relation}->.placeRel;
+.placeRel map_to_area->.searchArea;
 
 (
   /* Core transport geometry */
-  ${way_selector}["highway"];
+  way(area.searchArea)${bbox_clause}["highway"];
 
   /* Connector nodes used by pedestrian routing logic */
-  ${node_selector}["barrier"];
-  ${node_selector}["highway"="crossing"];
-  ${node_selector}["railway"="level_crossing"];
-  ${node_selector}["entrance"];
+  node(area.searchArea)${bbox_clause}["barrier"];
+  node(area.searchArea)${bbox_clause}["highway"="crossing"];
+  node(area.searchArea)${bbox_clause}["railway"="level_crossing"];
+  node(area.searchArea)${bbox_clause}["entrance"];
 
   /* Water public transport (do not treat as walkable edges) */
-  ${way_selector}["route"="ferry"];
-  ${relation_selector}["type"="route"]["route"="ferry"];
-  ${node_selector}["amenity"="ferry_terminal"];
-  ${node_selector}["public_transport"="stop_position"]["ferry"="yes"];
-  ${node_selector}["public_transport"="platform"]["ferry"="yes"];
+  way(area.searchArea)${bbox_clause}["route"="ferry"];
+  relation(area.searchArea)${bbox_clause}["type"="route"]["route"="ferry"];
+  node(area.searchArea)${bbox_clause}["amenity"="ferry_terminal"];
+  node(area.searchArea)${bbox_clause}["public_transport"="stop_position"]["ferry"="yes"];
+  node(area.searchArea)${bbox_clause}["public_transport"="platform"]["ferry"="yes"];
 );
 
 /* Download-friendly output:

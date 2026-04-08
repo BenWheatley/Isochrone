@@ -27,8 +27,6 @@
       "locationRelation": "rel(175342)[\"name\"=\"Greater London\"][\"wikidata\"=\"Q84\"]",
       "subdivisionAdminLevel": "8",
       "subdivisionDiscoveryModes": ["subarea"],
-      "routingQueryScope": "bbox",
-      "routingTileSizeDegrees": 0.2,
       "epsg": 27700
     },
     {
@@ -47,8 +45,6 @@
       "boundaryFileName": "luxembourg-country-district-boundaries-canvas.json",
       "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q32\"]",
       "subdivisionAdminLevel": "8",
-      "routingQueryScope": "bbox",
-      "routingTileSizeDegrees": 0.2,
       "epsg": 2169
     }
   ]

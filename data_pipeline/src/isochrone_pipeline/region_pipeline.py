@@ -28,6 +28,8 @@ BOUNDARY_QUERY_SCRIPT = REPO_ROOT / "docs" / "overpass_boundary_query.sh"
 BoundaryUnits = Literal["meters", "degrees"]
 BoundaryBuilder = Callable[..., dict[str, Any]]
 GraphBuilder = Callable[..., dict[str, Any]]
+QueryRenderer = Callable[..., str]
+OverpassFetcher = Callable[..., None]
 
 
 @dataclass(frozen=True)
@@ -39,8 +41,6 @@ class RegionSpec:
     location_relation: str
     subdivision_admin_level: str
     subdivision_discovery_modes: tuple[str, ...]
-    routing_query_scope: str
-    routing_tile_size_degrees: float | None
     epsg: int
     graph_binary_file_name: str
     graph_summary_file_name: str
@@ -98,14 +98,6 @@ def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
             entry.get("subdivisionDiscoveryModes", ["area", "subarea"]),
             field_name=f"locations[{index}].subdivisionDiscoveryModes",
         )
-        routing_query_scope = _normalize_routing_query_scope(
-            entry.get("routingQueryScope", "area"),
-            field_name=f"locations[{index}].routingQueryScope",
-        )
-        routing_tile_size_degrees = _optional_positive_float(
-            entry.get("routingTileSizeDegrees"),
-            f"locations[{index}].routingTileSizeDegrees",
-        )
         epsg = _require_int(entry.get("epsg"), f"locations[{index}].epsg")
         graph_binary_file_name = entry.get("graphBinaryFileName")
         if graph_binary_file_name is None:
@@ -139,8 +131,6 @@ def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
                 location_relation=location_relation,
                 subdivision_admin_level=subdivision_admin_level,
                 subdivision_discovery_modes=subdivision_discovery_modes,
-                routing_query_scope=routing_query_scope,
-                routing_tile_size_degrees=routing_tile_size_degrees,
                 epsg=epsg,
                 graph_binary_file_name=graph_binary_file_name,
                 graph_summary_file_name=graph_summary_file_name,
@@ -195,8 +185,8 @@ def run_fetch_pipeline(
     max_time_seconds: int,
     routing_query_script: Path = ROUTING_QUERY_SCRIPT,
     boundary_query_script: Path = BOUNDARY_QUERY_SCRIPT,
-    render_query_fn: Callable[..., str] | None = None,
-    fetch_overpass_json_fn: Callable[..., None] | None = None,
+    render_query_fn: QueryRenderer | None = None,
+    fetch_overpass_json_fn: OverpassFetcher | None = None,
     stderr: TextIO | None = None,
 ) -> None:
     stderr = stderr or sys.stderr
@@ -205,36 +195,33 @@ def run_fetch_pipeline(
     fetch_overpass_json_fn = fetch_overpass_json_fn or fetch_overpass_json
 
     for spec in region_specs:
-        if spec.routing_tile_size_degrees is None:
-            _log(stderr, f"Fetching routing extract for {spec.name}")
-            routing_query = render_query_fn(
-                routing_query_script,
-                "--location-label",
-                spec.name,
-                "--location-relation",
-                spec.location_relation,
-                "--scope",
-                spec.routing_query_scope,
-            )
-            fetch_overpass_json_fn(
-                query_text=routing_query,
-                output_path=input_dir / spec.routing_input_file_name,
-                overpass_url=overpass_url,
-                max_time_seconds=max_time_seconds,
-            )
-        else:
-            fetch_tiled_routing_extract(
-                spec=spec,
-                input_dir=input_dir,
-                overpass_url=overpass_url,
-                max_time_seconds=max_time_seconds,
-                routing_query_script=routing_query_script,
-                render_query_fn=render_query_fn,
-                fetch_overpass_json_fn=fetch_overpass_json_fn,
-                stderr=stderr,
-            )
+        _log(stderr, f"Fetching routing extract for {spec.name}")
+        routing_output_path = input_dir / spec.routing_input_file_name
+        routing_query = render_query_fn(
+            routing_query_script,
+            "--location-label",
+            spec.name,
+            "--location-relation",
+            spec.location_relation,
+        )
+        _log_rendered_query(
+            stderr,
+            label=f"routing query for {spec.name}",
+            query_text=routing_query,
+            output_path=routing_output_path,
+            overpass_url=overpass_url,
+            max_time_seconds=max_time_seconds,
+        )
+        fetch_overpass_json_fn(
+            query_text=routing_query,
+            output_path=routing_output_path,
+            overpass_url=overpass_url,
+            max_time_seconds=max_time_seconds,
+            request_label=f"routing extract for {spec.name}",
+        )
 
         _log(stderr, f"Fetching boundary extract for {spec.name}")
+        boundary_output_path = input_dir / spec.boundary_input_file_name
         boundary_query = render_query_fn(
             boundary_query_script,
             "--location-label",
@@ -246,11 +233,20 @@ def run_fetch_pipeline(
             "--subdivision-discovery-modes",
             ",".join(spec.subdivision_discovery_modes),
         )
-        fetch_overpass_json_fn(
+        _log_rendered_query(
+            stderr,
+            label=f"boundary query for {spec.name}",
             query_text=boundary_query,
-            output_path=input_dir / spec.boundary_input_file_name,
+            output_path=boundary_output_path,
             overpass_url=overpass_url,
             max_time_seconds=max_time_seconds,
+        )
+        fetch_overpass_json_fn(
+            query_text=boundary_query,
+            output_path=boundary_output_path,
+            overpass_url=overpass_url,
+            max_time_seconds=max_time_seconds,
+            request_label=f"boundary extract for {spec.name}",
         )
 
 
@@ -327,191 +323,26 @@ def render_query(query_script: Path, *args: str) -> str:
     return result.stdout
 
 
-def fetch_tiled_routing_extract(
-    *,
-    spec: RegionSpec,
-    input_dir: Path,
-    overpass_url: str,
-    max_time_seconds: int,
-    routing_query_script: Path,
-    render_query_fn: Callable[..., str],
-    fetch_overpass_json_fn: Callable[..., None],
-    stderr: TextIO,
-) -> None:
-    tile_size_degrees = spec.routing_tile_size_degrees
-    if tile_size_degrees is None:
-        raise ValueError("routing_tile_size_degrees is required for tiled routing fetch")
-
-    bounds_payload = fetch_overpass_payload(
-        query_text=build_relation_bounds_query(spec.location_relation),
-        overpass_url=overpass_url,
-        max_time_seconds=min(max_time_seconds, 60),
-        fetch_overpass_json_fn=fetch_overpass_json_fn,
-    )
-    bounds = parse_relation_bounds(bounds_payload)
-    bboxes = build_bbox_tiles(bounds, tile_size_degrees)
-    _log(stderr, f"Fetching routing extract for {spec.name} across {len(bboxes)} bbox tiles")
-
-    tile_payloads: list[dict[str, Any]] = []
-    for tile_index, bbox in enumerate(bboxes, start=1):
-        bbox_text = format_bbox(bbox)
-        _log(
-            stderr,
-            f"Fetching routing tile {tile_index}/{len(bboxes)} for {spec.name}: {bbox_text}",
-        )
-        routing_query = render_query_fn(
-            routing_query_script,
-            "--location-label",
-            spec.name,
-            "--location-relation",
-            spec.location_relation,
-            "--scope",
-            spec.routing_query_scope,
-            "--bbox",
-            bbox_text,
-        )
-        tile_payloads.append(
-            fetch_overpass_payload(
-                query_text=routing_query,
-                overpass_url=overpass_url,
-                max_time_seconds=max_time_seconds,
-                fetch_overpass_json_fn=fetch_overpass_json_fn,
-            )
-        )
-
-    merged_payload = merge_overpass_json_payloads(tile_payloads)
-    output_path = input_dir / spec.routing_input_file_name
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(merged_payload), encoding="utf-8")
-
-
-def fetch_overpass_payload(
-    *,
-    query_text: str,
-    overpass_url: str,
-    max_time_seconds: int,
-    fetch_overpass_json_fn: Callable[..., None] | None = None,
-) -> dict[str, Any]:
-    fetch_overpass_json_fn = fetch_overpass_json_fn or fetch_overpass_json
-    with tempfile.TemporaryDirectory(prefix="overpass-payload-") as temp_dir:
-        output_path = Path(temp_dir) / "payload.json"
-        fetch_overpass_json_fn(
-            query_text=query_text,
-            output_path=output_path,
-            overpass_url=overpass_url,
-            max_time_seconds=max_time_seconds,
-        )
-        payload = json.loads(output_path.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            raise ValueError("Overpass payload must be a JSON object")
-        return cast(dict[str, Any], payload)
-
-
-def build_relation_bounds_query(location_relation: str) -> str:
-    return f"[out:json][timeout:60];\n{location_relation};\nout bb;\n"
-
-
-def parse_relation_bounds(payload: dict[str, Any]) -> tuple[float, float, float, float]:
-    elements = payload.get("elements")
-    if not isinstance(elements, list) or not elements:
-        raise ValueError("bounds payload must contain a non-empty elements array")
-
-    parsed_bounds: list[tuple[float, float, float, float]] = []
-    for element in elements:
-        if not isinstance(element, dict):
-            continue
-        bounds = element.get("bounds")
-        if not isinstance(bounds, dict):
-            continue
-        parsed_bounds.append(
-            (
-                _require_coordinate(bounds.get("minlat"), "bounds.minlat"),
-                _require_coordinate(bounds.get("minlon"), "bounds.minlon"),
-                _require_coordinate(bounds.get("maxlat"), "bounds.maxlat"),
-                _require_coordinate(bounds.get("maxlon"), "bounds.maxlon"),
-            )
-        )
-
-    if not parsed_bounds:
-        raise ValueError("bounds payload must include at least one bounds object")
-
-    south = min(bound[0] for bound in parsed_bounds)
-    west = min(bound[1] for bound in parsed_bounds)
-    north = max(bound[2] for bound in parsed_bounds)
-    east = max(bound[3] for bound in parsed_bounds)
-    if south >= north or west >= east:
-        raise ValueError("bounds payload contains an invalid bounding box")
-    return (south, west, north, east)
-
-
-def build_bbox_tiles(
-    bounds: tuple[float, float, float, float],
-    tile_size_degrees: float,
-) -> list[tuple[float, float, float, float]]:
-    south, west, north, east = bounds
-    if tile_size_degrees <= 0:
-        raise ValueError("tile_size_degrees must be positive")
-
-    bboxes: list[tuple[float, float, float, float]] = []
-    tile_south = south
-    while tile_south < north:
-        tile_north = min(tile_south + tile_size_degrees, north)
-        tile_west = west
-        while tile_west < east:
-            tile_east = min(tile_west + tile_size_degrees, east)
-            bboxes.append((tile_south, tile_west, tile_north, tile_east))
-            tile_west = tile_east
-        tile_south = tile_north
-    return bboxes
-
-
-def format_bbox(bbox: tuple[float, float, float, float]) -> str:
-    south, west, north, east = bbox
-    return f"{south:.6f},{west:.6f},{north:.6f},{east:.6f}"
-
-
-def merge_overpass_json_payloads(payloads: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    merged_payload: dict[str, Any] = {}
-    merged_elements: list[dict[str, Any]] = []
-    merged_by_key: dict[tuple[str, int], dict[str, Any]] = {}
-
-    for payload in payloads:
-        if not merged_payload:
-            for metadata_key in ("version", "generator", "osm3s"):
-                if metadata_key in payload:
-                    merged_payload[metadata_key] = payload[metadata_key]
-
-        elements = payload.get("elements")
-        if not isinstance(elements, list):
-            raise ValueError("Overpass payload must contain an elements array")
-        for element in elements:
-            if not isinstance(element, dict):
-                raise ValueError("Overpass elements must be objects")
-            element_type = element.get("type")
-            element_id = element.get("id")
-            if not isinstance(element_type, str) or not isinstance(element_id, int):
-                raise ValueError("Overpass elements must include string type and integer id")
-            key = (element_type, element_id)
-            existing = merged_by_key.get(key)
-            if existing is None:
-                copied = _copy_overpass_element(element)
-                merged_by_key[key] = copied
-                merged_elements.append(copied)
-            else:
-                _merge_overpass_element(existing, element)
-
-    merged_payload["elements"] = merged_elements
-    return merged_payload
-
-
 def fetch_overpass_json(
     *,
     query_text: str,
     output_path: Path,
     overpass_url: str,
     max_time_seconds: int,
+    stderr: TextIO | None = None,
+    request_label: str | None = None,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if stderr is not None:
+        _log_rendered_query(
+            stderr,
+            label=request_label or f"Overpass request for {output_path.name}",
+            query_text=query_text,
+            output_path=output_path,
+            overpass_url=overpass_url,
+            max_time_seconds=max_time_seconds,
+        )
+
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
@@ -521,8 +352,6 @@ def fetch_overpass_json(
     ) as temp_query:
         temp_query.write(query_text)
         temp_query_path = Path(temp_query.name)
-
-    temp_output_path = output_path.parent / f".{output_path.name}.tmp"
 
     try:
         result = subprocess.run(
@@ -536,25 +365,115 @@ def fetch_overpass_json(
                 f"data@{temp_query_path}",
                 overpass_url,
                 "-o",
-                str(temp_output_path),
+                str(output_path),
             ],
             check=False,
             text=True,
             capture_output=True,
         )
         if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or f"curl failed for {output_path}")
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_output_path.replace(output_path)
+            output_path.unlink(missing_ok=True)
+            debug_bundle = _write_failed_overpass_debug_bundle(
+                output_path=output_path,
+                query_text=query_text,
+                curl_stdout=result.stdout,
+                curl_stderr=result.stderr,
+            )
+            raise RuntimeError(
+                _format_overpass_failure_message(
+                    request_label=request_label or output_path.name,
+                    output_path=output_path,
+                    overpass_url=overpass_url,
+                    max_time_seconds=max_time_seconds,
+                    curl_exit_code=result.returncode,
+                    debug_bundle=debug_bundle,
+                )
+            )
+        _remove_failed_overpass_debug_bundle(output_path)
     finally:
         temp_query_path.unlink(missing_ok=True)
-        temp_output_path.unlink(missing_ok=True)
 
 
 def gzip_file(input_path: Path, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with input_path.open("rb") as source, gzip.open(output_path, "wb") as target:
         shutil.copyfileobj(source, target)
+
+
+def _log_rendered_query(
+    stderr: TextIO,
+    *,
+    label: str,
+    query_text: str,
+    output_path: Path,
+    overpass_url: str,
+    max_time_seconds: int,
+) -> None:
+    _log(stderr, f"Rendered {label}")
+    _log(stderr, f"Overpass URL: {overpass_url}")
+    _log(stderr, f"Output path: {output_path}")
+    _log(stderr, f"Timeout seconds: {max_time_seconds}")
+    _log(stderr, f"Query bytes: {len(query_text.encode('utf-8'))}")
+    _log(stderr, f"--- begin query: {label} ---")
+    stderr.write(query_text)
+    if not query_text.endswith("\n"):
+        stderr.write("\n")
+    _log(stderr, f"--- end query: {label} ---")
+
+
+def _write_failed_overpass_debug_bundle(
+    *,
+    output_path: Path,
+    query_text: str,
+    curl_stdout: str,
+    curl_stderr: str,
+) -> dict[str, Path]:
+    query_path = output_path.with_name(f"{output_path.name}.failed-query.ql")
+    stderr_path = output_path.with_name(f"{output_path.name}.failed-curl-stderr.txt")
+    query_path.write_text(query_text, encoding="utf-8")
+    stderr_path.write_text(curl_stderr, encoding="utf-8")
+    debug_bundle = {
+        "query": query_path,
+        "stderr": stderr_path,
+    }
+    if curl_stdout:
+        stdout_path = output_path.with_name(f"{output_path.name}.failed-curl-stdout.txt")
+        stdout_path.write_text(curl_stdout, encoding="utf-8")
+        debug_bundle["stdout"] = stdout_path
+    return debug_bundle
+
+
+def _remove_failed_overpass_debug_bundle(output_path: Path) -> None:
+    for suffix in (
+        ".failed-query.ql",
+        ".failed-curl-stderr.txt",
+        ".failed-curl-stdout.txt",
+    ):
+        output_path.with_name(f"{output_path.name}{suffix}").unlink(missing_ok=True)
+
+
+def _format_overpass_failure_message(
+    *,
+    request_label: str,
+    output_path: Path,
+    overpass_url: str,
+    max_time_seconds: int,
+    curl_exit_code: int,
+    debug_bundle: dict[str, Path],
+) -> str:
+    message_lines = [
+        f"Overpass request failed for {request_label}",
+        f"output_path={output_path}",
+        f"overpass_url={overpass_url}",
+        f"max_time_seconds={max_time_seconds}",
+        f"curl_exit_code={curl_exit_code}",
+        f"saved_query={debug_bundle['query']}",
+        f"saved_curl_stderr={debug_bundle['stderr']}",
+    ]
+    stdout_path = debug_bundle.get("stdout")
+    if stdout_path is not None:
+        message_lines.append(f"saved_curl_stdout={stdout_path}")
+    return "\n".join(message_lines)
 
 
 def main(
@@ -696,57 +615,6 @@ def _normalize_subdivision_discovery_modes(value: object, *, field_name: str) ->
     if not normalized_modes:
         raise ValueError(f"{field_name} must include at least one supported mode")
     return tuple(normalized_modes)
-
-
-def _normalize_routing_query_scope(value: object, *, field_name: str) -> str:
-    scope = _require_non_empty_string(value, field_name)
-    if scope not in {"area", "bbox"}:
-        raise ValueError(f"{field_name} must be one of: area, bbox")
-    return scope
-
-
-def _optional_positive_float(value: object, field_name: str) -> float | None:
-    if value is None:
-        return None
-    parsed = _require_float(value, field_name)
-    if parsed <= 0:
-        raise ValueError(f"{field_name} must be positive")
-    return parsed
-
-
-def _require_coordinate(value: object, field_name: str) -> float:
-    return _require_float(value, field_name)
-
-
-def _copy_overpass_element(element: dict[str, Any]) -> dict[str, Any]:
-    copied: dict[str, Any] = {}
-    for key, value in element.items():
-        if isinstance(value, dict):
-            copied[key] = dict(value)
-        elif isinstance(value, list):
-            copied[key] = list(value)
-        else:
-            copied[key] = value
-    return copied
-
-
-def _merge_overpass_element(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
-    for key, value in incoming.items():
-        if key == "tags" and isinstance(value, dict):
-            existing_tags = existing.get("tags")
-            if not isinstance(existing_tags, dict):
-                existing["tags"] = dict(value)
-            else:
-                for tag_key, tag_value in value.items():
-                    existing_tags.setdefault(tag_key, tag_value)
-            continue
-        if key not in existing:
-            if isinstance(value, list):
-                existing[key] = list(value)
-            elif isinstance(value, dict):
-                existing[key] = dict(value)
-            else:
-                existing[key] = value
 
 
 def _require_int(value: object, field_name: str) -> int:

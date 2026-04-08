@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import subprocess
 from io import StringIO
 from pathlib import Path
 
@@ -9,9 +10,9 @@ from isochrone_pipeline.region_pipeline import (
     DEFAULT_LOCATIONS_FILE,
     RegionSpec,
     build_location_manifest,
+    fetch_overpass_json,
     load_region_specs,
     main,
-    parse_relation_bounds,
     run_build_pipeline,
     run_fetch_pipeline,
 )
@@ -49,8 +50,6 @@ def test_load_region_specs_reads_external_json_config(tmp_path: Path) -> None:
             location_relation='rel["boundary"="administrative"]["wikidata"="Q90"]',
             subdivision_admin_level="9",
             subdivision_discovery_modes=("area", "subarea"),
-            routing_query_scope="area",
-            routing_tile_size_degrees=None,
             epsg=2154,
             graph_binary_file_name="paris-graph.bin",
             graph_summary_file_name="paris-graph-summary.json",
@@ -71,8 +70,6 @@ def test_build_location_manifest_strips_pipeline_only_fields() -> None:
                 location_relation='rel["boundary"="administrative"]["wikidata"="Q90"]',
                 subdivision_admin_level="9",
                 subdivision_discovery_modes=("area", "subarea"),
-                routing_query_scope="area",
-                routing_tile_size_degrees=None,
                 epsg=2154,
                 graph_binary_file_name="paris-graph.bin",
                 graph_summary_file_name="paris-graph-summary.json",
@@ -154,8 +151,6 @@ def test_run_build_pipeline_writes_outputs_and_returns_manifest(
                 location_relation='rel["boundary"="administrative"]["wikidata"="Q90"]',
                 subdivision_admin_level="9",
                 subdivision_discovery_modes=("area", "subarea"),
-                routing_query_scope="area",
-                routing_tile_size_degrees=None,
                 epsg=2154,
                 graph_binary_file_name="paris-graph.bin",
                 graph_summary_file_name="paris-graph-summary.json",
@@ -203,8 +198,6 @@ def test_build_cli_writes_ui_manifest_json_to_stdout(
                         "locationRelation": 'rel["boundary"="administrative"]["wikidata"="Q90"]',
                         "subdivisionAdminLevel": "9",
                         "subdivisionDiscoveryModes": ["subarea"],
-                        "routingQueryScope": "bbox",
-                        "routingTileSizeDegrees": 0.25,
                         "epsg": 2154,
                     }
                 ]
@@ -273,66 +266,32 @@ def test_default_regions_config_uses_deterministic_greater_london_relation() -> 
     assert london.location_relation == 'rel(175342)["name"="Greater London"]["wikidata"="Q84"]'
     assert london.subdivision_admin_level == "8"
     assert london.subdivision_discovery_modes == ("subarea",)
-    assert london.routing_query_scope == "bbox"
-    assert london.routing_tile_size_degrees == 0.2
-    luxembourg = next(spec for spec in specs if spec.id == "luxembourg-country")
-    assert luxembourg.routing_query_scope == "bbox"
-    assert luxembourg.routing_tile_size_degrees == 0.2
 
 
-def test_parse_relation_bounds_unions_multiple_matching_relation_bounds() -> None:
-    bounds = parse_relation_bounds(
-        {
-            "elements": [
-                {
-                    "type": "relation",
-                    "id": 1,
-                    "bounds": {"minlat": 51.1, "minlon": -0.3, "maxlat": 51.2, "maxlon": -0.2},
-                },
-                {
-                    "type": "relation",
-                    "id": 2,
-                    "bounds": {"minlat": 51.0, "minlon": -0.4, "maxlat": 51.3, "maxlon": -0.1},
-                },
-            ]
-        }
-    )
-
-    assert bounds == (51.0, -0.4, 51.3, -0.1)
-
-
-def test_run_fetch_pipeline_tiles_routing_extracts_and_merges_duplicate_elements(
+def test_run_fetch_pipeline_logs_rendered_queries_before_fetching(
     tmp_path: Path,
 ) -> None:
     input_dir = tmp_path / "input"
+    stderr = StringIO()
+    fetch_calls: list[tuple[str, Path]] = []
+
     spec = RegionSpec(
-        id="london",
-        name="London",
-        graph_file_name="london-graph.bin.gz",
-        boundary_file_name="london-district-boundaries-canvas.json",
-        location_relation='rel(175342)["name"="Greater London"]["wikidata"="Q84"]',
-        subdivision_admin_level="8",
-        subdivision_discovery_modes=("subarea",),
-        routing_query_scope="bbox",
-        routing_tile_size_degrees=0.2,
-        epsg=27700,
-        graph_binary_file_name="london-graph.bin",
-        graph_summary_file_name="london-graph-summary.json",
+        id="paris",
+        name="Paris",
+        graph_file_name="paris-graph.bin.gz",
+        boundary_file_name="paris-district-boundaries-canvas.json",
+        location_relation='rel["boundary"="administrative"]["wikidata"="Q90"]',
+        subdivision_admin_level="9",
+        subdivision_discovery_modes=("area", "subarea"),
+        epsg=2154,
+        graph_binary_file_name="paris-graph.bin",
+        graph_summary_file_name="paris-graph-summary.json",
         boundary_resolution=25.0,
         boundary_units="meters",
     )
 
-    rendered_bboxes: list[str] = []
-
     def fake_render_query(query_script: Path, *args: str) -> str:
-        if query_script.name == "overpass_routing_query.sh":
-            scope_index = args.index("--scope") + 1
-            assert args[scope_index] == "bbox"
-            bbox_index = args.index("--bbox") + 1
-            bbox_text = args[bbox_index]
-            rendered_bboxes.append(bbox_text)
-            return f"routing:{bbox_text}"
-        return "boundary"
+        return f"/* {query_script.name} */\n" + " ".join(args) + "\n"
 
     def fake_fetch_overpass_json(
         *,
@@ -340,103 +299,88 @@ def test_run_fetch_pipeline_tiles_routing_extracts_and_merges_duplicate_elements
         output_path: Path,
         overpass_url: str,
         max_time_seconds: int,
+        stderr=None,
+        request_label: str | None = None,
     ) -> None:
-        del overpass_url, max_time_seconds
-        if "out bb;" in query_text:
-            output_path.write_text(
-                json.dumps(
-                    {
-                        "elements": [
-                            {
-                                "type": "relation",
-                                "id": 175342,
-                                "bounds": {
-                                    "minlat": 51.0,
-                                    "minlon": -0.4,
-                                    "maxlat": 51.2,
-                                    "maxlon": -0.1,
-                                },
-                            }
-                        ]
-                    }
-                ),
-                encoding="utf-8",
-            )
-            return
-        if query_text == "routing:51.000000,-0.400000,51.200000,-0.200000":
-            output_path.write_text(
-                json.dumps(
-                    {
-                        "elements": [
-                            {
-                                "type": "node",
-                                "id": 1,
-                                "lat": 51.0,
-                                "lon": -0.3,
-                                "tags": {"barrier": "gate"},
-                            },
-                            {
-                                "type": "way",
-                                "id": 10,
-                                "nodes": [1, 2],
-                                "tags": {"highway": "residential"},
-                            },
-                        ]
-                    }
-                ),
-                encoding="utf-8",
-            )
-            return
-        if query_text == "routing:51.000000,-0.200000,51.200000,-0.100000":
-            output_path.write_text(
-                json.dumps(
-                    {
-                        "elements": [
-                            {"type": "node", "id": 1, "lat": 51.0, "lon": -0.3},
-                            {"type": "node", "id": 2, "lat": 51.1, "lon": -0.15},
-                            {
-                                "type": "way",
-                                "id": 11,
-                                "nodes": [1, 2],
-                                "tags": {"highway": "primary"},
-                            },
-                        ]
-                    }
-                ),
-                encoding="utf-8",
-            )
-            return
-        if query_text == "boundary":
-            output_path.write_text('{"elements": []}\n', encoding="utf-8")
-            return
-        raise AssertionError(f"unexpected query: {query_text}")
+        del overpass_url, max_time_seconds, stderr
+        current_logs = stderr_buffer.getvalue()
+        assert query_text in current_logs
+        assert str(output_path) in current_logs
+        assert request_label is not None
+        fetch_calls.append((request_label, output_path))
 
+    stderr_buffer = stderr
     run_fetch_pipeline(
         [spec],
         input_dir=input_dir,
-        overpass_url="https://example.test/api/interpreter",
+        overpass_url="https://overpass.example/api/interpreter",
         max_time_seconds=600,
         render_query_fn=fake_render_query,
         fetch_overpass_json_fn=fake_fetch_overpass_json,
+        stderr=stderr,
     )
 
-    assert rendered_bboxes == [
-        "51.000000,-0.400000,51.200000,-0.200000",
-        "51.000000,-0.200000,51.200000,-0.100000",
+    log_text = stderr.getvalue()
+    assert "Rendered routing query for Paris" in log_text
+    assert "Rendered boundary query for Paris" in log_text
+    assert "Overpass URL: https://overpass.example/api/interpreter" in log_text
+    assert "Output path: " + str(input_dir / "paris-routing.osm.json") in log_text
+    assert "Output path: " + str(input_dir / "paris-district-boundaries.osm.json") in log_text
+    assert fetch_calls == [
+        ("routing extract for Paris", input_dir / "paris-routing.osm.json"),
+        ("boundary extract for Paris", input_dir / "paris-district-boundaries.osm.json"),
     ]
 
-    routing_payload = json.loads(
-        (input_dir / spec.routing_input_file_name).read_text(encoding="utf-8")
+
+def test_fetch_overpass_json_failure_writes_debug_bundle(tmp_path: Path, monkeypatch) -> None:
+    output_path = tmp_path / "london-routing.osm.json"
+    stderr = StringIO()
+
+    def fake_run(
+        args: list[str],
+        *,
+        check: bool,
+        text: bool,
+        capture_output: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        del check, text, capture_output
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=22,
+            stdout="",
+            stderr="curl: (22) The requested URL returned error: 504\n",
+        )
+
+    monkeypatch.setattr("isochrone_pipeline.region_pipeline.subprocess.run", fake_run)
+
+    try:
+        fetch_overpass_json(
+            query_text='[out:json];way["highway"](0,0,1,1);out body qt;',
+            output_path=output_path,
+            overpass_url="https://overpass.example/api/interpreter",
+            max_time_seconds=600,
+            stderr=stderr,
+            request_label="routing extract for London",
+        )
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected fetch_overpass_json to fail")
+
+    assert "routing extract for London" in message
+    assert "curl_exit_code=22" in message
+    assert "https://overpass.example/api/interpreter" in message
+    assert str(output_path) in message
+    assert str(output_path.with_name("london-routing.osm.json.failed-query.ql")) in message
+    assert (
+        output_path.with_name("london-routing.osm.json.failed-query.ql").read_text(encoding="utf-8")
+        == '[out:json];way["highway"](0,0,1,1);out body qt;'
     )
-    assert routing_payload["elements"] == [
-        {"type": "node", "id": 1, "lat": 51.0, "lon": -0.3, "tags": {"barrier": "gate"}},
-        {
-            "type": "way",
-            "id": 10,
-            "nodes": [1, 2],
-            "tags": {"highway": "residential"},
-        },
-        {"type": "node", "id": 2, "lat": 51.1, "lon": -0.15},
-        {"type": "way", "id": 11, "nodes": [1, 2], "tags": {"highway": "primary"}},
-    ]
-    assert (input_dir / spec.boundary_input_file_name).is_file()
+    assert (
+        output_path.with_name("london-routing.osm.json.failed-curl-stderr.txt").read_text(
+            encoding="utf-8"
+        )
+        == "curl: (22) The requested URL returned error: 504\n"
+    )
+    assert not output_path.exists()
+    assert "Rendered routing extract for London" in stderr.getvalue()
