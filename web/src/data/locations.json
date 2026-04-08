@@ -23,6 +23,12 @@
       "name": "Luxembourg (country)",
       "graphFileName": "luxembourg-country-graph.bin.gz",
       "boundaryFileName": "luxembourg-country-district-boundaries-canvas.json"
+    },
+    {
+      "id": "london",
+      "name": "London",
+      "graphFileName": "london-graph.bin.gz",
+      "boundaryFileName": "london-district-boundaries-canvas.json"
     }
   ]
 }
