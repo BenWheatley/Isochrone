@@ -11,6 +11,12 @@
       "name": "Paris",
       "graphFileName": "paris-graph.bin.gz",
       "boundaryFileName": "paris-district-boundaries-canvas.json"
+    },
+    {
+      "id": "rome",
+      "name": "Rome",
+      "graphFileName": "rome-graph.bin.gz",
+      "boundaryFileName": "rome-district-boundaries-canvas.json"
     }
   ]
 }
