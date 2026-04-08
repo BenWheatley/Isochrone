@@ -67,6 +67,47 @@ SAMPLE_OVERPASS_REF_WAYS = {
     ]
 }
 
+SAMPLE_OVERPASS_REF_WAYS_WITH_NODE_COORDS = {
+    "elements": [
+        {
+            "type": "relation",
+            "id": 103,
+            "tags": {
+                "boundary": "administrative",
+                "type": "boundary",
+                "admin_level": "9",
+                "name": "Trastevere",
+            },
+            "members": [
+                {"type": "way", "ref": 9100, "role": "outer"},
+            ],
+        },
+        {
+            "type": "way",
+            "id": 9100,
+            "nodes": [7001, 7002, 7003],
+        },
+        {
+            "type": "node",
+            "id": 7001,
+            "lat": 41.8890,
+            "lon": 12.4680,
+        },
+        {
+            "type": "node",
+            "id": 7002,
+            "lat": 41.8900,
+            "lon": 12.4690,
+        },
+        {
+            "type": "node",
+            "id": 7003,
+            "lat": 41.8910,
+            "lon": 12.4700,
+        },
+    ]
+}
+
 SAMPLE_OVERPASS_NO_GEOMETRY = {
     "elements": [
         {
@@ -139,6 +180,23 @@ def test_extract_overpass_boundary_features_uses_way_refs_with_geometry() -> Non
     assert features[0].relation_id == 101
     assert len(features[0].paths_lat_lon) == 1
     assert len(features[0].paths_lat_lon[0]) == 3
+
+
+def test_extract_overpass_boundary_features_reconstructs_way_geometry_from_node_coords() -> None:
+    features = extract_overpass_boundary_features(
+        SAMPLE_OVERPASS_REF_WAYS_WITH_NODE_COORDS,
+        admin_level="9",
+    )
+
+    assert len(features) == 1
+    assert features[0].relation_id == 103
+    assert features[0].paths_lat_lon == (
+        (
+            (41.8890, 12.4680),
+            (41.8900, 12.4690),
+            (41.8910, 12.4700),
+        ),
+    )
 
 
 def test_simplify_overpass_boundaries_requires_geometry() -> None:

@@ -22,8 +22,8 @@ DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 DEFAULT_MAX_TIME_SECONDS = 600
 DEFAULT_BOUNDARY_RESOLUTION = 25.0
 DEFAULT_BOUNDARY_UNITS = "meters"
-ROUTING_QUERY_SCRIPT = REPO_ROOT / "docs" / "berlin_overpass_routing_query.ql"
-BOUNDARY_QUERY_SCRIPT = REPO_ROOT / "docs" / "berlin_district_boundaries_query.ql"
+ROUTING_QUERY_SCRIPT = REPO_ROOT / "docs" / "overpass_routing_query.sh"
+BOUNDARY_QUERY_SCRIPT = REPO_ROOT / "docs" / "overpass_boundary_query.sh"
 
 BoundaryUnits = Literal["meters", "degrees"]
 BoundaryBuilder = Callable[..., dict[str, Any]]
@@ -274,8 +274,12 @@ def run_build_pipeline(
 
 
 def render_query(query_script: Path, *args: str) -> str:
+    bash_path = shutil.which("bash")
+    if bash_path is None:
+        raise RuntimeError("bash is required to render query scripts")
+
     result = subprocess.run(
-        ["zsh", str(query_script), *args],
+        [bash_path, str(query_script), *args],
         check=False,
         capture_output=True,
         text=True,

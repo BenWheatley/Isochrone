@@ -32,8 +32,6 @@ Run:
 
 The location list is loaded from `data_pipeline/regions.json`.
 
-For large routing extracts, a location can optionally set `routingTileSizeDegrees` in `data_pipeline/regions.json`. When present, Stage 1 first resolves the place-relation bounding box, fetches the routing extract in bbox tiles, and merges the Overpass `elements` by `(type, id)` before writing `<slug>-routing.osm.json`.
-
 Outputs go to `data_pipeline/input/` and are named:
 - `<slug>-routing.osm.json`
 - `<slug>-district-boundaries.osm.json`
@@ -43,6 +41,17 @@ Examples:
 - `data_pipeline/input/paris-district-boundaries.osm.json`
 
 This stage only downloads raw Overpass API responses.
+
+Query templates used by this stage:
+- `docs/overpass_routing_query.sh`
+- `docs/overpass_boundary_query.sh`
+
+Boundary extracts are written in a download-friendly shape:
+- relations with member refs
+- ways with node refs
+- nodes with coordinates
+
+The build step reconstructs boundary polylines from those refs, so fetch does not depend on inline way geometry being present in the Overpass response.
 
 To avoid fetching every configured region, filter by id:
 

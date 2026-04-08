@@ -7,18 +7,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+from isochrone_pipeline.region_pipeline import render_query
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS_ROOT = REPO_ROOT / "docs"
 PIPELINE_ROOT = REPO_ROOT / "data_pipeline"
 
 
-def _run_zsh_script(
+def _run_shell_script(
     script_path: Path,
     *args: str,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["zsh", str(script_path), *args],
+        ["bash", str(script_path), *args],
         check=False,
         capture_output=True,
         text=True,
@@ -42,9 +44,33 @@ def _run_python_script(
     )
 
 
+def test_region_pipeline_render_query_uses_bash_interpreter(monkeypatch, tmp_path: Path) -> None:
+    script_path = tmp_path / "query.ql"
+    script_path.write_text("#!/bin/sh\necho ok\n", encoding="utf-8")
+
+    calls: list[list[str]] = []
+
+    def fake_run(
+        args: list[str],
+        *,
+        check: bool,
+        capture_output: bool,
+        text: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        del check, capture_output, text
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr("isochrone_pipeline.region_pipeline.shutil.which", lambda name: "/bin/bash")
+    monkeypatch.setattr("isochrone_pipeline.region_pipeline.subprocess.run", fake_run)
+
+    assert render_query(script_path) == "ok\n"
+    assert calls == [["/bin/bash", str(script_path)]]
+
+
 def test_routing_query_script_renders_location_selector() -> None:
-    script_path = DOCS_ROOT / "berlin_overpass_routing_query.ql"
-    result = _run_zsh_script(
+    script_path = DOCS_ROOT / "overpass_routing_query.sh"
+    result = _run_shell_script(
         script_path,
         "--location-label",
         "Paris",
@@ -60,8 +86,8 @@ def test_routing_query_script_renders_location_selector() -> None:
 
 
 def test_routing_query_script_can_scope_extract_to_bbox_tile() -> None:
-    script_path = DOCS_ROOT / "berlin_overpass_routing_query.ql"
-    result = _run_zsh_script(
+    script_path = DOCS_ROOT / "overpass_routing_query.sh"
+    result = _run_shell_script(
         script_path,
         "--location-label",
         "London",
@@ -82,8 +108,8 @@ def test_routing_query_script_can_scope_extract_to_bbox_tile() -> None:
 
 
 def test_boundary_query_script_renders_location_selector_and_admin_level() -> None:
-    script_path = DOCS_ROOT / "berlin_district_boundaries_query.ql"
-    result = _run_zsh_script(
+    script_path = DOCS_ROOT / "overpass_boundary_query.sh"
+    result = _run_shell_script(
         script_path,
         "--location-label",
         "Luxembourg (country)",
@@ -97,7 +123,8 @@ def test_boundary_query_script_renders_location_selector_and_admin_level() -> No
     assert "Luxembourg (country) subdivision boundaries" in result.stdout
     assert 'rel["boundary"="administrative"]["wikidata"="Q32"]->.placeRel;' in result.stdout
     assert '["admin_level"="8"]->.subdivisions;' in result.stdout
-    assert "out body geom qt;" in result.stdout
+    assert "out body qt;" in result.stdout
+    assert "out skel qt;" in result.stdout
 
 
 def test_region_data_fetch_command_fetches_selected_locations_from_external_config(

@@ -1,4 +1,4 @@
-"""Extract and simplify Berlin administrative boundaries for direct canvas rendering."""
+"""Extract and simplify administrative boundaries for direct canvas rendering."""
 
 from __future__ import annotations
 
@@ -29,7 +29,24 @@ def extract_overpass_boundary_features(
         raise ValueError("Overpass JSON must contain an 'elements' list")
 
     features: list[BoundaryFeature] = []
+    node_lat_lon_by_id: dict[int, tuple[float, float]] = {}
     way_geometry_by_id: dict[int, tuple[tuple[float, float], ...]] = {}
+
+    for element in elements:
+        if not isinstance(element, dict):
+            continue
+        if element.get("type") != "node":
+            continue
+
+        node_id = element.get("id")
+        lat = element.get("lat")
+        lon = element.get("lon")
+        if (
+            isinstance(node_id, int)
+            and isinstance(lat, int | float)
+            and isinstance(lon, int | float)
+        ):
+            node_lat_lon_by_id[node_id] = (float(lat), float(lon))
 
     for element in elements:
         if not isinstance(element, dict):
@@ -42,6 +59,16 @@ def extract_overpass_boundary_features(
             continue
 
         way_geometry = _parse_geometry_points(element.get("geometry"))
+        if len(way_geometry) < 2:
+            node_refs = element.get("nodes")
+            if isinstance(node_refs, list):
+                reconstructed_geometry = tuple(
+                    node_lat_lon_by_id[node_id]
+                    for node_id in node_refs
+                    if isinstance(node_id, int) and node_id in node_lat_lon_by_id
+                )
+                if len(reconstructed_geometry) == len(node_refs):
+                    way_geometry = reconstructed_geometry
         if len(way_geometry) >= 2:
             way_geometry_by_id[way_id] = way_geometry
 
@@ -169,8 +196,8 @@ def simplify_overpass_boundaries_for_canvas(
     if not features:
         raise ValueError(
             "No administrative boundary geometry found. "
-            "Ensure Overpass output includes relation member way geometry "
-            "(for example: '(.districts;>;); out body geom qt;')."
+            "Ensure Overpass output includes relation member ways plus either way geometry "
+            "or node coordinates (for example: '(.districts;>;); out body qt; >; out skel qt;')."
         )
 
     if units == "meters":

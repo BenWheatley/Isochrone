@@ -1,15 +1,16 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 set -euo pipefail
 
 usage() {
   cat <<'EOF' >&2
 Usage:
-  berlin_overpass_routing_query.ql \
+  overpass_routing_query.sh \
     --location-label "<human readable place>" \
-    --location-relation '<Overpass relation selector>'
+    --location-relation '<Overpass relation selector>' \
+    [--bbox 'south,west,north,east']
 
 Example:
-  berlin_overpass_routing_query.ql \
+  overpass_routing_query.sh \
     --location-label "Berlin" \
     --location-relation 'rel(62422)["name"="Berlin"]["wikidata"="Q64"]'
 EOF
@@ -18,6 +19,7 @@ EOF
 
 location_label=""
 location_relation=""
+bbox_clause=""
 
 while (($# > 0)); do
   case "$1" in
@@ -29,6 +31,11 @@ while (($# > 0)); do
     --location-relation)
       [[ $# -ge 2 ]] || usage
       location_relation="$2"
+      shift 2
+      ;;
+    --bbox)
+      [[ $# -ge 2 ]] || usage
+      bbox_clause="($2)"
       shift 2
       ;;
     *)
@@ -44,9 +51,8 @@ cat <<EOF
 /*
 ${location_label} routing-focused OSM extraction (no polygons)
 
-Legacy filename note:
-- this query script used to be Berlin-only
-- it is now parameterized by location relation selector
+This query is location-agnostic. It renders a routing extract for the relation
+selector you pass in, optionally constrained to a bbox tile for large regions.
 
 Includes:
 - all highway ways (roads, footpaths, cycleways, etc.)
@@ -65,20 +71,20 @@ ${location_relation}->.placeRel;
 
 (
   /* Core transport geometry */
-  way(area.searchArea)["highway"];
+  way(area.searchArea)${bbox_clause}["highway"];
 
   /* Connector nodes used by pedestrian routing logic */
-  node(area.searchArea)["barrier"];
-  node(area.searchArea)["highway"="crossing"];
-  node(area.searchArea)["railway"="level_crossing"];
-  node(area.searchArea)["entrance"];
+  node(area.searchArea)${bbox_clause}["barrier"];
+  node(area.searchArea)${bbox_clause}["highway"="crossing"];
+  node(area.searchArea)${bbox_clause}["railway"="level_crossing"];
+  node(area.searchArea)${bbox_clause}["entrance"];
 
   /* Water public transport (do not treat as walkable edges) */
-  way(area.searchArea)["route"="ferry"];
-  relation(area.searchArea)["type"="route"]["route"="ferry"];
-  node(area.searchArea)["amenity"="ferry_terminal"];
-  node(area.searchArea)["public_transport"="stop_position"]["ferry"="yes"];
-  node(area.searchArea)["public_transport"="platform"]["ferry"="yes"];
+  way(area.searchArea)${bbox_clause}["route"="ferry"];
+  relation(area.searchArea)${bbox_clause}["type"="route"]["route"="ferry"];
+  node(area.searchArea)${bbox_clause}["amenity"="ferry_terminal"];
+  node(area.searchArea)${bbox_clause}["public_transport"="stop_position"]["ferry"="yes"];
+  node(area.searchArea)${bbox_clause}["public_transport"="platform"]["ferry"="yes"];
 );
 
 /* Download-friendly output:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Simplify Overpass district-boundary JSON and emit canvas-ready geometry."""
+"""Simplify Overpass administrative-boundary JSON and emit canvas-ready geometry."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def main() -> int:
         "--input",
         type=Path,
         required=True,
-        help="Path to Overpass JSON input (from berlin_district_boundaries_query.ql).",
+        help="Path to Overpass JSON input (for example from docs/overpass_boundary_query.sh).",
     )
     parser.add_argument(
         "--output",
@@ -44,7 +44,7 @@ def main() -> int:
     parser.add_argument(
         "--admin-level",
         default="9",
-        help="Administrative level filter (default: 9 for Berlin districts).",
+        help="Administrative level filter (default: 9).",
     )
     args = parser.parse_args()
 

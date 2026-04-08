@@ -1,16 +1,16 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 set -euo pipefail
 
 usage() {
   cat <<'EOF' >&2
 Usage:
-  berlin_district_boundaries_query.ql \
+  overpass_boundary_query.sh \
     --location-label "<human readable place>" \
     --location-relation '<Overpass relation selector>' \
     --subdivision-admin-level '<osm admin_level integer>'
 
 Example:
-  berlin_district_boundaries_query.ql \
+  overpass_boundary_query.sh \
     --location-label "Berlin" \
     --location-relation 'rel(62422)["name"="Berlin"]["wikidata"="Q64"]' \
     --subdivision-admin-level 9
@@ -55,9 +55,12 @@ cat <<EOF
 /*
 ${location_label} subdivision boundaries
 
-Legacy filename note:
-- this query script used to be Berlin-only
-- it is now parameterized by place relation selector and subdivision admin level
+This query is location-agnostic. It renders administrative subdivision boundaries
+for the relation selector and admin level you pass in.
+
+Output: JSON with relation members, way node refs, and referenced node coordinates.
+The build step reconstructs boundary polylines from those refs, which is smaller
+and more robust across regions than relying on inline way geometry.
 */
 
 ${location_relation}->.placeRel;
@@ -69,5 +72,7 @@ rel(area.placeArea)
   ["admin_level"="${subdivision_admin_level}"]->.subdivisions;
 
 (.subdivisions;>;);
-out body geom qt;
+out body qt;
+>;
+out skel qt;
 EOF
