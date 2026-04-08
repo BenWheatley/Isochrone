@@ -31,7 +31,8 @@ make review
 - Region configuration lives in `data_pipeline/regions.json`.
 - Default configured locations are: Berlin, Paris, London, Rome, and Luxembourg (country).
 - `subdivisionDiscoveryModes` in `data_pipeline/regions.json` controls how boundary subdivisions are discovered for each region. The default is `["area", "subarea"]`; regions such as London can use `["subarea"]` to avoid expensive area scans.
-- `routingTileSizeDegrees` in `data_pipeline/regions.json` enables tiled routing fetches for large regions. When set, the pipeline first fetches relation bounds, then downloads routing data tile-by-tile and deterministically merges duplicate OSM elements.
+- `routingQueryScope` in `data_pipeline/regions.json` controls whether routing extracts are filtered by administrative area (`"area"`) or by plain bbox (`"bbox"`).
+- `routingTileSizeDegrees` enables tiled routing fetches for large regions. When set, the pipeline first fetches relation bounds, then downloads routing data tile-by-tile and deterministically merges duplicate OSM elements.
 - Fetch writes raw Overpass JSON under `data_pipeline/input/`, for example:
   - `berlin-routing.osm.json`
   - `berlin-district-boundaries.osm.json`

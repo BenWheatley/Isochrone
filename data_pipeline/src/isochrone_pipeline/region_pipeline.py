@@ -39,6 +39,7 @@ class RegionSpec:
     location_relation: str
     subdivision_admin_level: str
     subdivision_discovery_modes: tuple[str, ...]
+    routing_query_scope: str
     routing_tile_size_degrees: float | None
     epsg: int
     graph_binary_file_name: str
@@ -97,6 +98,10 @@ def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
             entry.get("subdivisionDiscoveryModes", ["area", "subarea"]),
             field_name=f"locations[{index}].subdivisionDiscoveryModes",
         )
+        routing_query_scope = _normalize_routing_query_scope(
+            entry.get("routingQueryScope", "area"),
+            field_name=f"locations[{index}].routingQueryScope",
+        )
         routing_tile_size_degrees = _optional_positive_float(
             entry.get("routingTileSizeDegrees"),
             f"locations[{index}].routingTileSizeDegrees",
@@ -134,6 +139,7 @@ def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
                 location_relation=location_relation,
                 subdivision_admin_level=subdivision_admin_level,
                 subdivision_discovery_modes=subdivision_discovery_modes,
+                routing_query_scope=routing_query_scope,
                 routing_tile_size_degrees=routing_tile_size_degrees,
                 epsg=epsg,
                 graph_binary_file_name=graph_binary_file_name,
@@ -207,6 +213,8 @@ def run_fetch_pipeline(
                 spec.name,
                 "--location-relation",
                 spec.location_relation,
+                "--scope",
+                spec.routing_query_scope,
             )
             fetch_overpass_json_fn(
                 query_text=routing_query,
@@ -357,6 +365,8 @@ def fetch_tiled_routing_extract(
             spec.name,
             "--location-relation",
             spec.location_relation,
+            "--scope",
+            spec.routing_query_scope,
             "--bbox",
             bbox_text,
         )
@@ -686,6 +696,13 @@ def _normalize_subdivision_discovery_modes(value: object, *, field_name: str) ->
     if not normalized_modes:
         raise ValueError(f"{field_name} must include at least one supported mode")
     return tuple(normalized_modes)
+
+
+def _normalize_routing_query_scope(value: object, *, field_name: str) -> str:
+    scope = _require_non_empty_string(value, field_name)
+    if scope not in {"area", "bbox"}:
+        raise ValueError(f"{field_name} must be one of: area, bbox")
+    return scope
 
 
 def _optional_positive_float(value: object, field_name: str) -> float | None:

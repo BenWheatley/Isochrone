@@ -49,6 +49,7 @@ def test_load_region_specs_reads_external_json_config(tmp_path: Path) -> None:
             location_relation='rel["boundary"="administrative"]["wikidata"="Q90"]',
             subdivision_admin_level="9",
             subdivision_discovery_modes=("area", "subarea"),
+            routing_query_scope="area",
             routing_tile_size_degrees=None,
             epsg=2154,
             graph_binary_file_name="paris-graph.bin",
@@ -70,6 +71,7 @@ def test_build_location_manifest_strips_pipeline_only_fields() -> None:
                 location_relation='rel["boundary"="administrative"]["wikidata"="Q90"]',
                 subdivision_admin_level="9",
                 subdivision_discovery_modes=("area", "subarea"),
+                routing_query_scope="area",
                 routing_tile_size_degrees=None,
                 epsg=2154,
                 graph_binary_file_name="paris-graph.bin",
@@ -152,6 +154,7 @@ def test_run_build_pipeline_writes_outputs_and_returns_manifest(
                 location_relation='rel["boundary"="administrative"]["wikidata"="Q90"]',
                 subdivision_admin_level="9",
                 subdivision_discovery_modes=("area", "subarea"),
+                routing_query_scope="area",
                 routing_tile_size_degrees=None,
                 epsg=2154,
                 graph_binary_file_name="paris-graph.bin",
@@ -200,6 +203,7 @@ def test_build_cli_writes_ui_manifest_json_to_stdout(
                         "locationRelation": 'rel["boundary"="administrative"]["wikidata"="Q90"]',
                         "subdivisionAdminLevel": "9",
                         "subdivisionDiscoveryModes": ["subarea"],
+                        "routingQueryScope": "bbox",
                         "routingTileSizeDegrees": 0.25,
                         "epsg": 2154,
                     }
@@ -269,7 +273,11 @@ def test_default_regions_config_uses_deterministic_greater_london_relation() -> 
     assert london.location_relation == 'rel(175342)["name"="Greater London"]["wikidata"="Q84"]'
     assert london.subdivision_admin_level == "8"
     assert london.subdivision_discovery_modes == ("subarea",)
+    assert london.routing_query_scope == "bbox"
     assert london.routing_tile_size_degrees == 0.2
+    luxembourg = next(spec for spec in specs if spec.id == "luxembourg-country")
+    assert luxembourg.routing_query_scope == "bbox"
+    assert luxembourg.routing_tile_size_degrees == 0.2
 
 
 def test_parse_relation_bounds_unions_multiple_matching_relation_bounds() -> None:
@@ -305,6 +313,7 @@ def test_run_fetch_pipeline_tiles_routing_extracts_and_merges_duplicate_elements
         location_relation='rel(175342)["name"="Greater London"]["wikidata"="Q84"]',
         subdivision_admin_level="8",
         subdivision_discovery_modes=("subarea",),
+        routing_query_scope="bbox",
         routing_tile_size_degrees=0.2,
         epsg=27700,
         graph_binary_file_name="london-graph.bin",
@@ -317,6 +326,8 @@ def test_run_fetch_pipeline_tiles_routing_extracts_and_merges_duplicate_elements
 
     def fake_render_query(query_script: Path, *args: str) -> str:
         if query_script.name == "overpass_routing_query.sh":
+            scope_index = args.index("--scope") + 1
+            assert args[scope_index] == "bbox"
             bbox_index = args.index("--bbox") + 1
             bbox_text = args[bbox_index]
             rendered_bboxes.append(bbox_text)

@@ -53,6 +53,15 @@ When present, the fetch step:
 This keeps the final raw JSON in the same shape as the non-tiled fetch path while
 avoiding single giant Overpass routing queries for large regions such as London.
 
+Routing fetches also support `routingQueryScope`:
+
+- `"area"`: query inside the administrative area derived from `locationRelation`
+- `"bbox"`: query directly by bbox, without `map_to_area`
+
+For tiled fetches, `"bbox"` is often the cheaper and more reliable option because
+each tile becomes a direct bbox query rather than an area-constrained bbox query.
+London and Luxembourg are configured this way.
+
 Outputs go to `data_pipeline/input/` and are named:
 - `<slug>-routing.osm.json`
 - `<slug>-district-boundaries.osm.json`
