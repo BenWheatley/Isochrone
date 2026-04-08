@@ -153,6 +153,7 @@ make wasm-build
 - Selected region is persisted in URL query params as `region=<locationId>`.
 - Last selected start node is persisted in URL query params as `node=<graphNodeId>` and restored on reload.
 - Selected transport modes and colour-cycle duration are also persisted in the URL as `modes=` and `cycle=`.
+- UI language can be forced from the URL as `lang=en`, `lang=de`, or `lang=fr`.
 - Theme, pointer-button inversion, transport modes, and colour cycle controls are in the header **Options** menu.
 - Page scrolling is disabled while interacting with the map viewport so touch gestures stay attached to the map.
 - Current binary schema details and compatibility policy: [Graph Binary Schema v2](docs/graph-binary-schema-v2.md).

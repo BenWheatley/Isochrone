@@ -1,5 +1,6 @@
 import {
   COLOUR_CYCLE_QUERY_PARAM,
+  LANGUAGE_QUERY_PARAM,
   LAST_CLICKED_NODE_QUERY_PARAM,
   MODE_SELECTION_QUERY_PARAM,
   SELECTED_REGION_QUERY_PARAM,
@@ -111,6 +112,21 @@ export function parseLocationIdFromLocationSearch(locationSearch) {
 
   const locationId = rawLocationId.trim();
   return locationId.length > 0 ? locationId : null;
+}
+
+export function parseLanguageFromLocationSearch(locationSearch) {
+  if (typeof locationSearch !== 'string' || locationSearch.length === 0) {
+    return null;
+  }
+
+  const params = new URLSearchParams(locationSearch);
+  const rawLanguage = params.get(LANGUAGE_QUERY_PARAM);
+  if (rawLanguage === null) {
+    return null;
+  }
+
+  const language = rawLanguage.trim();
+  return language.length > 0 ? language : null;
 }
 
 export function persistLocationIdToLocation(locationId, options = {}) {

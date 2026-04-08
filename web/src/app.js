@@ -24,6 +24,7 @@ import {
   precomputeEdgeTraversalCostSecondsCache,
 } from './core/routing.js';
 import {
+  parseLanguageFromLocationSearch,
   mapCanvasPixelToGraphMeters,
   mapClientPointToCanvasPixel,
   parseLocationIdFromLocationSearch,
@@ -5380,13 +5381,20 @@ function isClosedPath(path) {
 
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', async () => {
+    const locationSearch = globalThis.location?.search ?? '';
+    const requestedLocale = parseLanguageFromLocationSearch(locationSearch);
     const [localeBundle, locationRegistry] = await Promise.all([
-      loadCommonLocaleBundle(),
+      loadCommonLocaleBundle(
+        requestedLocale === null
+          ? undefined
+          : {
+              locale: requestedLocale,
+            },
+      ),
       loadLocationRegistry(),
     ]);
     const shell = initializeAppShell(globalThis.document, { localeBundle });
-    const requestedLocationId =
-      parseLocationIdFromLocationSearch(globalThis.location?.search ?? '') ?? DEFAULT_LOCATION_ID;
+    const requestedLocationId = parseLocationIdFromLocationSearch(locationSearch) ?? DEFAULT_LOCATION_ID;
     const initialLocation = resolveLocationEntry(
       locationRegistry,
       requestedLocationId,

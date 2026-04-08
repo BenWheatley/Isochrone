@@ -15,6 +15,20 @@ function normalizeNonEmptyString(value, fieldName) {
   return value.trim();
 }
 
+function compareLocationEntriesAlphabetically(left, right) {
+  const nameOrder = left.name.localeCompare(right.name, undefined, {
+    sensitivity: 'base',
+    numeric: true,
+  });
+  if (nameOrder !== 0) {
+    return nameOrder;
+  }
+  return left.id.localeCompare(right.id, undefined, {
+    sensitivity: 'base',
+    numeric: true,
+  });
+}
+
 export function createDefaultLocationRegistry() {
   return {
     locations: [
@@ -53,6 +67,7 @@ export function parseLocationRegistry(payload) {
     return { id, name, graphFileName, boundaryFileName };
   });
 
+  normalizedLocations.sort(compareLocationEntriesAlphabetically);
   return {
     locations: normalizedLocations,
   };
