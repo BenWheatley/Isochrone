@@ -15,6 +15,29 @@ function normalizeNonEmptyString(value, fieldName) {
   return value.trim();
 }
 
+function normalizeLocaleKey(locale) {
+  if (typeof locale !== 'string' || locale.trim().length === 0) {
+    return '';
+  }
+  return locale.trim().replace('_', '-').toLowerCase();
+}
+
+function normalizeLocalizedNames(value, fieldName) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an object when provided`);
+  }
+
+  const normalizedEntries = Object.entries(value).map(([rawLocale, rawName]) => [
+    normalizeNonEmptyString(rawLocale, `${fieldName}.<locale>`).replace('_', '-').toLowerCase(),
+    normalizeNonEmptyString(rawName, `${fieldName}[${rawLocale}]`),
+  ]);
+
+  return Object.fromEntries(normalizedEntries);
+}
+
 function compareLocationEntriesAlphabetically(left, right) {
   const nameOrder = left.name.localeCompare(right.name, undefined, {
     sensitivity: 'base',
@@ -52,6 +75,10 @@ export function parseLocationRegistry(payload) {
   const normalizedLocations = locations.map((entry, index) => {
     const id = normalizeNonEmptyString(entry?.id, `locations[${index}].id`);
     const name = normalizeNonEmptyString(entry?.name, `locations[${index}].name`);
+    const localizedNames = normalizeLocalizedNames(
+      entry?.localizedNames,
+      `locations[${index}].localizedNames`,
+    );
     const graphFileName = normalizeNonEmptyString(
       entry?.graphFileName,
       `locations[${index}].graphFileName`,
@@ -64,12 +91,62 @@ export function parseLocationRegistry(payload) {
       throw new Error(`duplicate location id: ${id}`);
     }
     seenLocationIds.add(id);
-    return { id, name, graphFileName, boundaryFileName };
+    return localizedNames === undefined
+      ? { id, name, graphFileName, boundaryFileName }
+      : { id, name, localizedNames, graphFileName, boundaryFileName };
   });
 
   normalizedLocations.sort(compareLocationEntriesAlphabetically);
   return {
     locations: normalizedLocations,
+  };
+}
+
+export function resolveLocationDisplayName(locationEntry, locale) {
+  if (!locationEntry || typeof locationEntry !== 'object') {
+    throw new Error('locationEntry is required');
+  }
+
+  const canonicalName = normalizeNonEmptyString(
+    locationEntry.canonicalName ?? locationEntry.name,
+    'locationEntry.name',
+  );
+  const localizedNames =
+    locationEntry.localizedNames && typeof locationEntry.localizedNames === 'object'
+      ? locationEntry.localizedNames
+      : null;
+  if (!localizedNames) {
+    return canonicalName;
+  }
+
+  const normalizedLocale = normalizeLocaleKey(locale);
+  if (normalizedLocale.length > 0 && typeof localizedNames[normalizedLocale] === 'string') {
+    return normalizeNonEmptyString(localizedNames[normalizedLocale], `localizedNames.${normalizedLocale}`);
+  }
+
+  if (normalizedLocale.includes('-')) {
+    const primaryLanguage = normalizedLocale.split('-')[0];
+    if (typeof localizedNames[primaryLanguage] === 'string') {
+      return normalizeNonEmptyString(localizedNames[primaryLanguage], `localizedNames.${primaryLanguage}`);
+    }
+  }
+
+  return canonicalName;
+}
+
+export function localizeLocationRegistry(registry, locale) {
+  if (!registry || typeof registry !== 'object' || !Array.isArray(registry.locations)) {
+    throw new Error('registry.locations must be an array');
+  }
+
+  const localizedLocations = registry.locations.map((entry) => ({
+    ...entry,
+    canonicalName: entry.canonicalName ?? entry.name,
+    name: resolveLocationDisplayName(entry, locale),
+  }));
+  localizedLocations.sort(compareLocationEntriesAlphabetically);
+  return {
+    locations: localizedLocations,
   };
 }
 

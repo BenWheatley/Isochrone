@@ -141,7 +141,8 @@ make wasm-build
 
 ## Runtime data
 - Web runtime loads `data_pipeline/output/graph-walk.bin.gz` by default.
-- Top-bar location selector is populated from `web/src/data/locations.json`, where each entry defines a stable location id plus the graph and boundary asset filenames to load.
+- Top-bar location selector is populated from `web/src/data/locations.json`, where each entry defines a stable location id, canonical display name, optional localized display-name overrides, plus the graph and boundary asset filenames to load.
+- `data_pipeline/regions.json` is the source of truth for region display names and localized variants; `web/src/data/locations.json` is generated from it by `./data_pipeline/region-data.py build` or `./data_pipeline/region-data.py all` and should not be hand-maintained for naming changes.
 - The graph payload is gzip-compressed and decompressed in-browser before parsing.
 - Clicking the map computes a full travel-time field across all reachable graph nodes (no walk-time cap).
 - Desktop controls:

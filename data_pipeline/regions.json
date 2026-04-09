@@ -20,6 +20,31 @@
       "epsg": 2154
     },
     {
+      "id": "cologne",
+      "name": "Cologne",
+      "localizedNames": {
+        "de": "Köln"
+      },
+      "graphFileName": "cologne-graph.bin.gz",
+      "boundaryFileName": "cologne-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q365\"]",
+      "subdivisionAdminLevel": "9",
+      "epsg": 25832
+    },
+    {
+      "id": "athens",
+      "name": "Athens",
+      "localizedNames": {
+        "de": "Athen",
+        "fr": "Athènes"
+      },
+      "graphFileName": "athens-graph.bin.gz",
+      "boundaryFileName": "athens-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q1524\"]",
+      "subdivisionAdminLevel": "10",
+      "epsg": 2100
+    },
+    {
       "id": "london",
       "name": "London",
       "graphFileName": "london-graph.bin.gz",
@@ -39,6 +64,24 @@
       "epsg": 32633
     },
     {
+      "id": "portsmouth",
+      "name": "Portsmouth",
+      "graphFileName": "portsmouth-graph.bin.gz",
+      "boundaryFileName": "portsmouth-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q72259\"]",
+      "subdivisionAdminLevel": "10",
+      "epsg": 27700
+    },
+    {
+      "id": "rhode-island",
+      "name": "Rhode Island",
+      "graphFileName": "rhode-island-graph.bin.gz",
+      "boundaryFileName": "rhode-island-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q1387\"]",
+      "subdivisionAdminLevel": "6",
+      "epsg": 32130
+    },
+    {
       "id": "luxembourg-country",
       "name": "Luxembourg (country)",
       "graphFileName": "luxembourg-country-graph.bin.gz",
@@ -46,6 +89,37 @@
       "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q32\"]",
       "subdivisionAdminLevel": "8",
       "epsg": 2169
+    },
+    {
+      "id": "singapore",
+      "name": "Singapore",
+      "localizedNames": {
+        "de": "Singapur",
+        "fr": "Singapour"
+      },
+      "graphFileName": "singapore-graph.bin.gz",
+      "boundaryFileName": "singapore-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q334\"]",
+      "subdivisionAdminLevel": "6",
+      "epsg": 3414
+    },
+    {
+      "id": "adelaide",
+      "name": "Adelaide",
+      "graphFileName": "adelaide-graph.bin.gz",
+      "boundaryFileName": "adelaide-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q1094063\"]",
+      "subdivisionAdminLevel": "10",
+      "epsg": 28354
+    },
+    {
+      "id": "nairobi",
+      "name": "Nairobi",
+      "graphFileName": "nairobi-graph.bin.gz",
+      "boundaryFileName": "nairobi-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q3335223\"]",
+      "subdivisionAdminLevel": "7",
+      "epsg": 32737
     }
   ]
 }

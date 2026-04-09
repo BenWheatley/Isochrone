@@ -6,6 +6,11 @@ The pipeline now has one external source-of-truth config file and one Python ent
 - config: `data_pipeline/regions.json`
 - main command: `data_pipeline/region-data.py`
 
+Naming/source-of-truth rule:
+- `data_pipeline/regions.json` is authoritative for each region's canonical `name` and optional `localizedNames`
+- `web/src/data/locations.json` is generated output for the web app and should inherit those names from the pipeline rather than being edited separately
+- the web runtime chooses the best display name for the active locale from that generated manifest, falling back to `name`
+
 ## What Exists Today
 
 Implemented:
@@ -31,6 +36,10 @@ Run:
 `region-data.py` prefers the repository `.venv/bin/python` when that virtualenv exists, so direct execution keeps using the project dependencies even if your shell is currently on another interpreter.
 
 The location list is loaded from `data_pipeline/regions.json`.
+
+Optional naming fields in that file:
+- `name`: canonical fallback/display name used when no locale-specific override exists
+- `localizedNames`: optional object keyed by locale code such as `de` or `fr`
 
 Boundary discovery for each region is also configured there. The optional
 `subdivisionDiscoveryModes` array controls how the boundary query finds child
@@ -124,6 +133,7 @@ The combined command also supports partial selection:
 ## Stage 5: Register The Region In The UI
 
 The `build` and `all` commands already emit the correct manifest JSON for `web/src/data/locations.json`.
+That manifest carries through optional `localizedNames` from `data_pipeline/regions.json` so the web app can localize the location menu without introducing a second naming source of truth.
 
 Example:
 

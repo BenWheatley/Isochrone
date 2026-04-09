@@ -48,6 +48,7 @@ class RegionSpec:
     graph_summary_file_name: str
     boundary_resolution: float
     boundary_units: BoundaryUnits
+    localized_names: dict[str, str] | None = None
 
     @property
     def routing_input_file_name(self) -> str:
@@ -77,6 +78,10 @@ def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
         seen_ids.add(region_id)
 
         name = _require_non_empty_string(entry.get("name"), f"locations[{index}].name")
+        localized_names = _normalize_localized_names(
+            entry.get("localizedNames"),
+            field_name=f"locations[{index}].localizedNames",
+        )
         graph_file_name = _require_non_empty_string(
             entry.get("graphFileName"),
             f"locations[{index}].graphFileName",
@@ -138,6 +143,7 @@ def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
                 graph_summary_file_name=graph_summary_file_name,
                 boundary_resolution=boundary_resolution,
                 boundary_units=normalized_boundary_units,
+                localized_names=localized_names,
             )
         )
 
@@ -145,17 +151,19 @@ def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
 
 
 def build_location_manifest(region_specs: Sequence[RegionSpec]) -> dict[str, Any]:
-    return {
-        "locations": [
-            {
-                "id": spec.id,
-                "name": spec.name,
-                "graphFileName": spec.graph_file_name,
-                "boundaryFileName": spec.boundary_file_name,
-            }
-            for spec in region_specs
-        ]
+    return {"locations": [_build_manifest_location_entry(spec) for spec in region_specs]}
+
+
+def _build_manifest_location_entry(spec: RegionSpec) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "id": spec.id,
+        "name": spec.name,
+        "graphFileName": spec.graph_file_name,
+        "boundaryFileName": spec.boundary_file_name,
     }
+    if spec.localized_names:
+        entry["localizedNames"] = dict(spec.localized_names)
+    return entry
 
 
 def select_region_specs(
@@ -704,6 +712,28 @@ def _normalize_subdivision_discovery_modes(value: object, *, field_name: str) ->
     if not normalized_modes:
         raise ValueError(f"{field_name} must include at least one supported mode")
     return tuple(normalized_modes)
+
+
+def _normalize_localized_names(value: object, *, field_name: str) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be an object when provided")
+
+    normalized: dict[str, str] = {}
+    for raw_locale, raw_name in value.items():
+        locale = (
+            _require_non_empty_string(
+                raw_locale,
+                f"{field_name}.<locale>",
+            )
+            .replace("_", "-")
+            .lower()
+        )
+        name = _require_non_empty_string(raw_name, f"{field_name}[{locale}]")
+        normalized[locale] = name
+
+    return normalized or None
 
 
 def _normalize_fetch_components(value: object) -> frozenset[str]:

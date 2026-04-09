@@ -38,6 +38,7 @@ import {
 } from './core/viewport.js';
 import {
   buildLocationAssetUrls,
+  localizeLocationRegistry,
   loadLocationRegistry,
   resolveLocationEntry,
 } from './core/location-registry.js';
@@ -5393,13 +5394,18 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
       loadLocationRegistry(),
     ]);
     const shell = initializeAppShell(globalThis.document, { localeBundle });
+    const localizedLocationRegistry = localizeLocationRegistry(locationRegistry, localeBundle.locale);
     const requestedLocationId = parseLocationIdFromLocationSearch(locationSearch) ?? DEFAULT_LOCATION_ID;
     const initialLocation = resolveLocationEntry(
-      locationRegistry,
+      localizedLocationRegistry,
       requestedLocationId,
       DEFAULT_LOCATION_ID,
     );
-    populateLocationSelect(shell, locationRegistry.locations, initialLocation?.id ?? DEFAULT_LOCATION_ID);
+    populateLocationSelect(
+      shell,
+      localizedLocationRegistry.locations,
+      initialLocation?.id ?? DEFAULT_LOCATION_ID,
+    );
     bindHeaderMenuControl(shell);
     bindPointerButtonInversionControl(shell);
     if (!ensureWasmSupportOrShowError(shell)) {
@@ -5440,7 +5446,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
     window.addEventListener('resize', handleWindowResize);
     const loadLocationById = async (requestedLocationId) => {
       const nextLocation = resolveLocationEntry(
-        locationRegistry,
+        localizedLocationRegistry,
         requestedLocationId,
         currentLocationId ?? initialLocation?.id ?? DEFAULT_LOCATION_ID,
       );
