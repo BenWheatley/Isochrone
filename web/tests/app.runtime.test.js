@@ -5,9 +5,12 @@ import {
   GRAPH_MAGIC,
   MinHeap,
   WASM_REQUIRED_MESSAGE,
+  clearRenderedIsochrone,
   computeEdgeTraversalCostSeconds,
   createWebGlIsochroneRenderer,
   createNodeSpatialIndex,
+  createPixelGrid,
+  createTravelTimeGrid,
   createWalkingSearchState,
   ensureWasmSupportOrShowError,
   findNearestNodeIndexForModeFromSpatialIndex,
@@ -34,6 +37,7 @@ import {
   layoutMapViewportToContainGraph,
   rerenderIsochroneFromSnapshotWithStatus,
   renderIsochroneLegendIfNeeded,
+  runSearchTimeSliced,
   shouldUploadEdgeGeometry,
   updateDistanceScaleBar,
   timeToColour,
@@ -498,6 +502,71 @@ test('ensureWasmSupportOrShowError renders required message when WASM is unavail
   assert.equal(shell.loadingOverlay.hidden, false);
   assert.equal(shell.loadingText.textContent, WASM_REQUIRED_MESSAGE);
   assert.equal(shell.routingStatus.textContent, WASM_REQUIRED_MESSAGE);
+});
+
+test('runSearchTimeSliced treats cancellation raised during expandOne as cancelled before onSlice runs', async () => {
+  let cancelled = false;
+  let done = false;
+  let onSliceCallCount = 0;
+  const searchState = {
+    isDone() {
+      return done;
+    },
+    expandOne() {
+      cancelled = true;
+      done = true;
+      return 7;
+    },
+  };
+
+  const summary = await runSearchTimeSliced(searchState, {
+    isCancelled() {
+      return cancelled;
+    },
+    onSlice() {
+      onSliceCallCount += 1;
+    },
+    nowImpl() {
+      return 0;
+    },
+  });
+
+  assert.equal(summary.cancelled, true);
+  assert.equal(summary.totalSettledCount, 1);
+  assert.equal(summary.sliceCount, 0);
+  assert.equal(onSliceCallCount, 0);
+});
+
+test('clearRenderedIsochrone clears stale routing snapshot and renderer state before a new map loads', () => {
+  let clearCallCount = 0;
+  const shell = {
+    isochroneCanvas: {
+      __isochroneRenderer: {
+        draw() {},
+        clear() {
+          clearCallCount += 1;
+        },
+      },
+    },
+  };
+  const pixelGrid = createPixelGrid(2, 2);
+  pixelGrid.rgba.fill(255);
+  const travelTimeGrid = createTravelTimeGrid(2, 2);
+  travelTimeGrid.seconds.fill(12);
+  const mapData = {
+    pixelGrid,
+    travelTimeGrid,
+    lastRoutingSnapshot: { sourceNodeIndex: 42 },
+  };
+
+  clearRenderedIsochrone(shell, mapData);
+
+  assert.equal(clearCallCount, 1);
+  assert.equal(mapData.lastRoutingSnapshot, null);
+  for (let i = 3; i < pixelGrid.rgba.length; i += 4) {
+    assert.equal(pixelGrid.rgba[i], 0);
+  }
+  assert.ok(Array.from(travelTimeGrid.seconds).every((value) => value === -1));
 });
 
 test('timeToColour wraps to the beginning after each configured cycle', () => {

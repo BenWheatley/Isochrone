@@ -2478,6 +2478,27 @@ function createCanvas2dIsochroneRenderer(canvas) {
 
   return {
     mode: '2d',
+    clear(options = {}) {
+      syncCanvasToDisplaySize(canvas);
+      const targetWidthPx = options.widthPx ?? canvas.width;
+      const targetHeightPx = options.heightPx ?? canvas.height;
+      if (!Number.isFinite(targetWidthPx) || targetWidthPx <= 0) {
+        throw new Error('options.widthPx (or canvas.width) must be positive');
+      }
+      if (!Number.isFinite(targetHeightPx) || targetHeightPx <= 0) {
+        throw new Error('options.heightPx (or canvas.height) must be positive');
+      }
+
+      const widthPx = Math.floor(targetWidthPx);
+      const heightPx = Math.floor(targetHeightPx);
+      if (canvas.width !== widthPx) {
+        canvas.width = widthPx;
+      }
+      if (canvas.height !== heightPx) {
+        canvas.height = heightPx;
+      }
+      context.clearRect(0, 0, canvas.width, canvas.height);
+    },
     draw(pixelGrid, options = {}) {
       if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
         canvas.width = pixelGrid.widthPx;
@@ -3589,6 +3610,27 @@ export function blitPixelGridToCanvas(canvas, pixelGrid, options = {}) {
   return renderer.draw(pixelGrid, { viewport: options.viewport });
 }
 
+export function clearRenderedIsochrone(shell, mapData = null) {
+  if (!shell || typeof shell !== 'object' || !shell.isochroneCanvas) {
+    throw new Error('shell.isochroneCanvas is required');
+  }
+
+  const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
+  if (typeof renderer.clear === 'function') {
+    renderer.clear();
+  }
+
+  if (mapData && typeof mapData === 'object') {
+    if (mapData.pixelGrid) {
+      clearGrid(mapData.pixelGrid);
+    }
+    if (mapData.travelTimeGrid) {
+      clearTravelTimeGrid(mapData.travelTimeGrid);
+    }
+    mapData.lastRoutingSnapshot = null;
+  }
+}
+
 export function renderReachableNodes(shell, mapData, distSeconds, options = {}) {
   if (!mapData || typeof mapData !== 'object') {
     throw new Error('mapData must be an object');
@@ -4261,6 +4303,9 @@ export async function runSearchTimeSliced(searchState, options = {}) {
       elapsedMs = nowImpl() - sliceStartMs;
     }
 
+    if (!cancelled && isCancelled()) {
+      cancelled = true;
+    }
     if (cancelled) {
       break;
     }
@@ -5467,6 +5512,9 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         routingBinding.dispose();
       }
       routingBinding = null;
+      if (previousMapData) {
+        clearRenderedIsochrone(shell, previousMapData);
+      }
       initializedMapData = null;
       isLocationLoading = true;
       shell.locationSelect.disabled = true;
