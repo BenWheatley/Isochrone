@@ -29,6 +29,15 @@
       "name": "London",
       "graphFileName": "london-graph.bin.gz",
       "boundaryFileName": "london-district-boundaries-canvas.json"
+    },
+    {
+      "id": "cologne",
+      "name": "Cologne",
+      "graphFileName": "cologne-graph.bin.gz",
+      "boundaryFileName": "cologne-district-boundaries-canvas.json",
+      "localizedNames": {
+        "de": "K\u00f6ln"
+      }
     }
   ]
 }
