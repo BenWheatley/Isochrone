@@ -65,6 +65,26 @@ test('buildRenderedIsochroneSvgDocument layers boundary image and vector isochro
   assert.ok(svg.includes('id="isochrone-copyright"'));
 });
 
+test('buildRenderedIsochroneSvgDocument localizes legend note and range labels', () => {
+  const svg = buildRenderedIsochroneSvgDocument({
+    widthPx: 640,
+    heightPx: 480,
+    boundaryLayerDataUrl: 'data:image/png;base64,AAA',
+    edgeVertexData: new Float32Array([10, 12, 0, 22, 24, 0]),
+    cycleMinutes: 120,
+    messages: {
+      'legend.duration.minuteOnly': '{minutes} Min.',
+      'legend.duration.hourOnly': '{hours} Std.',
+      'legend.duration.hourMinute': '{hours} Std. {minutes} Min.',
+      'legend.range': '{start}–{end}',
+      'legend.repeat': 'Farben wiederholen sich alle {duration}.',
+    },
+  });
+
+  assert.ok(svg.includes('48 Min.–1 Std. 12 Min.'));
+  assert.ok(svg.includes('Farben wiederholen sich alle 2 Std.'));
+});
+
 test('buildRenderedIsochroneSvgDocument escapes title text', () => {
   const svg = buildRenderedIsochroneSvgDocument({
     widthPx: 2,

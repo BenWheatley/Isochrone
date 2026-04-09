@@ -532,6 +532,48 @@ test('renderIsochroneLegendIfNeeded renders print-safe swatches and caches by th
   assert.equal(themeChangeRender, true);
 });
 
+test('renderIsochroneLegendIfNeeded localizes time ranges and rerenders when locale changes', () => {
+  const shell = {
+    isochroneLegend: { innerHTML: '' },
+    lastRenderedLegendCycleMinutes: null,
+    lastRenderedLegendTheme: null,
+    lastRenderedLegendLocale: null,
+    locale: 'en',
+  };
+  const englishMessages = {
+    'legend.duration.minuteOnly': '{minutes} min',
+    'legend.duration.hourOnly': '{hours} h',
+    'legend.duration.hourMinute': '{hours} h {minutes} min',
+    'legend.range': '{start}–{end}',
+    'legend.repeat': 'Colours repeat every {duration}.',
+  };
+  const frenchMessages = {
+    'legend.duration.minuteOnly': '{minutes} min',
+    'legend.duration.hourOnly': '{hours} h',
+    'legend.duration.hourMinute': '{hours} h {minutes} min',
+    'legend.range': '{start}–{end}',
+    'legend.repeat': 'Les couleurs se répètent toutes les {duration}.',
+  };
+
+  const firstRender = renderIsochroneLegendIfNeeded(shell, 120, {
+    theme: 'dark',
+    locale: 'en',
+    messages: englishMessages,
+  });
+  assert.equal(firstRender, true);
+  assert.ok(shell.isochroneLegend.innerHTML.includes('48 min–1 h 12 min'));
+  assert.ok(shell.isochroneLegend.innerHTML.includes('Colours repeat every 2 h.'));
+
+  const localeChangeRender = renderIsochroneLegendIfNeeded(shell, 120, {
+    theme: 'dark',
+    locale: 'fr',
+    messages: frenchMessages,
+  });
+  assert.equal(localeChangeRender, true);
+  assert.ok(shell.isochroneLegend.innerHTML.includes('48 min–1 h 12 min'));
+  assert.ok(shell.isochroneLegend.innerHTML.includes('Les couleurs se répètent toutes les 2 h.'));
+});
+
 test('updateDistanceScaleBar sets distance-aligned segment width for patterned bar', () => {
   const lineStyle = {
     width: '',

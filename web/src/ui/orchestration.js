@@ -182,6 +182,7 @@ export function initializeAppShell(doc, options = {}) {
     localeMessages: localeBundle.messages,
     loadingFadeTimeoutId: null,
     lastRenderedLegendCycleMinutes: null,
+    lastRenderedLegendLocale: null,
   };
 }
 

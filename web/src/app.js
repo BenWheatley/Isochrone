@@ -57,6 +57,10 @@ import {
   getCommonMessage,
   loadCommonLocaleBundle,
 } from './ui/localization.js';
+import {
+  formatLegendRange,
+  formatLegendRepeatNote,
+} from './ui/legend-format.js';
 import { bindCanvasClickRouting as bindCanvasClickRoutingInternal } from './interaction/canvas-routing.js';
 import {
   bindSvgExportControl,
@@ -1953,20 +1957,6 @@ export function layoutMapViewportToContainGraph(shell, graphHeader) {
   };
 }
 
-function formatLegendDuration(totalMinutes) {
-  const roundedMinutes = Math.max(0, Math.round(totalMinutes));
-  if (roundedMinutes < 60) {
-    return `${roundedMinutes}m`;
-  }
-
-  const hours = Math.floor(roundedMinutes / 60);
-  const minutes = roundedMinutes % 60;
-  if (minutes === 0) {
-    return `${hours}h`;
-  }
-  return `${hours}h ${minutes}m`;
-}
-
 function resolveIsochroneTheme(rootElement = globalThis.document?.documentElement ?? null) {
   const datasetTheme = rootElement?.dataset?.theme ?? null;
   return normalizeIsochroneTheme(datasetTheme, 'dark');
@@ -2065,6 +2055,7 @@ export function renderIsochroneLegend(shell, cycleMinutes, options = {}) {
     options.theme ?? resolveIsochroneTheme(options.rootElement),
     'dark',
   );
+  const messages = options.messages ?? getShellLocaleMessages(shell);
   const colours = getIsochronePalette(theme);
 
   const legendRows = [];
@@ -2072,7 +2063,7 @@ export function renderIsochroneLegend(shell, cycleMinutes, options = {}) {
     const colour = colours[index];
     const rangeStartMinutes = boundaries[index] * cycleMinutes;
     const rangeEndMinutes = boundaries[index + 1] * cycleMinutes;
-    const rangeLabel = `${formatLegendDuration(rangeStartMinutes)}-${formatLegendDuration(rangeEndMinutes)}`;
+    const rangeLabel = formatLegendRange(rangeStartMinutes, rangeEndMinutes, { messages });
     const colourCss = `rgb(${colour[0]}, ${colour[1]}, ${colour[2]})`;
 
     legendRows.push(
@@ -2080,7 +2071,7 @@ export function renderIsochroneLegend(shell, cycleMinutes, options = {}) {
     );
   }
   legendRows.push(
-    `<div class="legend-note">Colours repeat every ${formatLegendDuration(cycleMinutes)}.</div>`,
+    `<div class="legend-note">${formatLegendRepeatNote(cycleMinutes, { messages })}</div>`,
   );
 
   shell.isochroneLegend.innerHTML = legendRows.join('');
@@ -2097,17 +2088,25 @@ export function renderIsochroneLegendIfNeeded(shell, cycleMinutes, options = {})
     options.theme ?? resolveIsochroneTheme(options.rootElement),
     'dark',
   );
+  const locale = typeof options.locale === 'string' && options.locale.trim().length > 0
+    ? options.locale.trim()
+    : shell?.locale ?? 'en';
 
   if (
     shell.lastRenderedLegendCycleMinutes === cycleMinutes
     && shell.lastRenderedLegendTheme === theme
+    && shell.lastRenderedLegendLocale === locale
   ) {
     return false;
   }
 
-  renderIsochroneLegend(shell, cycleMinutes, { theme });
+  renderIsochroneLegend(shell, cycleMinutes, {
+    theme,
+    messages: options.messages ?? getShellLocaleMessages(shell),
+  });
   shell.lastRenderedLegendCycleMinutes = cycleMinutes;
   shell.lastRenderedLegendTheme = theme;
+  shell.lastRenderedLegendLocale = locale;
   return true;
 }
 
@@ -5613,6 +5612,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           edgeVertexData,
           cycleMinutes,
           title,
+          messages: getShellLocaleMessages(shell),
           scaleBarLabel,
           scaleBarWidthPx,
           copyrightNotice,

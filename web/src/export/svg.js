@@ -1,4 +1,5 @@
 import { DEFAULT_COLOUR_CYCLE_MINUTES, timeToColour } from '../render/colour.js';
+import { formatLegendRange, formatLegendRepeatNote } from '../ui/legend-format.js';
 
 function escapeXml(value) {
   return String(value)
@@ -40,20 +41,7 @@ function pad2(value) {
   return String(value).padStart(2, '0');
 }
 
-function formatLegendDuration(totalMinutes) {
-  const roundedMinutes = Math.max(0, Math.round(totalMinutes));
-  if (roundedMinutes < 60) {
-    return `${roundedMinutes}m`;
-  }
-  const hours = Math.floor(roundedMinutes / 60);
-  const minutes = roundedMinutes % 60;
-  if (minutes === 0) {
-    return `${hours}h`;
-  }
-  return `${hours}h ${minutes}m`;
-}
-
-function buildLegendEntries(cycleMinutes) {
+function buildLegendEntries(cycleMinutes, options = {}) {
   const boundaries = [0, 1 / 5, 2 / 5, 3 / 5, 4 / 5, 1];
   const colours = [
     [0, 255, 255],
@@ -69,7 +57,7 @@ function buildLegendEntries(cycleMinutes) {
     const rangeEndMinutes = boundaries[index + 1] * cycleMinutes;
     entries.push({
       colour: colours[index],
-      label: `${formatLegendDuration(rangeStartMinutes)}-${formatLegendDuration(rangeEndMinutes)}`,
+      label: formatLegendRange(rangeStartMinutes, rangeEndMinutes, options),
     });
   }
   return entries;
@@ -217,8 +205,9 @@ function buildSvgTitleOverlayMarkup(widthPx, title) {
   ].join('\n');
 }
 
-function buildSvgLegendOverlayMarkup(widthPx, cycleMinutes) {
-  const entries = buildLegendEntries(cycleMinutes);
+function buildSvgLegendOverlayMarkup(widthPx, cycleMinutes, options = {}) {
+  const messages = options.messages ?? null;
+  const entries = buildLegendEntries(cycleMinutes, { messages });
   const rowHeight = 17;
   const boxWidth = 220;
   const boxHeight = 16 + entries.length * rowHeight + 20;
@@ -241,7 +230,7 @@ function buildSvgLegendOverlayMarkup(widthPx, cycleMinutes) {
     textY += rowHeight;
   }
   lines.push(
-    `    <text x="${formatSvgNumber(boxX + 10)}" y="${formatSvgNumber(boxY + boxHeight - 7)}" font-family="Segoe UI, Tahoma, Geneva, Verdana, sans-serif" font-size="10" fill="#c0d4e8">Colours repeat every ${escapeXml(formatLegendDuration(cycleMinutes))}.</text>`,
+    `    <text x="${formatSvgNumber(boxX + 10)}" y="${formatSvgNumber(boxY + boxHeight - 7)}" font-family="Segoe UI, Tahoma, Geneva, Verdana, sans-serif" font-size="10" fill="#c0d4e8">${escapeXml(formatLegendRepeatNote(cycleMinutes, { messages }))}</text>`,
   );
   lines.push('  </g>');
   return lines.join('\n');
@@ -352,12 +341,13 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
     typeof options.copyrightNotice === 'string' && options.copyrightNotice.trim().length > 0
       ? options.copyrightNotice.trim()
       : 'Map data © OpenStreetMap contributors, available under the Open Database License (ODbL): https://www.openstreetmap.org/copyright';
+  const messages = options.messages ?? null;
   const escapedTitle = escapeXml(title);
   const escapedBoundaryDataUrl = escapeXml(boundaryLayerDataUrl);
   const escapedBackgroundColour = escapeXml(backgroundColour);
   const edgeLines = buildIsochroneEdgeLineMarkup(edgeVertexData, { cycleMinutes });
   const titleOverlayMarkup = buildSvgTitleOverlayMarkup(widthPx, title);
-  const legendOverlayMarkup = buildSvgLegendOverlayMarkup(widthPx, cycleMinutes);
+  const legendOverlayMarkup = buildSvgLegendOverlayMarkup(widthPx, cycleMinutes, { messages });
   const scaleOverlayMarkup = buildSvgScaleOverlayMarkup(heightPx, scaleBarLabel, scaleBarWidthPx);
   const copyrightOverlayMarkup = buildSvgCopyrightOverlayMarkup(widthPx, heightPx, copyrightNotice);
 
@@ -417,6 +407,7 @@ export function exportCurrentRenderedIsochroneSvg(shell, options = {}) {
     edgeVertexData: options.edgeVertexData ?? new Float32Array(0),
     cycleMinutes: options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
     title: options.title ?? 'Isochrone export',
+    messages: options.messages ?? null,
     scaleBarLabel: options.scaleBarLabel,
     scaleBarWidthPx: options.scaleBarWidthPx,
     copyrightNotice: options.copyrightNotice,
