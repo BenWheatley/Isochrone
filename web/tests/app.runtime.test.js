@@ -815,8 +815,10 @@ test('persistNodeIndexToLocation rewrites URL when the node actually changes', (
   assert.equal(unchanged, false);
 });
 
-test('persistLocationIdToLocation writes region query value', () => {
-  const locationObject = { href: 'https://example.test/map?foo=bar#viewport' };
+test('persistLocationIdToLocation writes region query value, clears node, and preserves other params', () => {
+  const locationObject = {
+    href: 'https://example.test/map?foo=bar&node=123&modes=walk%2Ccar&cycle=75&lang=fr#viewport',
+  };
   let replacedUrl = null;
   const historyObject = {
     replaceState(_state, _title, url) {
@@ -826,9 +828,13 @@ test('persistLocationIdToLocation writes region query value', () => {
 
   const changed = persistLocationIdToLocation('rome', { locationObject, historyObject });
   assert.equal(changed, true);
-  assert.equal(replacedUrl, '/map?foo=bar&region=rome#viewport');
+  assert.equal(
+    replacedUrl,
+    '/map?foo=bar&modes=walk%2Ccar&cycle=75&lang=fr&region=rome#viewport',
+  );
 
-  locationObject.href = 'https://example.test/map?foo=bar&region=rome#viewport';
+  locationObject.href =
+    'https://example.test/map?foo=bar&modes=walk%2Ccar&cycle=75&lang=fr&region=rome#viewport';
   const unchanged = persistLocationIdToLocation('rome', { locationObject, historyObject });
   assert.equal(unchanged, false);
 });

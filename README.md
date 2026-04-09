@@ -151,7 +151,7 @@ make wasm-build
   - Secondary drag moves the selection point.
 - Zoom/pan redraw the current routing snapshot; camera movement does not start a new route solve.
 - Selected region is persisted in URL query params as `region=<locationId>`.
-- Last selected start node is persisted in URL query params as `node=<graphNodeId>` and restored on reload.
+- Last selected start node is persisted in URL query params as `node=<graphNodeId>` and restored on reload; switching region clears `node` while preserving the other URL params.
 - Selected transport modes and colour-cycle duration are also persisted in the URL as `modes=` and `cycle=`.
 - UI language can be forced from the URL as `lang=en`, `lang=de`, or `lang=fr`.
 - Theme, pointer-button inversion, transport modes, and colour cycle controls are in the header **Options** menu.

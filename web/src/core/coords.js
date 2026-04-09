@@ -150,6 +150,7 @@ export function persistLocationIdToLocation(locationId, options = {}) {
   }
 
   nextUrl.searchParams.set(SELECTED_REGION_QUERY_PARAM, normalizedLocationId);
+  nextUrl.searchParams.delete(LAST_CLICKED_NODE_QUERY_PARAM);
   historyObject.replaceState(null, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
   return true;
 }
