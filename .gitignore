@@ -27,3 +27,4 @@ web/dist/
 target/
 data_pipeline/output/*benchmark*.json
 # Keep web/wasm/*.wasm so that GitHub Pages works
+/data_pipeline/input
