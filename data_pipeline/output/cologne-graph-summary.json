@@ -1,0 +1,82 @@
+{
+  "generated_at_utc": "2026-04-09T14:19:45.730845+00:00",
+  "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/cologne-routing.osm.json",
+  "binary_output": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/output/cologne-graph.bin",
+  "binary_size_bytes": 5401216,
+  "before_node_count": 329027,
+  "before_edge_count": 665838,
+  "after_node_count": 133638,
+  "after_edge_count": 271912,
+  "constraint_tag_presence": {
+    "access": 9785,
+    "foot": 7919,
+    "oneway": 12842,
+    "oneway:foot": 0,
+    "bicycle": 9205,
+    "cycleway": 1076,
+    "oneway:bicycle": 1674,
+    "motor_vehicle": 1592,
+    "vehicle": 773,
+    "sidewalk": 11670,
+    "junction": 291,
+    "service": 10301,
+    "surface": 58968,
+    "tracktype": 2887,
+    "maxspeed": 17271,
+    "maxspeed:forward": 87,
+    "maxspeed:backward": 88
+  },
+  "constraint_tag_coverage_ratio": {
+    "access": 0.10569351580812063,
+    "foot": 0.08553775694271919,
+    "oneway": 0.1387139632097992,
+    "oneway:foot": 0.0,
+    "bicycle": 0.0994285961179101,
+    "cycleway": 0.011622506183907798,
+    "oneway:bicycle": 0.018081854416228303,
+    "motor_vehicle": 0.017196124391060608,
+    "vehicle": 0.008349625725056438,
+    "sidewalk": 0.12605450480130484,
+    "junction": 0.0031432614307780383,
+    "service": 0.11126713401527344,
+    "surface": 0.6369479039523002,
+    "tracktype": 0.031184177837306516,
+    "maxspeed": 0.18655418615452748,
+    "maxspeed:forward": 0.0009397379535315784,
+    "maxspeed:backward": 0.0009505395392043552
+  },
+  "edge_mode_mask_counts": {
+    "7": 141170,
+    "3": 87392,
+    "5": 434,
+    "1": 42916
+  },
+  "edge_mode_counts": {
+    "walk": 271912,
+    "bike": 228562,
+    "car": 141604
+  },
+  "edge_mode_coverage_ratio": {
+    "walk": 1.0,
+    "bike": 0.8405734208126159,
+    "car": 0.5207714260496042
+  },
+  "header": {
+    "magic": "0x49534F43",
+    "version": 2,
+    "flags": 0,
+    "n_nodes": 133638,
+    "n_edges": 271912,
+    "n_stops": 0,
+    "n_tedges": 0,
+    "origin_easting": 343786.9931386156,
+    "origin_northing": 5632136.3992700605,
+    "epsg_code": 25832,
+    "grid_width_px": 2801,
+    "grid_height_px": 2973,
+    "pixel_size_m": 10.0,
+    "node_table_offset": 64,
+    "edge_table_offset": 2138272,
+    "stop_table_offset": 5401216
+  }
+}

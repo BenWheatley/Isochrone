@@ -1,0 +1,82 @@
+{
+  "generated_at_utc": "2026-04-08T22:36:08.832224+00:00",
+  "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/luxembourg-country-routing.osm.json",
+  "binary_output": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/output/luxembourg-country-graph.bin",
+  "binary_size_bytes": 6757012,
+  "before_node_count": 879803,
+  "before_edge_count": 1777377,
+  "after_node_count": 165264,
+  "after_edge_count": 342727,
+  "constraint_tag_presence": {
+    "access": 11731,
+    "foot": 15186,
+    "oneway": 10457,
+    "oneway:foot": 8,
+    "bicycle": 13002,
+    "cycleway": 1489,
+    "oneway:bicycle": 516,
+    "motor_vehicle": 4469,
+    "vehicle": 1074,
+    "sidewalk": 8088,
+    "junction": 1253,
+    "service": 13465,
+    "surface": 85016,
+    "tracktype": 32813,
+    "maxspeed": 28821,
+    "maxspeed:forward": 71,
+    "maxspeed:backward": 72
+  },
+  "constraint_tag_coverage_ratio": {
+    "access": 0.08801440522189294,
+    "foot": 0.11393630190944218,
+    "oneway": 0.0784559402783509,
+    "oneway:foot": 6.0021757887234125e-05,
+    "bicycle": 0.09755036200622726,
+    "cycleway": 0.011171549686761451,
+    "oneway:bicycle": 0.003871403383726601,
+    "motor_vehicle": 0.03352965449975616,
+    "vehicle": 0.00805792099636118,
+    "sidewalk": 0.0606819972239937,
+    "junction": 0.009400907829088045,
+    "service": 0.10102412124395094,
+    "surface": 0.637851221067637,
+    "tracktype": 0.24618674269422666,
+    "maxspeed": 0.21623588550849682,
+    "maxspeed:forward": 0.0005326931012492028,
+    "maxspeed:backward": 0.0005401958209851071
+  },
+  "edge_mode_mask_counts": {
+    "7": 155444,
+    "1": 70990,
+    "3": 116115,
+    "5": 178
+  },
+  "edge_mode_counts": {
+    "walk": 342727,
+    "bike": 271559,
+    "car": 155622
+  },
+  "edge_mode_coverage_ratio": {
+    "walk": 1.0,
+    "bike": 0.7923478453696382,
+    "car": 0.4540698573500191
+  },
+  "header": {
+    "magic": "0x49534F43",
+    "version": 2,
+    "flags": 0,
+    "n_nodes": 165264,
+    "n_edges": 342727,
+    "n_stops": 0,
+    "n_tedges": 0,
+    "origin_easting": 48350.32058181415,
+    "origin_northing": 56765.9266951499,
+    "epsg_code": 2169,
+    "grid_width_px": 5764,
+    "grid_height_px": 8226,
+    "pixel_size_m": 10.0,
+    "node_table_offset": 64,
+    "edge_table_offset": 2644288,
+    "stop_table_offset": 6757012
+  }
+}

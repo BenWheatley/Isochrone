@@ -1,0 +1,82 @@
+{
+  "generated_at_utc": "2026-04-08T22:45:37.870717+00:00",
+  "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/london-routing.osm.json",
+  "binary_output": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/output/london-graph.bin",
+  "binary_size_bytes": 28704348,
+  "before_node_count": 1983289,
+  "before_edge_count": 4091332,
+  "after_node_count": 686537,
+  "after_edge_count": 1476641,
+  "constraint_tag_presence": {
+    "access": 43393,
+    "foot": 47768,
+    "oneway": 70456,
+    "oneway:foot": 1398,
+    "bicycle": 30463,
+    "cycleway": 13406,
+    "oneway:bicycle": 3728,
+    "motor_vehicle": 7503,
+    "vehicle": 686,
+    "sidewalk": 45165,
+    "junction": 2700,
+    "service": 51262,
+    "surface": 241069,
+    "tracktype": 1340,
+    "maxspeed": 111090,
+    "maxspeed:forward": 3,
+    "maxspeed:backward": 2
+  },
+  "constraint_tag_coverage_ratio": {
+    "access": 0.0807254556887141,
+    "foot": 0.08886441516692774,
+    "oneway": 0.13107166377074736,
+    "oneway:foot": 0.002600746365838322,
+    "bicycle": 0.05667134230510215,
+    "cycleway": 0.024939632174841592,
+    "oneway:bicycle": 0.006935323642235525,
+    "motor_vehicle": 0.013958082963437004,
+    "vehicle": 0.0012761888461838976,
+    "sidewalk": 0.08402196681909,
+    "junction": 0.0050229007065547,
+    "service": 0.09536442074792852,
+    "surface": 0.44846875941793884,
+    "tracktype": 0.002492847017327147,
+    "maxspeed": 0.20666445907080058,
+    "maxspeed:forward": 5.581000785060777e-06,
+    "maxspeed:backward": 3.7206671900405182e-06
+  },
+  "edge_mode_mask_counts": {
+    "7": 814604,
+    "1": 528247,
+    "3": 133312,
+    "5": 478
+  },
+  "edge_mode_counts": {
+    "walk": 1476641,
+    "bike": 947916,
+    "car": 815082
+  },
+  "edge_mode_coverage_ratio": {
+    "walk": 1.0,
+    "bike": 0.641940728992355,
+    "car": 0.5519838606675557
+  },
+  "header": {
+    "magic": "0x49534F43",
+    "version": 2,
+    "flags": 0,
+    "n_nodes": 686537,
+    "n_edges": 1476641,
+    "n_stops": 0,
+    "n_tedges": 0,
+    "origin_easting": 503519.184796834,
+    "origin_northing": 155664.71452815592,
+    "epsg_code": 27700,
+    "grid_width_px": 5845,
+    "grid_height_px": 4523,
+    "pixel_size_m": 10.0,
+    "node_table_offset": 64,
+    "edge_table_offset": 10984656,
+    "stop_table_offset": 28704348
+  }
+}
