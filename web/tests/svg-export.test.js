@@ -100,7 +100,7 @@ test('buildIsochroneEdgeLineMarkup skips hidden edges and applies theme palette'
   assert.ok(!markup.includes('x1="1"'));
 });
 
-test('buildRenderedIsochroneSvgDocument uses vector boundaries and shared viewport alignment', () => {
+test('buildRenderedIsochroneSvgDocument uses full-region graph coordinates and ignores viewport zoom', () => {
   const svg = buildRenderedIsochroneSvgDocument({
     widthPx: 100,
     heightPx: 100,
@@ -134,11 +134,65 @@ test('buildRenderedIsochroneSvgDocument uses vector boundaries and shared viewpo
   assert.ok(svg.includes('viewBox="0 0 100 100"'));
   assert.ok(!svg.includes('<image '));
   assert.ok(svg.includes('id="isochrone-boundaries"'));
-  assert.ok(svg.includes('d="M 10 14 L 30 34 L 50 54"'));
+  assert.ok(svg.includes('d="M 10 10 L 20 20 L 30 30"'));
   assert.ok(svg.includes('x1="10"'));
-  assert.ok(svg.includes('y1="14"'));
-  assert.ok(svg.includes('x2="30"'));
-  assert.ok(svg.includes('y2="34"'));
+  assert.ok(svg.includes('y1="10"'));
+  assert.ok(svg.includes('x2="20"'));
+  assert.ok(svg.includes('y2="20"'));
+});
+
+test('exportCurrentRenderedIsochroneSvg uses graph extent instead of current canvas viewport size', () => {
+  const documentObject = {
+    documentElement: { dataset: {} },
+    body: {
+      appendChild() {},
+    },
+    createElement() {
+      return {
+        click() {},
+        remove() {},
+        style: {},
+      };
+    },
+  };
+  const urlObject = {
+    createObjectURL() {
+      return 'blob:test';
+    },
+    revokeObjectURL() {},
+  };
+  const shell = {
+    boundaryCanvas: {
+      width: 25,
+      height: 25,
+      ownerDocument: documentObject,
+    },
+    isochroneCanvas: {
+      width: 25,
+      height: 25,
+      ownerDocument: documentObject,
+    },
+  };
+
+  const result = exportCurrentRenderedIsochroneSvg(shell, {
+    graphHeader: createGraphHeader(),
+    boundaryPayload: createBoundaryPayload(),
+    edgeVertexData: new Float32Array([10, 10, 0, 20, 20, 60]),
+    viewport: {
+      scale: 8,
+      offsetXPx: 99,
+      offsetYPx: 99,
+    },
+    documentObject,
+    urlObject,
+    scheduleRevoke(callback) {
+      callback();
+    },
+  });
+
+  assert.ok(result.svgDocument.includes('viewBox="0 0 100 100"'));
+  assert.ok(result.svgDocument.includes('d="M 10 10 L 20 20 L 30 30"'));
+  assert.ok(result.svgDocument.includes('x2="20"'));
 });
 
 test('buildRenderedIsochroneSvgDocument localizes legend note and range labels', () => {

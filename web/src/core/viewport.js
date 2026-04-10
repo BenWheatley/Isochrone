@@ -82,18 +82,6 @@ export function mapScreenCanvasPixelToGraphPixel(viewportOrFrame, screenCanvasX,
   };
 }
 
-export function mapGraphPixelToScreenCanvasPixel(viewportOrFrame, graphPixelX, graphPixelY) {
-  const resolvedViewport = validateViewportOrFrame(viewportOrFrame);
-  if (!Number.isFinite(graphPixelX) || !Number.isFinite(graphPixelY)) {
-    throw new Error('graphPixelX and graphPixelY must be finite numbers');
-  }
-
-  return {
-    xPx: (graphPixelX - resolvedViewport.offsetXPx) * resolvedViewport.effectiveScale,
-    yPx: (graphPixelY - resolvedViewport.offsetYPx) * resolvedViewport.effectiveScale,
-  };
-}
-
 export function panMapViewportByCanvasDelta(graphHeader, viewport, deltaCanvasX, deltaCanvasY, options = {}) {
   if (!Number.isFinite(deltaCanvasX) || !Number.isFinite(deltaCanvasY)) {
     throw new Error('deltaCanvasX and deltaCanvasY must be finite numbers');

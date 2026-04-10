@@ -161,7 +161,8 @@ make wasm-build
 - Current binary schema details and compatibility policy: [Graph Binary Schema v2](docs/graph-binary-schema-v2.md).
 
 ## SVG export
-- Export uses vector isochrone edge lines plus the boundary canvas layer.
+- Export uses vector isochrone edge lines and vector boundary geometry.
+- Export uses the full region extent from the graph/boundary data, not the current zoomed viewport.
 - Export background is set to the current map background colour (same palette context as the canvas view).
 
 ## Deployment (GitHub Pages)

@@ -9,10 +9,6 @@ import {
   getBoundaryStrokeStyle,
   projectBoundaryBasemapToGraphPaths,
 } from '../core/boundary-basemap.js';
-import {
-  mapGraphPixelToScreenCanvasPixel,
-  resolveViewportFrame,
-} from '../core/viewport.js';
 
 const SVG_FONT_STACK = 'Segoe UI, Tahoma, Geneva, Verdana, sans-serif';
 
@@ -391,7 +387,7 @@ function buildSvgCopyrightOverlayMarkup(widthPx, heightPx, copyrightNotice, over
   return lines.join('\n');
 }
 
-function buildSvgBoundaryPathMarkup(boundaryPayload, graphHeader, viewportFrame, boundaryStroke) {
+function buildSvgBoundaryPathMarkup(boundaryPayload, graphHeader, boundaryStroke) {
   if (!boundaryPayload || !graphHeader) {
     return '';
   }
@@ -406,9 +402,8 @@ function buildSvgBoundaryPathMarkup(boundaryPayload, graphHeader, viewportFrame,
       const commands = [];
       for (let index = 0; index < path.length; index += 1) {
         const [graphX, graphY] = path[index];
-        const screenPoint = mapGraphPixelToScreenCanvasPixel(viewportFrame, graphX, graphY);
         commands.push(
-          `${index === 0 ? 'M' : 'L'} ${formatSvgNumber(screenPoint.xPx)} ${formatSvgNumber(screenPoint.yPx)}`,
+          `${index === 0 ? 'M' : 'L'} ${formatSvgNumber(graphX)} ${formatSvgNumber(graphY)}`,
         );
       }
       pathMarkup.push(
@@ -432,7 +427,6 @@ export function buildIsochroneEdgeLineMarkup(edgeVertexData, options = {}) {
     throw new Error('cycleMinutes must be a positive number');
   }
 
-  const viewportFrame = options.viewportFrame ?? null;
   const theme = normalizeIsochroneTheme(options.theme, ISOCHRONE_THEME_DARK);
   const edgeLines = [];
   for (let i = 0; i < edgeVertexData.length; i += 6) {
@@ -458,15 +452,9 @@ export function buildIsochroneEdgeLineMarkup(edgeVertexData, options = {}) {
 
     const representativeSeconds = Math.max(0, (t0 + t1) * 0.5);
     const [r, g, b] = timeToColour(representativeSeconds, { cycleMinutes, theme });
-    const startPoint = viewportFrame
-      ? mapGraphPixelToScreenCanvasPixel(viewportFrame, x0, y0)
-      : { xPx: x0, yPx: y0 };
-    const endPoint = viewportFrame
-      ? mapGraphPixelToScreenCanvasPixel(viewportFrame, x1, y1)
-      : { xPx: x1, yPx: y1 };
 
     edgeLines.push(
-      `<line x1="${formatSvgNumber(startPoint.xPx)}" y1="${formatSvgNumber(startPoint.yPx)}" x2="${formatSvgNumber(endPoint.xPx)}" y2="${formatSvgNumber(endPoint.yPx)}" stroke="rgb(${r}, ${g}, ${b})" stroke-width="1" stroke-linecap="round" vector-effect="non-scaling-stroke" />`,
+      `<line x1="${formatSvgNumber(x0)}" y1="${formatSvgNumber(y0)}" x2="${formatSvgNumber(x1)}" y2="${formatSvgNumber(y1)}" stroke="rgb(${r}, ${g}, ${b})" stroke-width="1" stroke-linecap="round" vector-effect="non-scaling-stroke" />`,
     );
   }
 
@@ -514,27 +502,18 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
   const escapedTitle = escapeXml(title);
   const escapedBackgroundColour = escapeXml(backgroundColour);
 
-  let viewportFrame = null;
-  if (options.graphHeader || options.boundaryPayload) {
-    if (!options.graphHeader || !options.boundaryPayload) {
-      throw new Error('graphHeader and boundaryPayload must be provided together');
-    }
-    viewportFrame = resolveViewportFrame(options.graphHeader, options.viewport, {
-      frameWidthPx: widthPx,
-      frameHeightPx: heightPx,
-    });
+  if ((options.graphHeader && !options.boundaryPayload) || (!options.graphHeader && options.boundaryPayload)) {
+    throw new Error('graphHeader and boundaryPayload must be provided together');
   }
 
   const boundaryMarkup = buildSvgBoundaryPathMarkup(
     options.boundaryPayload ?? null,
     options.graphHeader ?? null,
-    viewportFrame,
     overlayColours.boundaryStroke,
   );
   const edgeLines = buildIsochroneEdgeLineMarkup(edgeVertexData, {
     cycleMinutes,
     theme,
-    viewportFrame,
   });
   const titleOverlayMarkup = buildSvgTitleOverlayMarkup(widthPx, title, overlayColours);
   const legendOverlayMarkup = buildSvgLegendOverlayMarkup(widthPx, cycleMinutes, overlayColours, {
@@ -613,8 +592,12 @@ export function exportCurrentRenderedIsochroneSvg(shell, options = {}) {
     throw new Error('shell.isochroneCanvas with width/height is required');
   }
 
-  const widthPx = shell.isochroneCanvas.width;
-  const heightPx = shell.isochroneCanvas.height;
+  const widthPx = Number.isInteger(options.graphHeader?.gridWidthPx)
+    ? options.graphHeader.gridWidthPx
+    : shell.isochroneCanvas.width;
+  const heightPx = Number.isInteger(options.graphHeader?.gridHeightPx)
+    ? options.graphHeader.gridHeightPx
+    : shell.isochroneCanvas.height;
   assertPositiveInteger(widthPx, 'shell.isochroneCanvas.width');
   assertPositiveInteger(heightPx, 'shell.isochroneCanvas.height');
 
@@ -631,7 +614,6 @@ export function exportCurrentRenderedIsochroneSvg(shell, options = {}) {
     backgroundColour,
     graphHeader: options.graphHeader ?? null,
     boundaryPayload: options.boundaryPayload ?? null,
-    viewport: options.viewport ?? null,
     edgeVertexData: options.edgeVertexData ?? new Float32Array(0),
     cycleMinutes: options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
     theme,

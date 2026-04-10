@@ -5553,7 +5553,6 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         return exportCurrentRenderedIsochroneSvg(shell, {
           graphHeader: initializedMapData?.graph.header ?? null,
           boundaryPayload: initializedMapData?.boundaryPayload ?? null,
-          viewport: initializedMapData?.viewport ?? null,
           edgeVertexData,
           cycleMinutes,
           theme: currentTheme,
