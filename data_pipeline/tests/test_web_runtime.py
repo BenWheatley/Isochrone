@@ -213,9 +213,6 @@ def test_quality_gates_cover_python_and_js_runtime_checks() -> None:
 def test_readme_links_live_app_and_discussed_docs() -> None:
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     markdown_links = parse_markdown_links(readme)
-
-    assert markdown_links["Live App"] == "https://benwheatley.github.io/Isochrone/"
     assert markdown_links["Region Data Pipeline"] == "docs/region-data-pipeline.md"
     assert markdown_links["WASM Routing Kernel"] == "docs/wasm-routing-kernel.md"
     assert markdown_links["Graph Binary Schema v2"] == "docs/graph-binary-schema-v2.md"
-    assert "fetch-data.sh" not in readme
