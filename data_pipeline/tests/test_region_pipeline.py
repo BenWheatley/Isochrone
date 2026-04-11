@@ -144,6 +144,14 @@ def test_committed_region_config_uses_deterministic_athens_relation_selector() -
     )
 
 
+def test_committed_region_config_uses_deterministic_portsmouth_relation_selector() -> None:
+    specs_by_id = {spec.id: spec for spec in load_region_specs(DEFAULT_LOCATIONS_FILE)}
+
+    assert specs_by_id["portsmouth"].location_relation == (
+        'rel(127167)["name"="Portsmouth"]["wikidata"="Q72259"]'
+    )
+
+
 def test_build_location_manifest_strips_pipeline_only_fields() -> None:
     manifest = build_location_manifest(
         [

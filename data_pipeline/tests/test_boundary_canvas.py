@@ -123,6 +123,51 @@ SAMPLE_OVERPASS_NO_GEOMETRY = {
     ]
 }
 
+SAMPLE_OVERPASS_EMPTY = {
+    "elements": [],
+}
+
+SAMPLE_OVERPASS_PLACE_ONLY = {
+    "elements": [
+        {
+            "type": "relation",
+            "id": 127167,
+            "tags": {
+                "boundary": "administrative",
+                "type": "boundary",
+                "admin_level": "6",
+                "name": "Portsmouth",
+            },
+            "members": [
+                {"type": "way", "ref": 9901, "role": "outer"},
+            ],
+        },
+        {
+            "type": "way",
+            "id": 9901,
+            "nodes": [8001, 8002, 8003],
+        },
+        {
+            "type": "node",
+            "id": 8001,
+            "lat": 50.8000,
+            "lon": -1.1000,
+        },
+        {
+            "type": "node",
+            "id": 8002,
+            "lat": 50.8100,
+            "lon": -1.0900,
+        },
+        {
+            "type": "node",
+            "id": 8003,
+            "lat": 50.8200,
+            "lon": -1.0800,
+        },
+    ]
+}
+
 
 def test_extract_overpass_boundary_features_filters_admin_level() -> None:
     features = extract_overpass_boundary_features(SAMPLE_OVERPASS, admin_level="9")
@@ -211,3 +256,30 @@ def test_simplify_overpass_boundaries_requires_geometry() -> None:
         assert "No administrative boundary geometry found" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_simplify_overpass_boundaries_rejects_empty_overpass_payload() -> None:
+    try:
+        simplify_overpass_boundaries_for_canvas(
+            SAMPLE_OVERPASS_EMPTY,
+            tolerance=25.0,
+            units="meters",
+            admin_level="9",
+        )
+    except ValueError as exc:
+        assert "zero Overpass elements" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_simplify_overpass_boundaries_falls_back_to_place_boundary() -> None:
+    payload = simplify_overpass_boundaries_for_canvas(
+        SAMPLE_OVERPASS_PLACE_ONLY,
+        tolerance=0.0,
+        units="degrees",
+        admin_level="10",
+    )
+
+    assert payload["stats"]["feature_count"] == 1
+    assert payload["features"][0]["relation_id"] == 127167
+    assert payload["features"][0]["name"] == "Portsmouth"

@@ -125,7 +125,12 @@ ${place_area_line}
 ${subdivision_query_branches}
 )->.subdivisions;
 
-(.subdivisions;>;);
+(
+  .placeRel;
+  .subdivisions;
+)->.exportRelations;
+
+(.exportRelations;>;);
 out body qt;
 >;
 out skel qt;

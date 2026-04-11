@@ -68,7 +68,7 @@
       "name": "Portsmouth",
       "graphFileName": "portsmouth-graph.bin.gz",
       "boundaryFileName": "portsmouth-district-boundaries-canvas.json",
-      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q72259\"]",
+      "locationRelation": "rel(127167)[\"name\"=\"Portsmouth\"][\"wikidata\"=\"Q72259\"]",
       "subdivisionAdminLevel": "10",
       "epsg": 27700
     },

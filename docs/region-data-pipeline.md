@@ -84,6 +84,7 @@ Boundary extracts are written in a download-friendly shape:
 
 The build step reconstructs boundary polylines from those refs, so fetch does not depend on inline way geometry being present in the Overpass response.
 The boundary query supports both area containment and explicit `subarea` membership so it can adapt to regions whose administrative relations are modeled differently.
+It always includes the selected place relation itself in the output, so the build step can fall back to an outer-boundary basemap when no matching child subdivisions exist for that region.
 
 To avoid fetching every configured region, filter by id:
 
@@ -123,6 +124,8 @@ To build only one artifact class:
 ./data_pipeline/region-data.py build --only luxembourg-country --components graph
 ./data_pipeline/region-data.py build --only luxembourg-country --components boundary
 ```
+
+If the boundary input file exists but contains zero Overpass elements, the build step fails explicitly and tells you to rerun fetch for that region. That usually means an older fetch silently produced an empty payload before the stricter fetch validation was added.
 
 The combined command also supports partial selection:
 

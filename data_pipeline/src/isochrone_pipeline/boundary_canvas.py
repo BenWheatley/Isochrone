@@ -22,7 +22,7 @@ class BoundaryFeature:
 def extract_overpass_boundary_features(
     overpass_json: dict[str, Any],
     *,
-    admin_level: str = "9",
+    admin_level: str | None = "9",
 ) -> tuple[BoundaryFeature, ...]:
     elements = overpass_json.get("elements")
     if not isinstance(elements, list):
@@ -88,10 +88,11 @@ def extract_overpass_boundary_features(
 
         if tags.get("boundary") != "administrative":
             continue
-        if str(tags.get("admin_level")) != admin_level:
+        if admin_level is not None and str(tags.get("admin_level")) != admin_level:
             continue
 
         name = str(tags.get("name") or f"relation_{relation_id}")
+        feature_admin_level = str(tags.get("admin_level") or "")
 
         paths: list[tuple[tuple[float, float], ...]] = []
         relation_geometry = _parse_geometry_points(element.get("geometry"))
@@ -122,7 +123,7 @@ def extract_overpass_boundary_features(
                 BoundaryFeature(
                     relation_id=relation_id,
                     name=name,
-                    admin_level=admin_level,
+                    admin_level=feature_admin_level,
                     paths_lat_lon=tuple(paths),
                 )
             )
@@ -191,8 +192,16 @@ def simplify_overpass_boundaries_for_canvas(
 ) -> dict[str, Any]:
     if tolerance < 0.0:
         raise ValueError("tolerance must be non-negative")
+    elements = overpass_json.get("elements")
+    if isinstance(elements, list) and not elements:
+        raise ValueError(
+            "Boundary input contains zero Overpass elements. "
+            "Rerun the fetch step for this region before building."
+        )
 
     features = extract_overpass_boundary_features(overpass_json, admin_level=admin_level)
+    if not features:
+        features = extract_overpass_boundary_features(overpass_json, admin_level=None)
     if not features:
         raise ValueError(
             "No administrative boundary geometry found. "

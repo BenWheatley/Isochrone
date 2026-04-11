@@ -47,6 +47,7 @@ make review
   - `docs/overpass_routing_query.sh`
   - `docs/overpass_boundary_query.sh`
 - Boundary extracts are intentionally download-friendly: relation members, way node refs, and node coordinates. The build step reconstructs polylines from those refs instead of relying on inline way geometry.
+- Boundary fetches always include the selected place relation itself as well as any discovered subdivisions, so regions without matching child districts can still build a fallback outer-boundary basemap.
 - To avoid hitting every configured region, filter with `--only`, for example:
 
 ```bash
@@ -82,6 +83,8 @@ make review
 ```bash
 ./data_pipeline/region-data.py build --only luxembourg-country --components boundary
 ```
+
+- If a boundary input file exists but contains zero Overpass elements, `build` now fails explicitly and tells you to rerun the fetch step for that region.
 
 - Or fetch and build in one run with:
 
