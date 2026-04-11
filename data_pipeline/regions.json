@@ -40,7 +40,7 @@
       },
       "graphFileName": "athens-graph.bin.gz",
       "boundaryFileName": "athens-district-boundaries-canvas.json",
-      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q1524\"]",
+      "locationRelation": "rel(1370736)[\"name\"=\"Athens\"][\"wikidata\"=\"Q1524\"]",
       "subdivisionAdminLevel": "10",
       "epsg": 2100
     },

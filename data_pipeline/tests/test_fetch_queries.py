@@ -178,7 +178,7 @@ def test_region_data_fetch_command_fetches_selected_locations_from_external_conf
         "  exit 1\n"
         "fi\n"
         'mkdir -p "$(dirname "$output")"\n'
-        'printf \'{"elements": []}\\n\' > "$output"\n'
+        'printf \'{"elements": [{"type":"node","id":1,"lat":0,"lon":0}]}\\n\' > "$output"\n'
         f"printf 'OUTPUT=%s\\n' \"$output\" >> {str(fake_log)!r}\n",
         encoding="utf-8",
     )

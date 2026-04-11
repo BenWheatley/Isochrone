@@ -37,7 +37,7 @@ make review
   - `berlin-district-boundaries.osm.json`
   - `luxembourg-country-routing.osm.json`
 - Each fetch prints the rendered Overpass QL plus request metadata before `curl` runs.
-- If a fetch fails, the pipeline writes debug artifacts next to the intended output path:
+- If a fetch fails, or if Overpass returns HTTP 200 with an empty `elements` list, the pipeline treats that as a failed fetch and writes debug artifacts next to the intended output path:
   - `<output>.failed-query.ql`
   - `<output>.failed-curl-stderr.txt`
   - `<output>.failed-response-body.txt`

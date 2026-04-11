@@ -66,7 +66,7 @@ This stage only downloads raw Overpass API responses.
 Operational debugging behavior:
 - before each request, the pipeline prints the fully rendered Overpass QL to stderr
 - it also prints request metadata: Overpass URL, output path, timeout, and query byte size
-- if the request fails, the pipeline writes sidecar debug files next to the intended output:
+- if the request fails, or if Overpass returns HTTP 200 with an empty `elements` list, the pipeline treats that as a failed fetch and writes sidecar debug files next to the intended output:
   - `<output>.failed-query.ql`
   - `<output>.failed-curl-stderr.txt`
   - `<output>.failed-response-body.txt`

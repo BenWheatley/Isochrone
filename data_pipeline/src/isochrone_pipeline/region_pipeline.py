@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TextIO, cast
 
+from isochrone_pipeline.osm_json_survey import iter_overpass_elements
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_LOCATIONS_FILE = REPO_ROOT / "data_pipeline" / "regions.json"
 DEFAULT_INPUT_DIR = REPO_ROOT / "data_pipeline" / "input"
@@ -432,6 +434,29 @@ def fetch_overpass_json(
                     debug_bundle=debug_bundle,
                 )
             )
+        response_validation = _validate_overpass_response_body(temp_response_path)
+        if response_validation is not None:
+            output_path.unlink(missing_ok=True)
+            debug_bundle = _write_failed_overpass_debug_bundle(
+                output_path=output_path,
+                query_text=query_text,
+                curl_stdout=result.stdout,
+                curl_stderr=result.stderr,
+                response_body_path=temp_response_path,
+                response_headers_path=temp_headers_path,
+            )
+            raise RuntimeError(
+                _format_overpass_failure_message(
+                    request_label=request_label or output_path.name,
+                    output_path=output_path,
+                    overpass_url=overpass_url,
+                    max_time_seconds=max_time_seconds,
+                    curl_exit_code=result.returncode,
+                    http_status=http_status,
+                    debug_bundle=debug_bundle,
+                    response_validation=response_validation,
+                )
+            )
         temp_response_path.replace(output_path)
         _remove_failed_overpass_debug_bundle(output_path)
     finally:
@@ -519,6 +544,7 @@ def _format_overpass_failure_message(
     curl_exit_code: int,
     http_status: int,
     debug_bundle: dict[str, Path],
+    response_validation: str | None = None,
 ) -> str:
     message_lines = [
         f"Overpass request failed for {request_label}",
@@ -527,11 +553,17 @@ def _format_overpass_failure_message(
         f"max_time_seconds={max_time_seconds}",
         f"curl_exit_code={curl_exit_code}",
         f"http_status={http_status}",
-        f"saved_query={debug_bundle['query']}",
-        f"saved_curl_stderr={debug_bundle['stderr']}",
-        f"saved_response_body={debug_bundle['response_body']}",
-        f"saved_response_headers={debug_bundle['response_headers']}",
     ]
+    if response_validation is not None:
+        message_lines.append(f"response_validation={response_validation}")
+    message_lines.extend(
+        [
+            f"saved_query={debug_bundle['query']}",
+            f"saved_curl_stderr={debug_bundle['stderr']}",
+            f"saved_response_body={debug_bundle['response_body']}",
+            f"saved_response_headers={debug_bundle['response_headers']}",
+        ]
+    )
     stdout_path = debug_bundle.get("stdout")
     if stdout_path is not None:
         message_lines.append(f"saved_curl_stdout={stdout_path}")
@@ -546,6 +578,18 @@ def _parse_curl_http_status(stdout_text: str) -> int:
         return int(status_text.splitlines()[-1].strip())
     except ValueError:
         return 0
+
+
+def _validate_overpass_response_body(response_body_path: Path) -> str | None:
+    try:
+        first_element = next(iter_overpass_elements(response_body_path), None)
+    except ValueError as exc:
+        return f"invalid_overpass_json: {exc}"
+
+    if first_element is None:
+        return "empty_overpass_elements"
+
+    return None
 
 
 def main(

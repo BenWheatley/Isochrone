@@ -136,6 +136,14 @@ def test_load_region_specs_reads_external_json_config(tmp_path: Path) -> None:
     )
 
 
+def test_committed_region_config_uses_deterministic_athens_relation_selector() -> None:
+    specs_by_id = {spec.id: spec for spec in load_region_specs(DEFAULT_LOCATIONS_FILE)}
+
+    assert specs_by_id["athens"].location_relation == (
+        'rel(1370736)["name"="Athens"]["wikidata"="Q1524"]'
+    )
+
+
 def test_build_location_manifest_strips_pipeline_only_fields() -> None:
     manifest = build_location_manifest(
         [
@@ -721,3 +729,57 @@ def test_fetch_overpass_json_failure_writes_debug_bundle(tmp_path: Path, monkeyp
     )
     assert not output_path.exists()
     assert "Rendered routing extract for London" in stderr.getvalue()
+
+
+def test_fetch_overpass_json_empty_success_response_writes_debug_bundle(
+    tmp_path: Path, monkeypatch
+) -> None:
+    output_path = tmp_path / "athens-routing.osm.json"
+    stderr = StringIO()
+
+    def fake_run(
+        args: list[str],
+        *,
+        check: bool,
+        text: bool,
+        capture_output: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        del check, text, capture_output
+        output_arg_index = args.index("-o") + 1
+        Path(args[output_arg_index]).write_text('{"elements":[]}\n', encoding="utf-8")
+        header_arg_index = args.index("--dump-header") + 1
+        Path(args[header_arg_index]).write_text(
+            "HTTP/1.1 200 OK\nContent-Type: application/json\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout="200",
+            stderr="",
+        )
+
+    monkeypatch.setattr("isochrone_pipeline.region_pipeline.subprocess.run", fake_run)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        fetch_overpass_json(
+            query_text='[out:json];way["highway"](0,0,1,1);out body qt;',
+            output_path=output_path,
+            overpass_url="https://overpass.example/api/interpreter",
+            max_time_seconds=600,
+            stderr=stderr,
+            request_label="routing extract for Athens",
+        )
+
+    message = str(exc_info.value)
+    assert "routing extract for Athens" in message
+    assert "http_status=200" in message
+    assert "response_validation=empty_overpass_elements" in message
+    assert str(output_path.with_name("athens-routing.osm.json.failed-response-body.txt")) in message
+    assert (
+        output_path.with_name("athens-routing.osm.json.failed-response-body.txt").read_text(
+            encoding="utf-8"
+        )
+        == '{"elements":[]}\n'
+    )
+    assert not output_path.exists()
