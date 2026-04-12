@@ -1,3 +1,6 @@
+import zipfile
+from pathlib import Path
+
 from isochrone_pipeline.boundary_canvas import (
     extract_overpass_boundary_features,
     simplify_overpass_boundaries_for_canvas,
@@ -169,6 +172,35 @@ SAMPLE_OVERPASS_PLACE_ONLY = {
 }
 
 
+def _write_test_water_polygons_zip(zip_path: Path) -> None:
+    import shapefile
+
+    source_dir = zip_path.parent / "water_source"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    shapefile_base = source_dir / "water_polygons"
+
+    writer = shapefile.Writer(str(shapefile_base), shapeType=shapefile.POLYGON)
+    writer.field("name", "C")
+    writer.poly(
+        [
+            [
+                [13.3600, 52.5190],
+                [13.3900, 52.5190],
+                [13.3900, 52.5220],
+                [13.3600, 52.5220],
+                [13.3600, 52.5190],
+            ]
+        ]
+    )
+    writer.record("ocean")
+    writer.close()
+
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        for suffix in (".shp", ".shx", ".dbf"):
+            file_path = shapefile_base.with_suffix(suffix)
+            archive.write(file_path, arcname=file_path.name)
+
+
 def test_extract_overpass_boundary_features_filters_admin_level() -> None:
     features = extract_overpass_boundary_features(SAMPLE_OVERPASS, admin_level="9")
 
@@ -283,3 +315,31 @@ def test_simplify_overpass_boundaries_falls_back_to_place_boundary() -> None:
     assert payload["stats"]["feature_count"] == 1
     assert payload["features"][0]["relation_id"] == 127167
     assert payload["features"][0]["name"] == "Portsmouth"
+
+
+def test_simplify_overpass_boundaries_can_include_clipped_water_polygons(
+    tmp_path: Path,
+) -> None:
+    coast_zip_path = tmp_path / "water-polygons.zip"
+    _write_test_water_polygons_zip(coast_zip_path)
+
+    payload = simplify_overpass_boundaries_for_canvas(
+        SAMPLE_OVERPASS,
+        tolerance=0.0,
+        units="degrees",
+        admin_level="9",
+        include_coast=True,
+        coast_source=coast_zip_path,
+    )
+
+    assert payload["stats"]["water_feature_count"] == 1
+    assert payload["stats"]["water_path_count"] >= 1
+    assert len(payload["water_features"]) == 1
+
+    width = payload["coordinate_space"]["width"]
+    height = payload["coordinate_space"]["height"]
+    water_path = payload["water_features"][0]["paths"][0]
+    assert len(water_path) >= 4
+    for x, y in water_path:
+        assert 0.0 <= x <= width
+        assert 0.0 <= y <= height

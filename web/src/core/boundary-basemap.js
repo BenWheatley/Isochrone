@@ -30,43 +30,8 @@ export function parseBoundaryBasemapPayload(payload) {
     throw new Error('boundary payload is missing features[]');
   }
 
-  const features = rawFeatures
-    .map((feature, featureIndex) => {
-      if (!feature || typeof feature !== 'object') {
-        throw new Error(`features[${featureIndex}] must be an object`);
-      }
-
-      const name = typeof feature.name === 'string' ? feature.name : `feature_${featureIndex}`;
-      const relationId = Number.isFinite(feature.relation_id) ? feature.relation_id : null;
-
-      if (!Array.isArray(feature.paths)) {
-        throw new Error(`features[${featureIndex}].paths must be an array`);
-      }
-
-      const paths = feature.paths
-        .map((path, pathIndex) => {
-          if (!Array.isArray(path)) {
-            throw new Error(`features[${featureIndex}].paths[${pathIndex}] must be an array`);
-          }
-
-          return path
-            .map((point, pointIndex) =>
-              parseCoordinatePair(
-                point,
-                `features[${featureIndex}].paths[${pathIndex}][${pointIndex}]`,
-              ),
-            )
-            .filter((point) => point.length === 2);
-        })
-        .filter((path) => path.length >= 2);
-
-      return {
-        name,
-        relationId,
-        paths,
-      };
-    })
-    .filter((feature) => feature.paths.length > 0);
+  const features = parseDrawableFeatures(rawFeatures, 'features');
+  const waterFeatures = parseDrawableFeatures(payload.water_features ?? [], 'water_features');
 
   if (features.length === 0) {
     throw new Error('boundary payload has no drawable paths');
@@ -81,6 +46,7 @@ export function parseBoundaryBasemapPayload(payload) {
       axis,
     },
     features,
+    waterFeatures,
   };
 }
 
@@ -93,6 +59,19 @@ export function projectBoundaryBasemapToGraphPaths(payloadOrParsedBoundary, grap
   const maxY = graphHeader.gridHeightPx - 1;
   return {
     coordinateSpace: parsedBoundary.coordinateSpace,
+    waterFeatures: parsedBoundary.waterFeatures.map((feature) => ({
+      name: feature.name,
+      relationId: feature.relationId,
+      paths: feature.paths.map((path) =>
+        path.map((point) => {
+          const easting = parsedBoundary.coordinateSpace.xOrigin + point[0];
+          const northing = parsedBoundary.coordinateSpace.yOrigin - point[1];
+          const xPx = (easting - graphHeader.originEasting) / graphHeader.pixelSizeM;
+          const yPx = maxY - (northing - graphHeader.originNorthing) / graphHeader.pixelSizeM;
+          return [xPx, yPx];
+        }),
+      ),
+    })),
     features: parsedBoundary.features.map((feature) => ({
       name: feature.name,
       relationId: feature.relationId,
@@ -124,6 +103,12 @@ export function getBoundaryStrokeStyle(colourTheme) {
     : 'rgba(125, 175, 220, 0.55)';
 }
 
+export function getBoundaryWaterFillStyle(colourTheme) {
+  return normalizeIsochroneTheme(colourTheme, 'dark') === 'light'
+    ? 'rgba(120, 235, 255, 0.72)'
+    : 'rgba(16, 55, 106, 0.78)';
+}
+
 function isParsedBoundaryBasemapPayload(value) {
   return (
     value
@@ -132,6 +117,51 @@ function isParsedBoundaryBasemapPayload(value) {
     && typeof value.coordinateSpace === 'object'
     && Array.isArray(value.features)
   );
+}
+
+function parseDrawableFeatures(rawFeatures, contextName) {
+  if (!Array.isArray(rawFeatures)) {
+    throw new Error(`boundary payload is missing ${contextName}[]`);
+  }
+
+  return rawFeatures
+    .map((feature, featureIndex) => {
+      if (!feature || typeof feature !== 'object') {
+        throw new Error(`${contextName}[${featureIndex}] must be an object`);
+      }
+
+      const name =
+        typeof feature.name === 'string' ? feature.name : `${contextName}_feature_${featureIndex}`;
+      const relationId = Number.isFinite(feature.relation_id) ? feature.relation_id : null;
+
+      if (!Array.isArray(feature.paths)) {
+        throw new Error(`${contextName}[${featureIndex}].paths must be an array`);
+      }
+
+      const paths = feature.paths
+        .map((path, pathIndex) => {
+          if (!Array.isArray(path)) {
+            throw new Error(`${contextName}[${featureIndex}].paths[${pathIndex}] must be an array`);
+          }
+
+          return path
+            .map((point, pointIndex) =>
+              parseCoordinatePair(
+                point,
+                `${contextName}[${featureIndex}].paths[${pathIndex}][${pointIndex}]`,
+              ),
+            )
+            .filter((point) => point.length === 2);
+        })
+        .filter((path) => path.length >= 2);
+
+      return {
+        name,
+        relationId,
+        paths,
+      };
+    })
+    .filter((feature) => feature.paths.length > 0);
 }
 
 function parseCoordinatePair(value, context) {

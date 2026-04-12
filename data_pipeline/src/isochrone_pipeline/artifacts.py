@@ -36,6 +36,8 @@ def write_simplified_boundary_canvas(
     units: ResolutionUnits,
     epsg: int,
     admin_level: str,
+    include_coast: bool = False,
+    coast_source: str | Path | None = None,
 ) -> dict[str, Any]:
     overpass_json = json.loads(input_path.read_text(encoding="utf-8"))
     payload = simplify_overpass_boundaries_for_canvas(
@@ -44,6 +46,8 @@ def write_simplified_boundary_canvas(
         units=units,
         epsg_code=epsg,
         admin_level=admin_level,
+        include_coast=include_coast,
+        coast_source=coast_source,
     )
 
     output = {

@@ -42,6 +42,7 @@ import {
   updateDistanceScaleBar,
   timeToColour,
 } from '../src/app.js';
+import { getBoundaryStrokeStyle, getBoundaryWaterFillStyle } from '../src/core/boundary-basemap.js';
 import { precomputeEdgeTraversalCostSecondsCache } from '../src/core/routing.js';
 
 const EDGE_MODE_WALK_BIT = 1;
@@ -824,6 +825,100 @@ test('drawBoundaryBasemapAlignedToGraphGrid sizes canvas to display frame and pr
     [1, 0, 0, 1, 200, 0],
   );
   assert.equal(context.lineWidth, 1.2);
+});
+
+test('drawBoundaryBasemapAlignedToGraphGrid renders water behind administrative boundaries', () => {
+  const operations = [];
+  const context = {
+    fillStyle: '',
+    strokeStyle: '',
+    lineWidth: 0,
+    lineJoin: '',
+    lineCap: '',
+    beginPath() {
+      operations.push({ type: 'beginPath' });
+    },
+    moveTo() {},
+    lineTo() {},
+    closePath() {
+      operations.push({ type: 'closePath' });
+    },
+    fill() {
+      operations.push({ type: 'fill', fillStyle: this.fillStyle });
+    },
+    stroke() {
+      operations.push({ type: 'stroke', strokeStyle: this.strokeStyle });
+    },
+    clearRect() {},
+    setTransform() {},
+  };
+  const boundaryCanvas = {
+    width: 800,
+    height: 300,
+    getBoundingClientRect() {
+      return { width: 800, height: 300 };
+    },
+    getContext(kind) {
+      assert.equal(kind, '2d');
+      return context;
+    },
+  };
+  const graphHeader = {
+    originEasting: 0,
+    originNorthing: 0,
+    gridWidthPx: 400,
+    gridHeightPx: 300,
+    pixelSizeM: 1,
+  };
+  const payload = {
+    coordinate_space: {
+      width: 400,
+      height: 300,
+      x_origin: 0,
+      y_origin: 299,
+      axis: 'x-right-y-down',
+    },
+    water_features: [
+      {
+        paths: [
+          [
+            [0, 0],
+            [399, 0],
+            [399, 299],
+            [0, 299],
+            [0, 0],
+          ],
+        ],
+      },
+    ],
+    features: [
+      {
+        name: 'frame',
+        paths: [
+          [
+            [100, 100],
+            [300, 100],
+            [300, 200],
+            [100, 200],
+            [100, 100],
+          ],
+        ],
+      },
+    ],
+  };
+
+  drawBoundaryBasemapAlignedToGraphGrid(boundaryCanvas, payload, graphHeader, {
+    colourTheme: 'dark',
+  });
+
+  const fillOperations = operations.filter((operation) => operation.type === 'fill');
+  const strokeOperations = operations.filter((operation) => operation.type === 'stroke');
+
+  assert.equal(fillOperations.length, 2);
+  assert.equal(strokeOperations.length, 1);
+  assert.equal(fillOperations[0].fillStyle, getBoundaryWaterFillStyle('dark'));
+  assert.equal(fillOperations[1].fillStyle, 'rgba(0, 0, 0, 0)');
+  assert.equal(strokeOperations[0].strokeStyle, getBoundaryStrokeStyle('dark'));
 });
 
 test('createWebGlIsochroneRenderer requests an anti-aliased WebGL context', () => {

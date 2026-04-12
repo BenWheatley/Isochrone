@@ -38,6 +38,7 @@ import {
 } from './core/viewport.js';
 import {
   getBoundaryStrokeStyle,
+  getBoundaryWaterFillStyle,
   isClosedPath,
   parseBoundaryBasemapPayload,
   projectBoundaryBasemapToGraphPaths,
@@ -1471,11 +1472,6 @@ export function drawBoundaryBasemapAlignedToGraphGrid(
 
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, boundaryCanvas.width, boundaryCanvas.height);
-  context.fillStyle = 'rgba(0, 0, 0, 0)';
-  context.strokeStyle = getBoundaryStrokeStyle(options.colourTheme);
-  context.lineWidth = 1.2 / viewportFrame.effectiveScale;
-  context.lineJoin = 'round';
-  context.lineCap = 'round';
   context.setTransform(
     viewportFrame.effectiveScale,
     0,
@@ -1484,6 +1480,40 @@ export function drawBoundaryBasemapAlignedToGraphGrid(
     -viewportFrame.offsetXPx * viewportFrame.effectiveScale,
     -viewportFrame.offsetYPx * viewportFrame.effectiveScale,
   );
+
+  context.fillStyle = getBoundaryWaterFillStyle(options.colourTheme);
+  for (const feature of projectedBoundary.waterFeatures) {
+    let hasDrawablePath = false;
+    context.beginPath();
+    for (const path of feature.paths) {
+      if (path.length < 3) {
+        continue;
+      }
+      hasDrawablePath = true;
+      for (let i = 0; i < path.length; i += 1) {
+        const point = path[i];
+        const xPx = point[0];
+        const yPx = point[1];
+        if (i === 0) {
+          context.moveTo(xPx, yPx);
+        } else {
+          context.lineTo(xPx, yPx);
+        }
+      }
+      if (isClosedPath(path)) {
+        context.closePath();
+      }
+    }
+    if (hasDrawablePath) {
+      context.fill();
+    }
+  }
+
+  context.fillStyle = 'rgba(0, 0, 0, 0)';
+  context.strokeStyle = getBoundaryStrokeStyle(options.colourTheme);
+  context.lineWidth = 1.2 / viewportFrame.effectiveScale;
+  context.lineJoin = 'round';
+  context.lineCap = 'round';
 
   let renderedPathCount = 0;
 

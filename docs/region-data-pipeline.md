@@ -125,6 +125,25 @@ To build only one artifact class:
 ./data_pipeline/region-data.py build --only luxembourg-country --components boundary
 ```
 
+Optional coast/water context:
+
+The low-level boundary simplifier can also attach a clipped water-polygon layer to the same output JSON as the administrative boundaries:
+
+```bash
+./data_pipeline/scripts/simplify_boundary_json.py \
+  --input data_pipeline/input/rhode-island-district-boundaries.osm.json \
+  --output data_pipeline/output/rhode-island-district-boundaries-canvas.json \
+  --resolution 25 \
+  --units meters \
+  --include-coast
+```
+
+Notes:
+- `--include-coast` is opt-in; normal boundary builds do not fetch or attach water polygons
+- by default it downloads the WGS84 split water-polygon archive from [osmdata.openstreetmap.de water polygons](https://osmdata.openstreetmap.de/data/water-polygons.html)
+- the water polygons are clipped to the boundary bbox and written into the same boundary canvas JSON under `water_features`
+- `--coast-source <local.zip|local.shp>` overrides the default download source for offline or debug runs
+
 If the boundary input file exists but contains zero Overpass elements, the build step fails explicitly and tells you to rerun fetch for that region. That usually means an older fetch silently produced an empty payload before the stricter fetch validation was added.
 
 The combined command also supports partial selection:

@@ -84,6 +84,20 @@ make review
 ./data_pipeline/region-data.py build --only luxembourg-country --components boundary
 ```
 
+- For an opt-in coast/water context layer in the same boundary output JSON, use the lower-level boundary simplifier directly:
+
+```bash
+./data_pipeline/scripts/simplify_boundary_json.py \
+  --input data_pipeline/input/rhode-island-district-boundaries.osm.json \
+  --output data_pipeline/output/rhode-island-district-boundaries-canvas.json \
+  --resolution 25 \
+  --units meters \
+  --include-coast
+```
+
+- `--include-coast` downloads and clips the OSM-derived water polygons dataset from [osmdata.openstreetmap.de water polygons](https://osmdata.openstreetmap.de/data/water-polygons.html) and stores the resulting water polygons in the same output JSON as the administrative boundaries.
+- Use `--coast-source <local.zip|local.shp>` to override the default source for debugging or offline runs.
+
 - If a boundary input file exists but contains zero Overpass elements, `build` now fails explicitly and tells you to rerun the fetch step for that region.
 
 - Or fetch and build in one run with:
@@ -148,6 +162,7 @@ make wasm-build
 - Top-bar location selector is populated from `web/src/data/locations.json`, where each entry defines a stable location id, canonical display name, optional localized display-name overrides, plus the graph and boundary asset filenames to load.
 - `data_pipeline/regions.json` is the source of truth for region display names and localized variants; `web/src/data/locations.json` is generated from it by `./data_pipeline/region-data.py build` or `./data_pipeline/region-data.py all` and should not be hand-maintained for naming changes.
 - The graph payload is gzip-compressed and decompressed in-browser before parsing.
+- When present in the boundary payload, clipped water polygons render behind the administrative boundaries in the basemap layer.
 - Clicking the map computes a full travel-time field across all reachable graph nodes (no walk-time cap).
 - Desktop controls:
   - Primary click selects a new origin.
