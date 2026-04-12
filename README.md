@@ -154,6 +154,10 @@ make wasm-build
   - Primary drag pans the map.
   - Mouse wheel zooms at the pointer.
   - Secondary drag moves the selection point.
+- Touch controls:
+  - Single tap selects a new origin.
+  - Two-finger pinch zooms.
+  - Two-finger drag pans the map.
 - Zoom/pan redraw the current routing snapshot; camera movement does not start a new route solve.
 - Selected region is persisted in URL query params as `region=<locationId>`.
 - Last selected start node is persisted in URL query params as `node=<graphNodeId>` and restored on reload; switching region clears `node` while preserving the other URL params.

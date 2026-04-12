@@ -83,6 +83,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   let activeRunToken = null;
   let isDisposed = false;
   let activePointerGesture = null;
+  let activeTouchPoints = new Map();
+  let activeTouchGesture = null;
+  let pendingTouchTap = null;
   let queuedClientPoint = null;
   let queuedNodeIndex = null;
   let lastCompletedClientPoint = null;
@@ -342,8 +345,210 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     }
   };
 
+  const trackTouchPointer = (event) => {
+    if (!Number.isInteger(event.pointerId)) {
+      return;
+    }
+    activeTouchPoints.set(event.pointerId, {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+    if (typeof shell.isochroneCanvas.setPointerCapture === 'function') {
+      shell.isochroneCanvas.setPointerCapture(event.pointerId);
+    }
+  };
+
+  const updateTouchPointer = (event) => {
+    if (!Number.isInteger(event.pointerId) || !activeTouchPoints.has(event.pointerId)) {
+      return false;
+    }
+    activeTouchPoints.set(event.pointerId, {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+    return true;
+  };
+
+  const getActiveTouchPair = () =>
+    [...activeTouchPoints.values()]
+      .sort((left, right) => left.pointerId - right.pointerId)
+      .slice(0, 2);
+
+  const resetTouchGestureSnapshot = () => {
+    const [firstPoint, secondPoint] = getActiveTouchPair();
+    if (!firstPoint || !secondPoint) {
+      activeTouchGesture = null;
+      return;
+    }
+    activeTouchGesture = {
+      lastCenterClientX: (firstPoint.clientX + secondPoint.clientX) / 2,
+      lastCenterClientY: (firstPoint.clientY + secondPoint.clientY) / 2,
+      lastDistancePx: Math.max(
+        1,
+        Math.hypot(
+          secondPoint.clientX - firstPoint.clientX,
+          secondPoint.clientY - firstPoint.clientY,
+        ),
+      ),
+    };
+  };
+
+  const beginTouchTap = (event) => {
+    pendingTouchTap = {
+      pointerId: Number.isInteger(event.pointerId) ? event.pointerId : null,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      moved: false,
+    };
+  };
+
+  const updateViewportFromTouchGesture = (nextCenterClientX, nextCenterClientY, nextDistancePx) => {
+    if (activeTouchGesture === null || !Number.isFinite(nextDistancePx) || nextDistancePx <= 0) {
+      return false;
+    }
+
+    const previousCenterCanvas = mapClientPointToCanvasPixel(
+      shell.isochroneCanvas,
+      activeTouchGesture.lastCenterClientX,
+      activeTouchGesture.lastCenterClientY,
+    );
+    const currentCenterCanvas = mapClientPointToCanvasPixel(
+      shell.isochroneCanvas,
+      nextCenterClientX,
+      nextCenterClientY,
+    );
+    const zoomFactor = nextDistancePx / activeTouchGesture.lastDistancePx;
+    const frameOptions = {
+      frameWidthPx: shell.isochroneCanvas.width,
+      frameHeightPx: shell.isochroneCanvas.height,
+      minScale: MIN_VIEWPORT_SCALE,
+      maxScale: MAX_VIEWPORT_SCALE,
+    };
+    const zoomedViewport = zoomMapViewportAtCanvasPixel(
+      mapData.graph.header,
+      mapData.viewport,
+      previousCenterCanvas.xPx,
+      previousCenterCanvas.yPx,
+      zoomFactor,
+      frameOptions,
+    );
+    const combinedViewport = panMapViewportByCanvasDelta(
+      mapData.graph.header,
+      zoomedViewport,
+      currentCenterCanvas.xPx - previousCenterCanvas.xPx,
+      currentCenterCanvas.yPx - previousCenterCanvas.yPx,
+      frameOptions,
+    );
+    const scaleChanged = Math.abs(combinedViewport.scale - mapData.viewport.scale) > Number.EPSILON;
+    const viewportChanged = applyViewport(combinedViewport, { updateScaleBar: scaleChanged });
+
+    activeTouchGesture = {
+      lastCenterClientX: nextCenterClientX,
+      lastCenterClientY: nextCenterClientY,
+      lastDistancePx: Math.max(1, nextDistancePx),
+    };
+    return viewportChanged;
+  };
+
+  const handleTouchPointerDown = (event) => {
+    if (typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+    trackTouchPointer(event);
+    if (activeTouchPoints.size === 1) {
+      activeTouchGesture = null;
+      beginTouchTap(event);
+      return;
+    }
+    pendingTouchTap = null;
+    if (activeTouchPoints.size >= 2) {
+      resetTouchGestureSnapshot();
+    }
+  };
+
+  const handleTouchPointerMove = (event) => {
+    if (!updateTouchPointer(event)) {
+      return;
+    }
+    if (typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+
+    if (activeTouchPoints.size === 1) {
+      if (
+        pendingTouchTap !== null
+        && pendingTouchTap.pointerId !== null
+        && event.pointerId === pendingTouchTap.pointerId
+      ) {
+        const totalDeltaX = event.clientX - pendingTouchTap.startClientX;
+        const totalDeltaY = event.clientY - pendingTouchTap.startClientY;
+        if (Math.hypot(totalDeltaX, totalDeltaY) >= NAVIGATION_DRAG_THRESHOLD_PX) {
+          pendingTouchTap.moved = true;
+        }
+      }
+      return;
+    }
+
+    const [firstPoint, secondPoint] = getActiveTouchPair();
+    if (!firstPoint || !secondPoint) {
+      return;
+    }
+    if (activeTouchGesture === null) {
+      resetTouchGestureSnapshot();
+      return;
+    }
+    pendingTouchTap = null;
+    updateViewportFromTouchGesture(
+      (firstPoint.clientX + secondPoint.clientX) / 2,
+      (firstPoint.clientY + secondPoint.clientY) / 2,
+      Math.hypot(secondPoint.clientX - firstPoint.clientX, secondPoint.clientY - firstPoint.clientY),
+    );
+  };
+
+  const handleTouchPointerUpOrCancel = (event, { cancelled = false } = {}) => {
+    if (!Number.isInteger(event.pointerId) || !activeTouchPoints.has(event.pointerId)) {
+      return;
+    }
+    if (typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+
+    const shouldSelect =
+      !cancelled
+      && activeTouchPoints.size === 1
+      && pendingTouchTap !== null
+      && pendingTouchTap.pointerId !== null
+      && event.pointerId === pendingTouchTap.pointerId
+      && pendingTouchTap.moved !== true;
+
+    activeTouchPoints.delete(event.pointerId);
+    releasePointerCaptureIfHeld(event);
+
+    if (shouldSelect) {
+      queueLatestRunAtClientPoint(event.clientX, event.clientY);
+    }
+
+    if (activeTouchPoints.size >= 2) {
+      pendingTouchTap = null;
+      resetTouchGestureSnapshot();
+      return;
+    }
+
+    pendingTouchTap = null;
+    activeTouchGesture = null;
+  };
+
   const handlePointerDown = (event) => {
-    if (isDisposed || activePointerGesture !== null) {
+    if (isDisposed) {
+      return;
+    }
+    if (event.pointerType === 'touch') {
+      handleTouchPointerDown(event);
+      return;
+    }
+    if (activePointerGesture !== null || activeTouchPoints.size > 0) {
       return;
     }
     if (event.pointerType !== 'mouse') {
@@ -365,6 +570,10 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   };
 
   const handlePointerMove = (event) => {
+    if (event.pointerType === 'touch') {
+      handleTouchPointerMove(event);
+      return;
+    }
     if (
       activePointerGesture === null
       || (
@@ -412,6 +621,10 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   };
 
   const handlePointerUp = (event) => {
+    if (event.pointerType === 'touch') {
+      handleTouchPointerUpOrCancel(event);
+      return;
+    }
     if (
       activePointerGesture === null
       || (
@@ -447,6 +660,10 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   };
 
   const handlePointerCancel = (event) => {
+    if (event.pointerType === 'touch') {
+      handleTouchPointerUpOrCancel(event, { cancelled: true });
+      return;
+    }
     activePointerGesture = null;
     releasePointerCaptureIfHeld(event);
   };
@@ -483,6 +700,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
       activeRunToken = null;
     }
     activePointerGesture = null;
+    activeTouchPoints = new Map();
+    activeTouchGesture = null;
+    pendingTouchTap = null;
     queuedClientPoint = null;
     queuedNodeIndex = null;
     lastCompletedClientPoint = null;
