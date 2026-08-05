@@ -7,6 +7,7 @@ import {
   WASM_REQUIRED_MESSAGE,
   clearRenderedIsochrone,
   computeEdgeTraversalCostSeconds,
+  computeExportDistanceScaleBar,
   createWebGlIsochroneRenderer,
   createNodeSpatialIndex,
   createPixelGrid,
@@ -713,6 +714,24 @@ test('updateDistanceScaleBar reflects zoomed viewport scale', () => {
   assert.equal(shell.distanceScaleLine.style.width, '100px');
   assert.equal(shell.distanceScaleLabel.textContent, '500 m');
   assert.equal(shell.distanceScaleLine.style.values['--scale-segment-width-px'], '20px');
+});
+
+test('computeExportDistanceScaleBar sizes the bar for the unzoomed export pixel grid, not the live viewport', () => {
+  const graphHeader = { pixelSizeM: 10 };
+
+  const exportScaleBar = computeExportDistanceScaleBar(graphHeader);
+
+  // Matches the zoom=1 on-screen case (metresPerCssPixel === pixelSizeM) from
+  // the 'sets distance-aligned segment width' test above, regardless of any
+  // zoom level the live map view happens to be at when export is triggered.
+  assert.equal(exportScaleBar.lineWidthPx, 100);
+  assert.equal(exportScaleBar.segmentWidthPx, 20);
+  assert.equal(exportScaleBar.label, '1.0 km');
+});
+
+test('computeExportDistanceScaleBar requires a positive pixelSizeM', () => {
+  assert.throws(() => computeExportDistanceScaleBar({ pixelSizeM: 0 }));
+  assert.throws(() => computeExportDistanceScaleBar(null));
 });
 
 test('layoutMapViewportToContainGraph clears legacy contained-layout sizing', () => {

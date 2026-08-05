@@ -251,14 +251,56 @@ test('buildRenderedIsochroneSvgDocument uses theme-derived overlay colours and p
     },
   });
 
-  assert.ok(svg.includes('fill="rgba(251, 253, 255, 0.92)"'));
-  assert.ok(svg.includes('stroke="rgba(97, 130, 159, 0.62)"'));
+  assert.ok(!svg.includes('fill="rgba(251, 253, 255, 0.92)"'));
+  assert.ok(!svg.includes('stroke="rgba(97, 130, 159, 0.62)"'));
   assert.ok(svg.includes('fill="#173750"'));
   assert.ok(svg.includes('fill="#365772"'));
   assert.ok(svg.includes('stroke="rgb(0, 110, 210)"'));
   assert.ok(svg.includes('id="isochrone-scale-pattern"'));
   assert.ok(svg.includes('fill="#21435d"'));
   assert.ok(svg.includes('fill="#eef5fb"'));
+});
+
+test('buildRenderedIsochroneSvgDocument omits outer overlay boxes and keeps full copyright text', () => {
+  const copyrightNotice =
+    'Map data © OpenStreetMap contributors, available under the Open Database License (ODbL): '
+    + 'https://www.openstreetmap.org/copyright Additional disclaimer text should remain fully visible '
+    + 'in the SVG export without truncation.';
+  const svg = buildRenderedIsochroneSvgDocument({
+    widthPx: 600,
+    heightPx: 400,
+    backgroundColour: '#111820',
+    graphHeader: createGraphHeader(),
+    boundaryPayload: createBoundaryPayload(),
+    edgeVertexData: new Float32Array([10, 10, 0, 20, 20, 60]),
+    title: 'Isochrone of Test, by Car',
+    scaleBarLabel: '1 km',
+    scaleBarWidthPx: 96,
+    scaleBarSegmentWidthPx: 24,
+    copyrightNotice,
+    overlayColours: {
+      overlayBackground: 'rgba(4, 12, 18, 0.88)',
+      overlayBorder: 'rgba(130, 170, 210, 0.55)',
+      overlayText: '#dceaf8',
+      overlayNote: '#c0d4e8',
+      scaleLineBackground: '#f6fbff',
+      scaleLineAlternate: '#31577a',
+      scaleLineBorder: '#c1d6e9',
+      boundaryStroke: 'rgba(125, 175, 220, 0.55)',
+    },
+  });
+
+  assert.ok(svg.includes('id="isochrone-title"'));
+  assert.ok(svg.includes('id="isochrone-legend"'));
+  assert.ok(svg.includes('id="isochrone-scale"'));
+  assert.ok(svg.includes('id="isochrone-copyright"'));
+  assert.ok(!svg.includes('fill="rgba(4, 12, 18, 0.88)"'));
+  assert.ok(!svg.includes('stroke="rgba(130, 170, 210, 0.55)"'));
+  assert.ok(!svg.includes('...'));
+  assert.ok(svg.includes('Additional'));
+  assert.ok(svg.includes('disclaimer'));
+  assert.ok(svg.includes('fully'));
+  assert.ok(svg.includes('without truncation.'));
 });
 
 test('buildRenderedIsochroneSvgDocument escapes title text', () => {
@@ -427,7 +469,8 @@ test('exportCurrentRenderedIsochroneSvg emits downloadable vector SVG with curre
 
   assert.equal(result.filename.endsWith('.svg'), true);
   assert.ok(result.svgDocument.includes('fill="#ffffff"'));
-  assert.ok(result.svgDocument.includes('fill="rgba(251, 253, 255, 0.92)"'));
+  assert.ok(!result.svgDocument.includes('fill="rgba(251, 253, 255, 0.92)"'));
+  assert.ok(!result.svgDocument.includes('stroke="rgba(97, 130, 159, 0.62)"'));
   assert.ok(result.svgDocument.includes('stroke="rgb(0, 110, 210)"'));
   assert.ok(result.svgDocument.includes('id="isochrone-boundaries"'));
   assert.equal(appendedNode, anchor);

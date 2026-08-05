@@ -1987,6 +1987,33 @@ function pickScaleBucketDistanceMetres(totalDistanceMetres) {
   return candidates[0].candidate;
 }
 
+function computeDistanceScaleBarGeometry(metresPerPixel) {
+  const preferredWidthPx = 120;
+  const preferredDistanceMetres = preferredWidthPx * metresPerPixel;
+  const chosenDistanceMetres = pickScaleDistanceMetres(preferredDistanceMetres);
+  const lineWidthPx = Math.max(24, Math.round(chosenDistanceMetres / metresPerPixel));
+  const bucketDistanceMetres = pickScaleBucketDistanceMetres(chosenDistanceMetres);
+  const segmentWidthPx = Math.max(4, Math.round(bucketDistanceMetres / metresPerPixel));
+  return {
+    chosenDistanceMetres,
+    lineWidthPx,
+    bucketDistanceMetres,
+    segmentWidthPx,
+    label: formatDistanceLabel(chosenDistanceMetres),
+  };
+}
+
+// The SVG export renders content in the unzoomed full-region graph pixel grid
+// (1 px = graphHeader.pixelSizeM metres), not the live zoomed screen viewport,
+// so the exported scale bar must be sized from that same fixed scale rather
+// than copied from the on-screen bar's CSS pixel width.
+export function computeExportDistanceScaleBar(graphHeader) {
+  if (!graphHeader || !(graphHeader.pixelSizeM > 0)) {
+    throw new Error('graphHeader.pixelSizeM must be positive');
+  }
+  return computeDistanceScaleBarGeometry(graphHeader.pixelSizeM);
+}
+
 export function renderIsochroneLegend(shell, cycleMinutes, options = {}) {
   if (!shell || typeof shell !== 'object' || !shell.isochroneLegend) {
     throw new Error('shell.isochroneLegend is required');
@@ -2081,12 +2108,7 @@ export function updateDistanceScaleBar(shell, graphHeader, options = {}) {
   });
 
   const metresPerCssPixel = graphHeader.pixelSizeM / viewportFrame.effectiveScale;
-  const preferredWidthPx = 120;
-  const preferredDistanceMetres = preferredWidthPx * metresPerCssPixel;
-  const chosenDistanceMetres = pickScaleDistanceMetres(preferredDistanceMetres);
-  const lineWidthPx = Math.max(24, Math.round(chosenDistanceMetres / metresPerCssPixel));
-  const bucketDistanceMetres = pickScaleBucketDistanceMetres(chosenDistanceMetres);
-  const segmentWidthPx = Math.max(4, Math.round(bucketDistanceMetres / metresPerCssPixel));
+  const { lineWidthPx, segmentWidthPx, label } = computeDistanceScaleBarGeometry(metresPerCssPixel);
 
   shell.distanceScaleLine.style.width = `${lineWidthPx}px`;
   if (typeof shell.distanceScaleLine.style.setProperty === 'function') {
@@ -2094,7 +2116,7 @@ export function updateDistanceScaleBar(shell, graphHeader, options = {}) {
   } else {
     shell.distanceScaleLine.style['--scale-segment-width-px'] = `${segmentWidthPx}px`;
   }
-  shell.distanceScaleLabel.textContent = formatDistanceLabel(chosenDistanceMetres);
+  shell.distanceScaleLabel.textContent = label;
 }
 
 export function precomputeNodePixelCoordinates(graph) {
@@ -5560,12 +5582,14 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         const locationName = initializedMapData?.locationName ?? DEFAULT_LOCATION_NAME;
         const modeLabels = getSelectedTransportModeLabels(shell);
         const title = formatIsochroneExportTitle(locationName, modeLabels);
-        const scaleBarLabel = shell.distanceScaleLabel?.textContent?.trim() ?? '';
-        const parsedScaleBarWidthPx = Number.parseFloat(shell.distanceScaleLine?.style?.width ?? '');
-        const scaleBarWidthPx =
-          Number.isFinite(parsedScaleBarWidthPx) && parsedScaleBarWidthPx > 0
-            ? parsedScaleBarWidthPx
-            : 96;
+        const graphHeaderForExport = initializedMapData?.graph.header ?? null;
+        const exportScaleBar = graphHeaderForExport
+          ? computeExportDistanceScaleBar(graphHeaderForExport)
+          : null;
+        const scaleBarLabel =
+          exportScaleBar?.label ?? shell.distanceScaleLabel?.textContent?.trim() ?? '';
+        const scaleBarWidthPx = exportScaleBar?.lineWidthPx ?? 96;
+        const scaleBarSegmentWidthPx = exportScaleBar?.segmentWidthPx;
         const copyrightNotice =
           shell.routingDisclaimer?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 
@@ -5590,6 +5614,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           messages: getShellLocaleMessages(shell),
           scaleBarLabel,
           scaleBarWidthPx,
+          scaleBarSegmentWidthPx,
           copyrightNotice,
         });
       },

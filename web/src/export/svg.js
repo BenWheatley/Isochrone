@@ -104,11 +104,21 @@ function wrapTextByWords(text, maxCharsPerLine, maxLines) {
   if (normalizedText.length === 0) {
     return [];
   }
-  const words = normalizedText.split(' ');
+  const words = [];
+  for (const rawWord of normalizedText.split(' ')) {
+    if (rawWord.length <= maxCharsPerLine) {
+      words.push(rawWord);
+      continue;
+    }
+    for (let index = 0; index < rawWord.length; index += maxCharsPerLine) {
+      words.push(rawWord.slice(index, index + maxCharsPerLine));
+    }
+  }
   const lines = [];
   let currentLine = '';
   let truncated = false;
   let wordIndex = 0;
+  const boundedLineCount = Number.isFinite(maxLines);
   for (; wordIndex < words.length; wordIndex += 1) {
     const word = words[wordIndex];
     const candidate = currentLine.length === 0 ? word : `${currentLine} ${word}`;
@@ -118,14 +128,14 @@ function wrapTextByWords(text, maxCharsPerLine, maxLines) {
     }
     lines.push(currentLine);
     currentLine = word;
-    if (lines.length >= maxLines - 1) {
+    if (boundedLineCount && lines.length >= maxLines - 1) {
       break;
     }
   }
-  if (wordIndex < words.length - 1) {
+  if (boundedLineCount && wordIndex < words.length - 1) {
     truncated = true;
   }
-  if (currentLine.length > 0 && lines.length < maxLines) {
+  if (currentLine.length > 0 && (!boundedLineCount || lines.length < maxLines)) {
     lines.push(currentLine);
   }
   if (truncated && lines.length > 0) {
@@ -270,12 +280,10 @@ function resolveSvgOverlayColours(shell, options = {}) {
 }
 
 function buildSvgTitleOverlayMarkup(widthPx, title, overlayColours) {
-  const boxHeight = 32;
-  const titleWidthPx = Math.min(Math.max(220, title.length * 7.2 + 22), Math.max(220, widthPx - 24));
+  void widthPx;
   return [
     '  <g id="isochrone-title">',
-    `    <rect x="12" y="12" width="${formatSvgNumber(titleWidthPx)}" height="${boxHeight}" rx="6" fill="${escapeXml(overlayColours.overlayBackground)}" stroke="${escapeXml(overlayColours.overlayBorder)}" />`,
-    `    <text x="22" y="33" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="15" fill="${escapeXml(overlayColours.overlayText)}">${escapeXml(title)}</text>`,
+    `    <text x="12" y="24" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="15" fill="${escapeXml(overlayColours.overlayText)}">${escapeXml(title)}</text>`,
     '  </g>',
   ].join('\n');
 }
@@ -293,10 +301,9 @@ function buildSvgLegendOverlayMarkup(widthPx, cycleMinutes, overlayColours, opti
 
   const lines = [
     '  <g id="isochrone-legend">',
-    `    <rect x="${formatSvgNumber(boxX)}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="6" fill="${escapeXml(overlayColours.overlayBackground)}" stroke="${escapeXml(overlayColours.overlayBorder)}" />`,
   ];
 
-  let textY = boxY + 18;
+  let textY = boxY + 10;
   for (const entry of entries) {
     lines.push(
       `    <rect x="${formatSvgNumber(boxX + 10)}" y="${formatSvgNumber(textY - 10)}" width="11" height="11" rx="2" fill="rgb(${entry.colour[0]}, ${entry.colour[1]}, ${entry.colour[2]})" />`,
@@ -326,17 +333,15 @@ function buildSvgScaleOverlayMarkup(
     Math.min(clampedScaleWidthPx, Math.round(scaleBarSegmentWidthPx)),
   );
   const boxWidth = Math.max(120, clampedScaleWidthPx + 24);
-  const boxHeight = 40;
   const boxX = 12;
-  const boxY = Math.max(12, heightPx - boxHeight - 12);
-  const lineX = boxX + 12;
-  const lineY = boxY + 14;
+  const lineX = boxX;
+  const lineY = Math.max(12, heightPx - 30);
   const lineHeight = 5;
   const clipId = 'isochrone-scale-pattern-clip';
+  const labelY = Math.min(heightPx - 8, lineY + 19);
 
   const lines = [
     '  <g id="isochrone-scale">',
-    `    <rect x="${boxX}" y="${formatSvgNumber(boxY)}" width="${boxWidth}" height="${boxHeight}" rx="6" fill="${escapeXml(overlayColours.overlayBackground)}" stroke="${escapeXml(overlayColours.overlayBorder)}" />`,
     `    <defs><clipPath id="${clipId}"><rect x="${lineX}" y="${formatSvgNumber(lineY)}" width="${clampedScaleWidthPx}" height="${lineHeight}" rx="3" /></clipPath></defs>`,
     `    <rect x="${lineX}" y="${formatSvgNumber(lineY)}" width="${clampedScaleWidthPx}" height="${lineHeight}" rx="3" fill="${escapeXml(overlayColours.scaleLineBackground)}" stroke="${escapeXml(overlayColours.scaleLineBorder)}" />`,
     `    <g id="isochrone-scale-pattern" clip-path="url(#${clipId})">`,
@@ -355,33 +360,30 @@ function buildSvgScaleOverlayMarkup(
 
   lines.push('    </g>');
   lines.push(
-    `    <text x="${formatSvgNumber(boxX + boxWidth / 2)}" y="${formatSvgNumber(boxY + 33)}" text-anchor="middle" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="11" fill="${escapeXml(overlayColours.overlayText)}">${escapeXml(scaleBarLabel)}</text>`,
+    `    <text x="${formatSvgNumber(boxX + boxWidth / 2)}" y="${formatSvgNumber(labelY)}" text-anchor="middle" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="11" fill="${escapeXml(overlayColours.overlayText)}">${escapeXml(scaleBarLabel)}</text>`,
   );
   lines.push('  </g>');
   return lines.join('\n');
 }
 
 function buildSvgCopyrightOverlayMarkup(widthPx, heightPx, copyrightNotice, overlayColours) {
-  const wrappedLines = wrapTextByWords(copyrightNotice, 58, 3);
+  const maxCharsPerLine = Math.max(12, Math.floor((widthPx - 24) / 5.5));
+  const wrappedLines = wrapTextByWords(copyrightNotice, maxCharsPerLine, Number.POSITIVE_INFINITY);
   if (wrappedLines.length === 0) {
     return '';
   }
 
-  const boxWidth = 388;
-  const boxHeight = 14 + wrappedLines.length * 12;
-  const boxX = Math.max(12, widthPx - boxWidth - 12);
-  const boxY = Math.max(12, heightPx - boxHeight - 12);
+  const lineHeight = 12;
+  const textX = Math.max(12, widthPx - 12);
+  const firstTextY = Math.max(12, heightPx - 12 - (wrappedLines.length - 1) * lineHeight);
 
-  const lines = [
-    '  <g id="isochrone-copyright">',
-    `    <rect x="${formatSvgNumber(boxX)}" y="${formatSvgNumber(boxY)}" width="${boxWidth}" height="${boxHeight}" rx="6" fill="${escapeXml(overlayColours.overlayBackground)}" stroke="${escapeXml(overlayColours.overlayBorder)}" />`,
-  ];
-  let textY = boxY + 16;
+  const lines = ['  <g id="isochrone-copyright">'];
+  let textY = firstTextY;
   for (const line of wrappedLines) {
     lines.push(
-      `    <text x="${formatSvgNumber(boxX + 10)}" y="${formatSvgNumber(textY)}" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="10" fill="${escapeXml(overlayColours.overlayNote)}">${escapeXml(line)}</text>`,
+      `    <text x="${formatSvgNumber(textX)}" y="${formatSvgNumber(textY)}" text-anchor="end" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="10" fill="${escapeXml(overlayColours.overlayNote)}">${escapeXml(line)}</text>`,
     );
-    textY += 12;
+    textY += lineHeight;
   }
   lines.push('  </g>');
   return lines.join('\n');
