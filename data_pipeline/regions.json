@@ -123,6 +123,18 @@
       "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q3335223\"]",
       "subdivisionAdminLevel": "7",
       "epsg": 32737
+    },
+    {
+      "id": "mexico-city",
+      "name": "Mexico City",
+      "localizedNames": {
+        "es": "Ciudad de México"
+      },
+      "graphFileName": "mexico-city-graph.bin.gz",
+      "boundaryFileName": "mexico-city-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q1489\"]",
+      "subdivisionAdminLevel": "8",
+      "epsg": 32614
     }
   ]
 }

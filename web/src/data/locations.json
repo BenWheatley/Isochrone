@@ -54,6 +54,15 @@
         "de": "Singapur",
         "fr": "Singapour"
       }
+    },
+    {
+      "id": "mexico-city",
+      "name": "Mexico City",
+      "graphFileName": "mexico-city-graph.bin.gz",
+      "boundaryFileName": "mexico-city-district-boundaries-canvas.json",
+      "localizedNames": {
+        "es": "Ciudad de México"
+      }
     }
   ]
 }
