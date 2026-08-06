@@ -61,7 +61,8 @@
       "boundaryFileName": "rome-district-boundaries-canvas.json",
       "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q220\"]",
       "subdivisionAdminLevel": "10",
-      "epsg": 32633
+      "epsg": 32633,
+      "coastal": true
     },
     {
       "id": "portsmouth",
@@ -102,7 +103,8 @@
       "boundaryFileName": "singapore-district-boundaries-canvas.json",
       "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q334\"]",
       "subdivisionAdminLevel": "6",
-      "epsg": 3414
+      "epsg": 3414,
+      "coastal": true
     },
     {
       "id": "adelaide",
