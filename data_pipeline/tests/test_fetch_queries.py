@@ -130,6 +130,20 @@ def test_boundary_query_script_renders_location_selector_and_admin_level() -> No
     assert "out body qt;" in result.stdout
     assert "out skel qt;" in result.stdout
     assert '["type"="boundary"]' not in result.stdout
+    assert ".placeRel map_to_area->.naturalArea;" in result.stdout
+    assert 'way(area.naturalArea)["natural"="wood"];' in result.stdout
+    assert 'way(area.naturalArea)["landuse"="forest"];' in result.stdout
+    assert 'way(area.naturalArea)["natural"="water"];' in result.stdout
+    assert 'rel(area.naturalArea)["natural"="water"]["type"="multipolygon"];' in result.stdout
+    assert 'way(area.naturalArea)["waterway"~"^(river|canal|stream)$"];' in result.stdout
+    assert 'way(area.naturalArea)["aeroway"="aerodrome"];' in result.stdout
+    assert 'rel(area.naturalArea)["aeroway"="aerodrome"]["type"="multipolygon"];' in result.stdout
+    assert "(.exportRelations; .naturalFeatures; >;);" in result.stdout
+    # The natural-feature relation scans are narrowly tag-scoped (natural=water,
+    # aeroway=aerodrome), not the broad boundary=administrative pattern that
+    # was previously found too expensive for Overpass — see the subarea-only
+    # discovery mode test below for the case that pattern was avoiding.
+    assert 'rel(area.naturalArea)["boundary"' not in result.stdout
 
 
 def test_boundary_query_script_can_use_subarea_only_discovery_mode() -> None:
@@ -150,6 +164,17 @@ def test_boundary_query_script_can_use_subarea_only_discovery_mode() -> None:
     assert ".placeRel map_to_area->.placeArea;" not in result.stdout
     assert "rel(area.placeArea)" not in result.stdout
     assert 'rel(r.placeRel:"subarea")' in result.stdout
+    assert ".placeRel map_to_area->.naturalArea;" in result.stdout
+    assert 'way(area.naturalArea)["natural"="wood"];' in result.stdout
+    assert "(.exportRelations; .naturalFeatures; >;);" in result.stdout
+    # This is the exact case the narrowly-scoped natural=water/aeroway=aerodrome
+    # relation scans must not regress: London disables `area` discovery mode
+    # specifically because a *broad* relation-typed area scan
+    # (boundary=administrative) was too expensive here. The natural-feature
+    # relation scans below use different, much narrower tags and are expected
+    # to still appear for this exact region config.
+    assert 'rel(area.naturalArea)["natural"="water"]["type"="multipolygon"];' in result.stdout
+    assert 'rel(area.naturalArea)["aeroway"="aerodrome"]["type"="multipolygon"];' in result.stdout
 
 
 def test_region_data_fetch_command_fetches_selected_locations_from_external_config(

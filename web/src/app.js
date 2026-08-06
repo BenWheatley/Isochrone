@@ -37,8 +37,12 @@ import {
   resolveViewportFrame,
 } from './core/viewport.js';
 import {
+  getAirportFillStyle,
   getBoundaryStrokeStyle,
   getBoundaryWaterFillStyle,
+  getForestFillStyle,
+  getInlandWaterFillStyle,
+  getWaterwayStrokeStyle,
   isClosedPath,
   parseBoundaryBasemapPayload,
   projectBoundaryBasemapToGraphPaths,
@@ -1447,6 +1451,35 @@ function syncCanvasToDisplaySize(canvas) {
   return sizeChanged;
 }
 
+function fillDrawableBoundaryFeatures(context, features) {
+  for (const feature of features) {
+    let hasDrawablePath = false;
+    context.beginPath();
+    for (const path of feature.paths) {
+      if (path.length < 3) {
+        continue;
+      }
+      hasDrawablePath = true;
+      for (let i = 0; i < path.length; i += 1) {
+        const point = path[i];
+        const xPx = point[0];
+        const yPx = point[1];
+        if (i === 0) {
+          context.moveTo(xPx, yPx);
+        } else {
+          context.lineTo(xPx, yPx);
+        }
+      }
+      if (isClosedPath(path)) {
+        context.closePath();
+      }
+    }
+    if (hasDrawablePath) {
+      context.fill();
+    }
+  }
+}
+
 export function drawBoundaryBasemapAlignedToGraphGrid(
   boundaryCanvas,
   payload,
@@ -1481,31 +1514,39 @@ export function drawBoundaryBasemapAlignedToGraphGrid(
     -viewportFrame.offsetYPx * viewportFrame.effectiveScale,
   );
 
+  // Bottom-to-top: forest -> airports -> inland water -> coastal sea -> waterways -> admin boundary lines.
+  context.fillStyle = getForestFillStyle(options.colourTheme);
+  fillDrawableBoundaryFeatures(context, projectedBoundary.forestFeatures);
+
+  context.fillStyle = getAirportFillStyle(options.colourTheme);
+  fillDrawableBoundaryFeatures(context, projectedBoundary.airportFeatures);
+
+  context.fillStyle = getInlandWaterFillStyle(options.colourTheme);
+  fillDrawableBoundaryFeatures(context, projectedBoundary.inlandWaterFeatures);
+
   context.fillStyle = getBoundaryWaterFillStyle(options.colourTheme);
-  for (const feature of projectedBoundary.waterFeatures) {
-    let hasDrawablePath = false;
-    context.beginPath();
+  fillDrawableBoundaryFeatures(context, projectedBoundary.waterFeatures);
+
+  context.lineJoin = 'round';
+  context.lineCap = 'round';
+  for (const feature of projectedBoundary.waterwayFeatures) {
+    const navigable = feature.navigable === true;
+    context.strokeStyle = getWaterwayStrokeStyle(options.colourTheme, navigable);
+    context.lineWidth = (navigable ? 1.6 : 1.0) / viewportFrame.effectiveScale;
     for (const path of feature.paths) {
-      if (path.length < 3) {
+      if (path.length < 2) {
         continue;
       }
-      hasDrawablePath = true;
+      context.beginPath();
       for (let i = 0; i < path.length; i += 1) {
         const point = path[i];
-        const xPx = point[0];
-        const yPx = point[1];
         if (i === 0) {
-          context.moveTo(xPx, yPx);
+          context.moveTo(point[0], point[1]);
         } else {
-          context.lineTo(xPx, yPx);
+          context.lineTo(point[0], point[1]);
         }
       }
-      if (isClosedPath(path)) {
-        context.closePath();
-      }
-    }
-    if (hasDrawablePath) {
-      context.fill();
+      context.stroke();
     }
   }
 

@@ -43,7 +43,14 @@ import {
   updateDistanceScaleBar,
   timeToColour,
 } from '../src/app.js';
-import { getBoundaryStrokeStyle, getBoundaryWaterFillStyle } from '../src/core/boundary-basemap.js';
+import {
+  getAirportFillStyle,
+  getBoundaryStrokeStyle,
+  getBoundaryWaterFillStyle,
+  getForestFillStyle,
+  getInlandWaterFillStyle,
+  getWaterwayStrokeStyle,
+} from '../src/core/boundary-basemap.js';
 import { precomputeEdgeTraversalCostSecondsCache } from '../src/core/routing.js';
 
 const EDGE_MODE_WALK_BIT = 1;
@@ -938,6 +945,113 @@ test('drawBoundaryBasemapAlignedToGraphGrid renders water behind administrative 
   assert.equal(fillOperations[0].fillStyle, getBoundaryWaterFillStyle('dark'));
   assert.equal(fillOperations[1].fillStyle, 'rgba(0, 0, 0, 0)');
   assert.equal(strokeOperations[0].strokeStyle, getBoundaryStrokeStyle('dark'));
+});
+
+test('drawBoundaryBasemapAlignedToGraphGrid draws forest/inland-water/waterway layers in order', () => {
+  const operations = [];
+  const context = {
+    fillStyle: '',
+    strokeStyle: '',
+    lineWidth: 0,
+    lineJoin: '',
+    lineCap: '',
+    beginPath() {
+      operations.push({ type: 'beginPath' });
+    },
+    moveTo() {},
+    lineTo() {},
+    closePath() {
+      operations.push({ type: 'closePath' });
+    },
+    fill() {
+      operations.push({ type: 'fill', fillStyle: this.fillStyle });
+    },
+    stroke() {
+      operations.push({ type: 'stroke', strokeStyle: this.strokeStyle, lineWidth: this.lineWidth });
+    },
+    clearRect() {},
+    setTransform() {},
+  };
+  const boundaryCanvas = {
+    width: 800,
+    height: 300,
+    getBoundingClientRect() {
+      return { width: 800, height: 300 };
+    },
+    getContext(kind) {
+      assert.equal(kind, '2d');
+      return context;
+    },
+  };
+  const graphHeader = {
+    originEasting: 0,
+    originNorthing: 0,
+    gridWidthPx: 400,
+    gridHeightPx: 300,
+    pixelSizeM: 1,
+  };
+  const closedSquare = [
+    [0, 0],
+    [10, 0],
+    [10, 10],
+    [0, 10],
+    [0, 0],
+  ];
+  const payload = {
+    coordinate_space: {
+      width: 400,
+      height: 300,
+      x_origin: 0,
+      y_origin: 299,
+      axis: 'x-right-y-down',
+    },
+    water_features: [{ paths: [closedSquare] }],
+    forest_features: [{ name: 'BigForest', paths: [closedSquare] }],
+    airport_features: [{ name: 'BigAirport', paths: [closedSquare] }],
+    inland_water_features: [{ name: 'BigLake', paths: [closedSquare] }],
+    waterway_features: [
+      { name: 'NavigableRiver', category: 'river', navigable: true, paths: [[[0, 0], [10, 10]]] },
+      { name: 'NonNavigableStream', category: 'stream', navigable: false, paths: [[[1, 1], [9, 9]]] },
+    ],
+    features: [
+      {
+        name: 'frame',
+        paths: [
+          [
+            [100, 100],
+            [300, 100],
+            [300, 200],
+            [100, 200],
+            [100, 100],
+          ],
+        ],
+      },
+    ],
+  };
+
+  drawBoundaryBasemapAlignedToGraphGrid(boundaryCanvas, payload, graphHeader, {
+    colourTheme: 'dark',
+  });
+
+  const fillOperations = operations.filter((operation) => operation.type === 'fill');
+  const strokeOperations = operations.filter((operation) => operation.type === 'stroke');
+
+  // Bottom-to-top fill order: forest, airports, inland water, sea, then the
+  // (transparent) closed-boundary-path fill.
+  assert.equal(fillOperations.length, 5);
+  assert.equal(fillOperations[0].fillStyle, getForestFillStyle('dark'));
+  assert.equal(fillOperations[1].fillStyle, getAirportFillStyle('dark'));
+  assert.equal(fillOperations[2].fillStyle, getInlandWaterFillStyle('dark'));
+  assert.equal(fillOperations[3].fillStyle, getBoundaryWaterFillStyle('dark'));
+  assert.equal(fillOperations[4].fillStyle, 'rgba(0, 0, 0, 0)');
+
+  // Waterway strokes happen before the admin boundary stroke, navigable
+  // rendered with a thicker line than non-navigable.
+  assert.equal(strokeOperations.length, 3);
+  assert.equal(strokeOperations[0].strokeStyle, getWaterwayStrokeStyle('dark', true));
+  assert.equal(strokeOperations[1].strokeStyle, getWaterwayStrokeStyle('dark', false));
+  assert.equal(strokeOperations[2].strokeStyle, getBoundaryStrokeStyle('dark'));
+  assert.ok(strokeOperations[0].lineWidth > strokeOperations[1].lineWidth);
 });
 
 test('createWebGlIsochroneRenderer requests an anti-aliased WebGL context', () => {

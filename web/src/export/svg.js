@@ -6,7 +6,12 @@ import {
 } from '../render/colour.js';
 import { formatLegendRange, formatLegendRepeatNote } from '../ui/legend-format.js';
 import {
+  getAirportFillStyle,
   getBoundaryStrokeStyle,
+  getBoundaryWaterFillStyle,
+  getForestFillStyle,
+  getInlandWaterFillStyle,
+  getWaterwayStrokeStyle,
   projectBoundaryBasemapToGraphPaths,
 } from '../core/boundary-basemap.js';
 
@@ -22,6 +27,12 @@ const DEFAULT_OVERLAY_COLOURS = {
     scaleLineAlternate: '#31577a',
     scaleLineBorder: '#c1d6e9',
     boundaryStroke: getBoundaryStrokeStyle('dark'),
+    boundaryWaterFill: getBoundaryWaterFillStyle('dark'),
+    forestFill: getForestFillStyle('dark'),
+    inlandWaterFill: getInlandWaterFillStyle('dark'),
+    waterwayNavigableStroke: getWaterwayStrokeStyle('dark', true),
+    waterwayNonNavigableStroke: getWaterwayStrokeStyle('dark', false),
+    airportFill: getAirportFillStyle('dark'),
   },
   light: {
     overlayBackground: 'rgba(251, 253, 255, 0.92)',
@@ -32,6 +43,12 @@ const DEFAULT_OVERLAY_COLOURS = {
     scaleLineAlternate: '#eef5fb',
     scaleLineBorder: '#21435d',
     boundaryStroke: getBoundaryStrokeStyle('light'),
+    boundaryWaterFill: getBoundaryWaterFillStyle('light'),
+    forestFill: getForestFillStyle('light'),
+    inlandWaterFill: getInlandWaterFillStyle('light'),
+    waterwayNavigableStroke: getWaterwayStrokeStyle('light', true),
+    waterwayNonNavigableStroke: getWaterwayStrokeStyle('light', false),
+    airportFill: getAirportFillStyle('light'),
   },
 };
 
@@ -275,6 +292,13 @@ function resolveSvgOverlayColours(shell, options = {}) {
       ?? readComputedCssCustomProperty(rootComputedStyle, '--map-scale-line-border')
       ?? defaults.scaleLineBorder,
     boundaryStroke: explicit.boundaryStroke ?? defaults.boundaryStroke,
+    boundaryWaterFill: explicit.boundaryWaterFill ?? defaults.boundaryWaterFill,
+    forestFill: explicit.forestFill ?? defaults.forestFill,
+    inlandWaterFill: explicit.inlandWaterFill ?? defaults.inlandWaterFill,
+    waterwayNavigableStroke: explicit.waterwayNavigableStroke ?? defaults.waterwayNavigableStroke,
+    waterwayNonNavigableStroke:
+      explicit.waterwayNonNavigableStroke ?? defaults.waterwayNonNavigableStroke,
+    airportFill: explicit.airportFill ?? defaults.airportFill,
     theme,
   };
 }
@@ -389,27 +413,24 @@ function buildSvgCopyrightOverlayMarkup(widthPx, heightPx, copyrightNotice, over
   return lines.join('\n');
 }
 
-function buildSvgBoundaryPathMarkup(boundaryPayload, graphHeader, boundaryStroke) {
-  if (!boundaryPayload || !graphHeader) {
-    return '';
+function buildSvgPathCommands(path) {
+  const commands = [];
+  for (let index = 0; index < path.length; index += 1) {
+    const [graphX, graphY] = path[index];
+    commands.push(`${index === 0 ? 'M' : 'L'} ${formatSvgNumber(graphX)} ${formatSvgNumber(graphY)}`);
   }
+  return commands.join(' ');
+}
 
-  const projectedBoundary = projectBoundaryBasemapToGraphPaths(boundaryPayload, graphHeader);
+function buildSvgFilledPolygonMarkup(features, fillColour, groupId) {
   const pathMarkup = [];
-  for (const feature of projectedBoundary.features) {
+  for (const feature of features) {
     for (const path of feature.paths) {
-      if (path.length < 2) {
+      if (path.length < 3) {
         continue;
       }
-      const commands = [];
-      for (let index = 0; index < path.length; index += 1) {
-        const [graphX, graphY] = path[index];
-        commands.push(
-          `${index === 0 ? 'M' : 'L'} ${formatSvgNumber(graphX)} ${formatSvgNumber(graphY)}`,
-        );
-      }
       pathMarkup.push(
-        `    <path d="${commands.join(' ')}" fill="none" stroke="${escapeXml(boundaryStroke)}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />`,
+        `    <path d="${buildSvgPathCommands(path)} Z" fill="${escapeXml(fillColour)}" stroke="none" />`,
       );
     }
   }
@@ -418,7 +439,32 @@ function buildSvgBoundaryPathMarkup(boundaryPayload, graphHeader, boundaryStroke
     return '';
   }
 
-  return ['  <g id="isochrone-boundaries">', ...pathMarkup, '  </g>'].join('\n');
+  return [`  <g id="${groupId}">`, ...pathMarkup, '  </g>'].join('\n');
+}
+
+function buildSvgStrokedLineMarkup(features, resolveStrokeColour, groupId) {
+  const pathMarkup = [];
+  for (const feature of features) {
+    const strokeColour = resolveStrokeColour(feature);
+    for (const path of feature.paths) {
+      if (path.length < 2) {
+        continue;
+      }
+      pathMarkup.push(
+        `    <path d="${buildSvgPathCommands(path)}" fill="none" stroke="${escapeXml(strokeColour)}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />`,
+      );
+    }
+  }
+
+  if (pathMarkup.length === 0) {
+    return '';
+  }
+
+  return [`  <g id="${groupId}">`, ...pathMarkup, '  </g>'].join('\n');
+}
+
+function buildSvgBoundaryLineMarkup(features, boundaryStroke) {
+  return buildSvgStrokedLineMarkup(features, () => boundaryStroke, 'isochrone-boundaries');
 }
 
 export function buildIsochroneEdgeLineMarkup(edgeVertexData, options = {}) {
@@ -508,11 +554,54 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
     throw new Error('graphHeader and boundaryPayload must be provided together');
   }
 
-  const boundaryMarkup = buildSvgBoundaryPathMarkup(
-    options.boundaryPayload ?? null,
-    options.graphHeader ?? null,
-    overlayColours.boundaryStroke,
-  );
+  const projectedBoundary =
+    options.boundaryPayload && options.graphHeader
+      ? projectBoundaryBasemapToGraphPaths(options.boundaryPayload, options.graphHeader)
+      : null;
+
+  // Bottom-to-top, matching the canvas draw order: forest, airports, inland
+  // water, sea, waterways, then admin boundary lines.
+  const forestMarkup = projectedBoundary
+    ? buildSvgFilledPolygonMarkup(
+        projectedBoundary.forestFeatures,
+        overlayColours.forestFill,
+        'isochrone-forest',
+      )
+    : '';
+  const airportMarkup = projectedBoundary
+    ? buildSvgFilledPolygonMarkup(
+        projectedBoundary.airportFeatures,
+        overlayColours.airportFill,
+        'isochrone-airports',
+      )
+    : '';
+  const inlandWaterMarkup = projectedBoundary
+    ? buildSvgFilledPolygonMarkup(
+        projectedBoundary.inlandWaterFeatures,
+        overlayColours.inlandWaterFill,
+        'isochrone-inland-water',
+      )
+    : '';
+  const seaMarkup = projectedBoundary
+    ? buildSvgFilledPolygonMarkup(
+        projectedBoundary.waterFeatures,
+        overlayColours.boundaryWaterFill,
+        'isochrone-sea',
+      )
+    : '';
+  const waterwayMarkup = projectedBoundary
+    ? buildSvgStrokedLineMarkup(
+        projectedBoundary.waterwayFeatures,
+        (feature) =>
+          feature.navigable
+            ? overlayColours.waterwayNavigableStroke
+            : overlayColours.waterwayNonNavigableStroke,
+        'isochrone-waterways',
+      )
+    : '';
+  const boundaryMarkup = projectedBoundary
+    ? buildSvgBoundaryLineMarkup(projectedBoundary.features, overlayColours.boundaryStroke)
+    : '';
   const edgeLines = buildIsochroneEdgeLineMarkup(edgeVertexData, {
     cycleMinutes,
     theme,
@@ -541,6 +630,11 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
     `<svg xmlns="http://www.w3.org/2000/svg" width="${widthPx}" height="${heightPx}" viewBox="0 0 ${widthPx} ${heightPx}" role="img" aria-label="${escapedTitle}">`,
     `  <title>${escapedTitle}</title>`,
     `  <rect id="isochrone-background" x="0" y="0" width="${widthPx}" height="${heightPx}" fill="${escapedBackgroundColour}" />`,
+    forestMarkup,
+    airportMarkup,
+    inlandWaterMarkup,
+    seaMarkup,
+    waterwayMarkup,
     boundaryMarkup,
     '  <g id="isochrone-edges">',
     edgeLines,
