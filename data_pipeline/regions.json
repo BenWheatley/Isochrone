@@ -135,6 +135,15 @@
       "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q1489\"]",
       "subdivisionAdminLevel": "8",
       "epsg": 32614
+    },
+    {
+      "id": "ottawa",
+      "name": "Ottawa",
+      "graphFileName": "ottawa-graph.bin.gz",
+      "boundaryFileName": "ottawa-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q1930\"]",
+      "subdivisionAdminLevel": "9",
+      "epsg": 32618
     }
   ]
 }

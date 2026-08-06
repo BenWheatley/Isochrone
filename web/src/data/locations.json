@@ -63,6 +63,12 @@
       "localizedNames": {
         "es": "Ciudad de México"
       }
+    },
+    {
+      "id": "ottawa",
+      "name": "Ottawa",
+      "graphFileName": "ottawa-graph.bin.gz",
+      "boundaryFileName": "ottawa-district-boundaries-canvas.json"
     }
   ]
 }
