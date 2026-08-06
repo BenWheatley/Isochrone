@@ -44,6 +44,16 @@
       "name": "Rhode Island",
       "graphFileName": "rhode-island-graph.bin.gz",
       "boundaryFileName": "rhode-island-district-boundaries-canvas.json"
+    },
+    {
+      "id": "singapore",
+      "name": "Singapore",
+      "graphFileName": "singapore-graph.bin.gz",
+      "boundaryFileName": "singapore-district-boundaries-canvas.json",
+      "localizedNames": {
+        "de": "Singapur",
+        "fr": "Singapour"
+      }
     }
   ]
 }
