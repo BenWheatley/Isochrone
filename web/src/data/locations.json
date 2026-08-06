@@ -69,6 +69,17 @@
       "name": "Ottawa",
       "graphFileName": "ottawa-graph.bin.gz",
       "boundaryFileName": "ottawa-district-boundaries-canvas.json"
+    },
+    {
+      "id": "zurich-canton",
+      "name": "Canton of Zurich",
+      "graphFileName": "zurich-canton-graph.bin.gz",
+      "boundaryFileName": "zurich-canton-district-boundaries-canvas.json",
+      "localizedNames": {
+        "de": "Kanton Zürich",
+        "fr": "Canton de Zurich",
+        "it": "Canton Zurigo"
+      }
     }
   ]
 }

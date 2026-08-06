@@ -144,6 +144,20 @@
       "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q1930\"]",
       "subdivisionAdminLevel": "9",
       "epsg": 32618
+    },
+    {
+      "id": "zurich-canton",
+      "name": "Canton of Zurich",
+      "localizedNames": {
+        "de": "Kanton Zürich",
+        "fr": "Canton de Zurich",
+        "it": "Canton Zurigo"
+      },
+      "graphFileName": "zurich-canton-graph.bin.gz",
+      "boundaryFileName": "zurich-canton-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q11943\"]",
+      "subdivisionAdminLevel": "6",
+      "epsg": 2056
     }
   ]
 }
