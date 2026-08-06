@@ -64,6 +64,16 @@ def main() -> int:
             f"Defaults to {DEFAULT_WATER_POLYGONS_SOURCE}."
         ),
     )
+    parser.add_argument(
+        "--coast-cache-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Directory to cache the downloaded water-polygon archive in, so repeated "
+            "--include-coast builds do not re-download it. Defaults to "
+            "data_pipeline/.cache/water-polygons. Ignored when --coast-source is a local file."
+        ),
+    )
     args = parser.parse_args()
 
     output = write_simplified_boundary_canvas(
@@ -75,6 +85,7 @@ def main() -> int:
         admin_level=args.admin_level,
         include_coast=args.include_coast,
         coast_source=args.coast_source,
+        coast_cache_dir=args.coast_cache_dir,
     )
 
     print(f"Wrote {args.output}")

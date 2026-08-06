@@ -58,6 +58,8 @@ class RegionSpec:
     boundary_resolution: float
     boundary_units: BoundaryUnits
     localized_names: dict[str, str] | None = None
+    coastal: bool = False
+    coast_source: str | None = None
 
     @property
     def routing_input_file_name(self) -> str:
@@ -137,6 +139,16 @@ def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
         if boundary_units not in {"meters", "degrees"}:
             raise ValueError(f"locations[{index}].boundaryUnits must be 'meters' or 'degrees'")
         normalized_boundary_units = cast(BoundaryUnits, boundary_units)
+        coastal = _normalize_optional_bool(
+            entry.get("coastal", False),
+            field_name=f"locations[{index}].coastal",
+        )
+        coast_source = entry.get("coastSource")
+        if coast_source is not None:
+            coast_source = _require_non_empty_string(
+                coast_source,
+                f"locations[{index}].coastSource",
+            )
 
         region_specs.append(
             RegionSpec(
@@ -153,6 +165,8 @@ def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
                 boundary_resolution=boundary_resolution,
                 boundary_units=normalized_boundary_units,
                 localized_names=localized_names,
+                coastal=coastal,
+                coast_source=coast_source,
             )
         )
 
@@ -302,6 +316,11 @@ def run_build_pipeline(
                 raise FileNotFoundError(f"boundary input not found: {boundary_input_path}")
             boundary_output_path = output_dir / spec.boundary_file_name
             _log(stderr, f"Building boundary canvas JSON for {spec.name}")
+            coastal_kwargs: dict[str, Any] = {}
+            if spec.coastal:
+                coastal_kwargs["include_coast"] = True
+                if spec.coast_source is not None:
+                    coastal_kwargs["coast_source"] = spec.coast_source
             simplify_boundaries(
                 input_path=boundary_input_path,
                 output_path=boundary_output_path,
@@ -309,6 +328,7 @@ def run_build_pipeline(
                 units=spec.boundary_units,
                 epsg=spec.epsg,
                 admin_level=spec.subdivision_admin_level,
+                **coastal_kwargs,
             )
 
         if "graph" in build_components:
@@ -831,6 +851,12 @@ def _normalize_subdivision_discovery_modes(value: object, *, field_name: str) ->
     if not normalized_modes:
         raise ValueError(f"{field_name} must include at least one supported mode")
     return tuple(normalized_modes)
+
+
+def _normalize_optional_bool(value: object, *, field_name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a boolean")
+    return value
 
 
 def _normalize_localized_names(value: object, *, field_name: str) -> dict[str, str] | None:

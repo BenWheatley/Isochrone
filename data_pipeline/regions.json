@@ -79,7 +79,8 @@
       "boundaryFileName": "rhode-island-district-boundaries-canvas.json",
       "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q1387\"]",
       "subdivisionAdminLevel": "6",
-      "epsg": 32130
+      "epsg": 32130,
+      "coastal": true
     },
     {
       "id": "luxembourg-country",

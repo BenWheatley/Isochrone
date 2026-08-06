@@ -38,6 +38,12 @@
       "localizedNames": {
         "de": "K\u00f6ln"
       }
+    },
+    {
+      "id": "rhode-island",
+      "name": "Rhode Island",
+      "graphFileName": "rhode-island-graph.bin.gz",
+      "boundaryFileName": "rhode-island-district-boundaries-canvas.json"
     }
   ]
 }

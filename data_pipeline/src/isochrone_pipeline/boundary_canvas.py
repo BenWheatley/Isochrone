@@ -192,6 +192,7 @@ def simplify_overpass_boundaries_for_canvas(
     admin_level: str = "9",
     include_coast: bool = False,
     coast_source: str | Path | None = None,
+    coast_cache_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     if tolerance < 0.0:
         raise ValueError("tolerance must be non-negative")
@@ -249,6 +250,7 @@ def simplify_overpass_boundaries_for_canvas(
         water_features = load_clipped_water_polygon_features(
             source=coast_source or DEFAULT_WATER_POLYGONS_SOURCE,
             clip_bbox=boundary_bbox_lon_lat,
+            cache_dir=coast_cache_dir,
         )
         prepared_water_features, water_stats = _prepare_drawable_features(
             features=tuple(

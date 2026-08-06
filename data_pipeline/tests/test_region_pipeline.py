@@ -25,6 +25,8 @@ def _make_region_spec(
     region_id: str = "paris",
     name: str = "Paris",
     epsg: int = 2154,
+    coastal: bool = False,
+    coast_source: str | None = None,
 ) -> RegionSpec:
     return RegionSpec(
         id=region_id,
@@ -39,6 +41,8 @@ def _make_region_spec(
         graph_summary_file_name=f"{region_id}-graph-summary.json",
         boundary_resolution=25.0,
         boundary_units="meters",
+        coastal=coastal,
+        coast_source=coast_source,
     )
 
 
@@ -134,6 +138,70 @@ def test_load_region_specs_reads_external_json_config(tmp_path: Path) -> None:
             boundary_units="meters",
         ),
     )
+
+
+def test_load_region_specs_reads_coastal_flag_and_coast_source(tmp_path: Path) -> None:
+    locations_file = tmp_path / "regions.json"
+    locations_file.write_text(
+        json.dumps(
+            {
+                "locations": [
+                    {
+                        "id": "rhode-island",
+                        "name": "Rhode Island",
+                        "graphFileName": "rhode-island-graph.bin.gz",
+                        "boundaryFileName": "rhode-island-district-boundaries-canvas.json",
+                        "locationRelation": (
+                            'rel["boundary"="administrative"]["wikidata"="Q1387"]'
+                        ),
+                        "subdivisionAdminLevel": "6",
+                        "epsg": 32130,
+                        "coastal": True,
+                        "coastSource": "/local/water-polygons.zip",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    specs = load_region_specs(locations_file)
+
+    assert specs[0].coastal is True
+    assert specs[0].coast_source == "/local/water-polygons.zip"
+
+
+def test_load_region_specs_defaults_coastal_to_false(tmp_path: Path) -> None:
+    locations_file = tmp_path / "regions.json"
+    locations_file.write_text(
+        json.dumps(
+            {
+                "locations": [
+                    {
+                        "id": "paris",
+                        "name": "Paris",
+                        "graphFileName": "paris-graph.bin.gz",
+                        "boundaryFileName": "paris-district-boundaries-canvas.json",
+                        "locationRelation": ('rel["boundary"="administrative"]["wikidata"="Q90"]'),
+                        "subdivisionAdminLevel": "9",
+                        "epsg": 2154,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    specs = load_region_specs(locations_file)
+
+    assert specs[0].coastal is False
+    assert specs[0].coast_source is None
+
+
+def test_committed_region_config_marks_rhode_island_coastal() -> None:
+    specs_by_id = {spec.id: spec for spec in load_region_specs(DEFAULT_LOCATIONS_FILE)}
+
+    assert specs_by_id["rhode-island"].coastal is True
 
 
 def test_committed_region_config_uses_deterministic_athens_relation_selector() -> None:

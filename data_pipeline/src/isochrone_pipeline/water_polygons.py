@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, mkstemp
 from urllib.parse import urlparse
 
 import requests  # type: ignore[import-untyped]
@@ -15,6 +16,13 @@ import shapefile  # type: ignore[import-untyped]
 DEFAULT_WATER_POLYGONS_SOURCE = (
     "https://osmdata.openstreetmap.de/download/water-polygons-split-4326.zip"
 )
+
+# The default source above is a ~900 MB global archive. It is filtered down to
+# a small per-region clip before ever being written to a shipped artifact, but
+# the download itself is expensive, so it is cached on disk and reused across
+# every coastal region build instead of being re-fetched each time.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_WATER_POLYGONS_CACHE_DIR = REPO_ROOT / "data_pipeline" / ".cache" / "water-polygons"
 
 LonLatPoint = tuple[float, float]
 LonLatRing = tuple[LonLatPoint, ...]
@@ -26,9 +34,10 @@ def load_clipped_water_polygon_features(
     *,
     source: str | Path = DEFAULT_WATER_POLYGONS_SOURCE,
     clip_bbox: LonLatBbox,
+    cache_dir: str | Path | None = None,
 ) -> tuple[LonLatMultiRing, ...]:
     features: list[LonLatMultiRing] = []
-    with _open_shapefile_reader(source) as reader:
+    with _open_shapefile_reader(source, cache_dir=cache_dir) as reader:
         for shape in reader.iterShapes():
             if not _shape_bbox_intersects(shape.bbox, clip_bbox):
                 continue
@@ -65,13 +74,18 @@ def clip_ring_to_bbox(ring: LonLatRing, clip_bbox: LonLatBbox) -> LonLatRing:
 
 
 @contextmanager
-def _open_shapefile_reader(source: str | Path) -> Iterator[shapefile.Reader]:
+def _open_shapefile_reader(
+    source: str | Path,
+    *,
+    cache_dir: str | Path | None = None,
+) -> Iterator[shapefile.Reader]:
     if _is_http_url(source):
-        with TemporaryDirectory() as tmp_dir_name:
-            archive_path = Path(tmp_dir_name) / "water-polygons.zip"
-            _download_to_path(str(source), archive_path)
-            with _open_shapefile_reader_from_archive(archive_path) as reader:
-                yield reader
+        resolved_cache_dir = (
+            Path(cache_dir) if cache_dir is not None else DEFAULT_WATER_POLYGONS_CACHE_DIR
+        )
+        archive_path = _fetch_cached_archive(str(source), cache_dir=resolved_cache_dir)
+        with _open_shapefile_reader_from_archive(archive_path) as reader:
+            yield reader
         return
 
     source_path = Path(source)
@@ -132,6 +146,31 @@ def _select_shapefile_member(member_names: list[str]) -> str:
         return preferred_members[0]
 
     raise ValueError("Water polygon archive contains multiple shapefiles; unable to choose one")
+
+
+def _fetch_cached_archive(url: str, *, cache_dir: Path) -> Path:
+    cache_path = cache_dir / _cache_filename_for_url(url)
+    if cache_path.is_file():
+        return cache_path
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    # Download to a temp file in the same directory, then atomically rename
+    # into place, so a crash or interrupt mid-download can never leave a
+    # partial file behind that a later run would mistake for a valid cache.
+    temp_fd, temp_name = mkstemp(dir=cache_dir, prefix=".download-", suffix=".part")
+    os.close(temp_fd)
+    temp_path = Path(temp_name)
+    try:
+        _download_to_path(url, temp_path)
+        os.replace(temp_path, cache_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+    return cache_path
+
+
+def _cache_filename_for_url(url: str) -> str:
+    name = Path(urlparse(url).path).name
+    return name if name else "water-polygons.zip"
 
 
 def _download_to_path(url: str, output_path: Path) -> None:

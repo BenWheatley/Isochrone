@@ -1,0 +1,82 @@
+{
+  "generated_at_utc": "2026-04-11T18:05:14.342561+00:00",
+  "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/rhode-island-routing.osm.json",
+  "binary_output": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/output/rhode-island-graph.bin",
+  "binary_size_bytes": 8674344,
+  "before_node_count": 884021,
+  "before_edge_count": 1643606,
+  "after_node_count": 257975,
+  "after_edge_count": 378890,
+  "constraint_tag_presence": {
+    "access": 19757,
+    "foot": 1626,
+    "oneway": 10157,
+    "oneway:foot": 0,
+    "bicycle": 1592,
+    "cycleway": 350,
+    "oneway:bicycle": 33,
+    "motor_vehicle": 641,
+    "vehicle": 7,
+    "sidewalk": 673,
+    "junction": 159,
+    "service": 38058,
+    "surface": 26748,
+    "tracktype": 176,
+    "maxspeed": 2902,
+    "maxspeed:forward": 0,
+    "maxspeed:backward": 0
+  },
+  "constraint_tag_coverage_ratio": {
+    "access": 0.16823918115707545,
+    "foot": 0.01384607524226374,
+    "oneway": 0.08649113544629324,
+    "oneway:foot": 0.0,
+    "bicycle": 0.01355655091370472,
+    "cycleway": 0.0029803974998722687,
+    "oneway:bicycle": 0.0002810089071308139,
+    "motor_vehicle": 0.005458385135480355,
+    "vehicle": 5.9607949997445375e-05,
+    "sidewalk": 0.005730878621182963,
+    "junction": 0.0013539520070848306,
+    "service": 0.3240799087146823,
+    "surface": 0.22777049236166697,
+    "tracktype": 0.0014987141713643409,
+    "maxspeed": 0.02471175298465521,
+    "maxspeed:forward": 0.0,
+    "maxspeed:backward": 0.0
+  },
+  "edge_mode_mask_counts": {
+    "7": 303662,
+    "3": 22904,
+    "1": 52302,
+    "5": 22
+  },
+  "edge_mode_counts": {
+    "walk": 378890,
+    "bike": 326566,
+    "car": 303684
+  },
+  "edge_mode_coverage_ratio": {
+    "walk": 1.0,
+    "bike": 0.8619018712555095,
+    "car": 0.8015096729921614
+  },
+  "header": {
+    "magic": "0x49534F43",
+    "version": 2,
+    "flags": 0,
+    "n_nodes": 257975,
+    "n_edges": 378890,
+    "n_stops": 0,
+    "n_tedges": 0,
+    "origin_easting": 69691.0941736379,
+    "origin_northing": 7095.64038905667,
+    "epsg_code": 32130,
+    "grid_width_px": 6217,
+    "grid_height_px": 9792,
+    "pixel_size_m": 10.0,
+    "node_table_offset": 64,
+    "edge_table_offset": 4127664,
+    "stop_table_offset": 8674344
+  }
+}
