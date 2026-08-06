@@ -80,6 +80,16 @@
         "fr": "Canton de Zurich",
         "it": "Canton Zurigo"
       }
+    },
+    {
+      "id": "cyprus",
+      "name": "Cyprus",
+      "graphFileName": "cyprus-graph.bin.gz",
+      "boundaryFileName": "cyprus-district-boundaries-canvas.json",
+      "localizedNames": {
+        "el": "Κύπρος",
+        "tr": "Kıbrıs"
+      }
     }
   ]
 }

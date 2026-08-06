@@ -158,6 +158,20 @@
       "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q11943\"]",
       "subdivisionAdminLevel": "6",
       "epsg": 2056
+    },
+    {
+      "id": "cyprus",
+      "name": "Cyprus",
+      "localizedNames": {
+        "el": "Κύπρος",
+        "tr": "Kıbrıs"
+      },
+      "graphFileName": "cyprus-graph.bin.gz",
+      "boundaryFileName": "cyprus-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q229\"]",
+      "subdivisionAdminLevel": "6",
+      "epsg": 32636,
+      "coastal": true
     }
   ]
 }
