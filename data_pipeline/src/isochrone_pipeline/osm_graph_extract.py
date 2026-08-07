@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
 from .osm_json_survey import iter_overpass_elements
 from .overpass_survey import WALKABLE_HIGHWAY_VALUES
+
+# Real regional/strait/lake ferries (Lake Zurich, Rhode Island Sound, the
+# Singapore Strait, etc.) stay well under this. Open-sea international
+# routes (e.g. a real Piraeus-Limassol way seen in fetched Cyprus data,
+# ~700 km, duration=31:00) are excluded: not just unrealistic for any
+# isochrone time budget, but large enough to overflow the graph binary's
+# u16 pixel-grid header fields (max ~655 km at the default 10 m/pixel).
+FERRY_MAX_SPAN_METERS = 80_000.0
+_EARTH_RADIUS_M = 6_371_000.0
 
 CONSTRAINT_TAGS: tuple[str, ...] = (
     "access",
@@ -254,6 +264,34 @@ def drop_ways_with_missing_nodes(
     return tuple(kept), dropped
 
 
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    )
+    return 2 * _EARTH_RADIUS_M * math.asin(min(1.0, math.sqrt(a)))
+
+
+def _way_lat_lon_span_m(way: WayCandidate, node_coords: dict[int, tuple[float, float]]) -> float:
+    lats: list[float] = []
+    lons: list[float] = []
+    for node_id in way.node_ids:
+        coord = node_coords.get(node_id)
+        if coord is None:
+            continue
+        lat, lon = coord
+        lats.append(lat)
+        lons.append(lon)
+
+    if len(lats) < 2:
+        return 0.0
+
+    return _haversine_m(min(lats), min(lons), max(lats), max(lons))
+
+
 def extract_walkable_graph_input(
     path: Path,
     walkable_highways: set[str] | None = None,
@@ -263,14 +301,32 @@ def extract_walkable_graph_input(
     referenced_node_ids = pass1.referenced_node_ids | ferry_pass.referenced_node_ids
     node_coords = load_referenced_nodes(path, referenced_node_ids)
     connector_nodes = collect_connector_nodes(path)
-    combined_ways = pass1.ways + ferry_pass.ways
+
+    ferry_ways_within_span = tuple(
+        way
+        for way in ferry_pass.ways
+        if _way_lat_lon_span_m(way, node_coords) <= FERRY_MAX_SPAN_METERS
+    )
+    excessive_span_ferry_way_count = len(ferry_pass.ways) - len(ferry_ways_within_span)
+
+    combined_ways = pass1.ways + ferry_ways_within_span
     kept_ways, dropped_way_count = drop_ways_with_missing_nodes(combined_ways, node_coords)
+
+    # Prune coordinates no longer referenced by any kept way so an excluded
+    # far-away ferry endpoint doesn't still expand the region's projected
+    # bounding box.
+    surviving_node_ids: set[int] = set()
+    for way in kept_ways:
+        surviving_node_ids.update(way.node_ids)
+    pruned_node_coords = {
+        node_id: coord for node_id, coord in node_coords.items() if node_id in surviving_node_ids
+    }
 
     return WalkableGraphExtract(
         ways=kept_ways,
-        node_coords=node_coords,
+        node_coords=pruned_node_coords,
         connector_nodes=connector_nodes,
-        dropped_way_count=dropped_way_count,
+        dropped_way_count=dropped_way_count + excessive_span_ferry_way_count,
     )
 
 

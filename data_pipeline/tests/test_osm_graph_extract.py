@@ -179,6 +179,61 @@ def test_extract_walkable_graph_input_merges_ferry_and_highway_ways(tmp_path: Pa
     assert ferry_way.highway == "ferry"
 
 
+def _write_long_ferry_fixture(path: Path) -> None:
+    path.write_text(
+        """
+{
+  "version": 0.6,
+  "elements": [
+    {"type": "node", "id": 1, "lat": 52.5, "lon": 13.4},
+    {"type": "node", "id": 2, "lat": 52.5005, "lon": 13.401},
+    {"type": "node", "id": 30, "lat": 37.9373296, "lon": 23.6370552},
+    {"type": "node", "id": 31, "lat": 34.6555364, "lon": 33.019948},
+    {"type": "node", "id": 40, "lat": 52.502, "lon": 13.403},
+    {"type": "node", "id": 41, "lat": 52.5025, "lon": 13.4035},
+    {
+      "type": "way",
+      "id": 100,
+      "nodes": [1, 2],
+      "tags": {"highway": "footway"}
+    },
+    {
+      "type": "way",
+      "id": 300,
+      "nodes": [30, 31],
+      "tags": {"route": "ferry", "duration": "31:00"}
+    },
+    {
+      "type": "way",
+      "id": 400,
+      "nodes": [40, 41],
+      "tags": {"route": "ferry", "duration": "00:05"}
+    }
+  ]
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+
+def test_extract_walkable_graph_input_drops_excessively_long_ferry_ways(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "long_ferry.json"
+    _write_long_ferry_fixture(source)
+
+    extracted = extract_walkable_graph_input(source)
+
+    osm_ids = {way.osm_id for way in extracted.ways}
+    assert osm_ids == {100, 400}
+    assert 300 not in osm_ids
+    # The dropped ~700 km ferry's endpoints must not linger in node_coords,
+    # or they'd still blow out the region's projected bounding box.
+    assert 30 not in extracted.node_coords
+    assert 31 not in extracted.node_coords
+    assert extracted.dropped_way_count == 1
+
+
 def test_summarize_constraint_tag_coverage_counts_presence() -> None:
     ways = (
         WayCandidate(
