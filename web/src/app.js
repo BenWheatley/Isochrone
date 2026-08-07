@@ -8,6 +8,7 @@ import {
   EDGE_MODE_BIKE_BIT,
   EDGE_MODE_CAR_BIT,
   EDGE_MODE_WALK_BIT,
+  EDGE_MODE_WATER_BIT,
   EDGE_RECORD_SIZE,
   FINAL_EDGE_INTERPOLATION_STEP_STRIDE,
   GRAPH_MAGIC,
@@ -144,7 +145,8 @@ export function precomputeNodeModeMask(graph) {
   validateGraphForRouting(graph);
 
   const nodeModeMask = new Uint8Array(graph.header.nNodes);
-  const supportedModeMask = EDGE_MODE_WALK_BIT | EDGE_MODE_BIKE_BIT | EDGE_MODE_CAR_BIT;
+  const supportedModeMask =
+    EDGE_MODE_WALK_BIT | EDGE_MODE_BIKE_BIT | EDGE_MODE_CAR_BIT | EDGE_MODE_WATER_BIT;
 
   for (let nodeIndex = 0; nodeIndex < graph.header.nNodes; nodeIndex += 1) {
     const firstEdgeIndex = graph.nodeU32[nodeIndex * 4 + 2];

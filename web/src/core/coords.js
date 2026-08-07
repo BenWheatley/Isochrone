@@ -7,7 +7,7 @@ import {
 } from '../config/constants.js';
 import { validateGraphForRouting } from './graph-validation.js';
 
-const CANONICAL_MODE_VALUES = ['walk', 'bike', 'car'];
+const CANONICAL_MODE_VALUES = ['walk', 'bike', 'car', 'water'];
 
 export function mapCanvasPixelToGraphMeters(graph, xPx, yPx) {
   validateGraphForRouting(graph);

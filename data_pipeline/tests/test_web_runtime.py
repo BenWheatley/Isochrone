@@ -131,7 +131,7 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
     assert parsed.elements_by_id["theme-select"].tag == "select"
     assert parsed.elements_by_id["mode-select"].tag == "select"
     assert parsed.elements_by_id["mode-select"].attrs["multiple"] == ""
-    assert parsed.elements_by_id["mode-select"].attrs["size"] == "3"
+    assert parsed.elements_by_id["mode-select"].attrs["size"] == "4"
     assert parsed.elements_by_id["invert-pointer-buttons"].tag == "input"
     assert parsed.elements_by_id["invert-pointer-buttons"].attrs["type"] == "checkbox"
 

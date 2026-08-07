@@ -12,6 +12,7 @@
   "body.options.mode.walk": "Walk",
   "body.options.mode.bike": "Bike",
   "body.options.mode.car": "Car",
+  "body.options.mode.water": "Ferry",
   "body.options.colourCycle": "Colour cycle (min)",
   "body.options.departureTime": "Departure time",
   "body.options.exportSvg": "Export SVG",

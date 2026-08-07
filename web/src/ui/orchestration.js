@@ -3,6 +3,7 @@ import {
   EDGE_MODE_BIKE_BIT,
   EDGE_MODE_CAR_BIT,
   EDGE_MODE_WALK_BIT,
+  EDGE_MODE_WATER_BIT,
 } from '../config/constants.js';
 import {
   parseColourCycleMinutesFromLocationSearch,
@@ -15,7 +16,7 @@ import {
   getCommonMessage,
 } from './localization.js';
 
-const CANONICAL_MODE_VALUES = ['walk', 'bike', 'car'];
+const CANONICAL_MODE_VALUES = ['walk', 'bike', 'car', 'water'];
 const CANONICAL_THEME_VALUES = ['light', 'dark'];
 const THEME_STORAGE_KEY = 'isochrone-theme';
 const POINTER_BUTTON_INVERSION_STORAGE_KEY = 'isochrone-invert-pointer-buttons';
@@ -416,6 +417,9 @@ export function getAllowedModeMaskFromShell(shell) {
     }
     if (optionValue === 'car') {
       allowedModeMask |= EDGE_MODE_CAR_BIT;
+    }
+    if (optionValue === 'water') {
+      allowedModeMask |= EDGE_MODE_WATER_BIT;
     }
   }
 

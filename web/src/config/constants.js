@@ -16,9 +16,13 @@ export const SUPPORTED_GRAPH_VERSIONS = new Set([2]);
 export const EDGE_MODE_WALK_BIT = 1;
 export const EDGE_MODE_BIKE_BIT = 1 << 1;
 export const EDGE_MODE_CAR_BIT = 1 << 2;
+export const EDGE_MODE_WATER_BIT = 1 << 3;
 export const WALKING_SPEED_M_S = 1.39;
 export const BIKE_CRUISE_SPEED_KPH = 20;
 export const CAR_FALLBACK_SPEED_KPH = 30;
+// Kept numerically identical to FERRY_FALLBACK_SPEED_KPH in
+// data_pipeline/src/isochrone_pipeline/adjacency.py.
+export const WATER_FALLBACK_SPEED_KPH = 25;
 export const ROAD_CLASS_MOTORWAY = 15;
 export const DEFAULT_COLOUR_CYCLE_MINUTES = 75;
 export const LOADING_FADE_MS = 180;

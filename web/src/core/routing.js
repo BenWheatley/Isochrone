@@ -4,9 +4,11 @@ import {
   EDGE_MODE_BIKE_BIT,
   EDGE_MODE_CAR_BIT,
   EDGE_MODE_WALK_BIT,
+  EDGE_MODE_WATER_BIT,
   EDGE_TRAVERSAL_COST_CACHE_PROPERTY,
   ROAD_CLASS_MOTORWAY,
   WALKING_SPEED_M_S,
+  WATER_FALLBACK_SPEED_KPH,
 } from '../config/constants.js';
 import { DuplicateEntryMinHeap, MinHeap } from './heap.js';
 import { validateGraphForRouting } from './graph-validation.js';
@@ -197,6 +199,20 @@ export function computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMas
 
   const distanceMeters = Math.max(1, walkingCostSeconds * WALKING_SPEED_M_S);
   const edgeMaxspeedKph = graph.edgeMaxspeedKph[edgeIndex];
+
+  if ((edgeModeMask & EDGE_MODE_WATER_BIT) !== 0) {
+    // A ferry leg's crossing time doesn't depend on which boarding bit
+    // (walk/bike/car) matched allowedModeMask — always cost it at the
+    // baked ferry speed (duration-tag-derived, explicit maxspeed, or the
+    // flat fallback, already resolved at build time into edgeMaxspeedKph).
+    const waterSpeedKph = edgeMaxspeedKph > 0 ? edgeMaxspeedKph : WATER_FALLBACK_SPEED_KPH;
+    if (waterSpeedKph <= 0) {
+      return Infinity;
+    }
+    const waterMetersPerSecond = (waterSpeedKph * 1000) / 3600;
+    return distanceMeters / waterMetersPerSecond;
+  }
+
   let bestCostSeconds = Infinity;
 
   if ((allowedModeMask & EDGE_MODE_WALK_BIT) !== 0 && (edgeModeMask & EDGE_MODE_WALK_BIT) !== 0) {

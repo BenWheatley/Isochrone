@@ -56,7 +56,9 @@ import { precomputeEdgeTraversalCostSecondsCache } from '../src/core/routing.js'
 const EDGE_MODE_WALK_BIT = 1;
 const EDGE_MODE_BIKE_BIT = 1 << 1;
 const EDGE_MODE_CAR_BIT = 1 << 2;
+const EDGE_MODE_WATER_BIT = 1 << 3;
 const CAR_FALLBACK_SPEED_KPH = 30;
+const WATER_FALLBACK_SPEED_KPH = 25;
 
 function createFixtureGraph() {
   const nNodes = 3;
@@ -249,6 +251,53 @@ test('computeEdgeTraversalCostSeconds obeys mode and road-class constraints', ()
   assert.ok(
     computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_CAR_BIT) <
       72 * (50 / CAR_FALLBACK_SPEED_KPH),
+  );
+});
+
+test('computeEdgeTraversalCostSeconds costs ferry edges at ferry speed regardless of boarding mode', () => {
+  const graph = createFixtureGraph();
+
+  // Edge 0 (0 -> 1, ~100m) is a foot-passenger ferry with a baked 36 kph
+  // crossing speed, not the ~72s walking-pace baked into edgeU16
+  // walking-cost.
+  const WALKING_SPEED_M_S = 1.39;
+  const bakedWalkingCostSeconds = graph.edgeU16[2];
+  const distanceMeters = bakedWalkingCostSeconds * WALKING_SPEED_M_S;
+  graph.edgeModeMask[0] = EDGE_MODE_WALK_BIT | EDGE_MODE_WATER_BIT;
+  graph.edgeMaxspeedKph[0] = 36;
+  const expectedFerrySeconds = distanceMeters / ((36 * 1000) / 3600);
+  assert.ok(
+    Math.abs(computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_WALK_BIT) - expectedFerrySeconds)
+      < 1e-6,
+  );
+  assert.ok(
+    Math.abs(computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_WATER_BIT) - expectedFerrySeconds)
+      < 1e-6,
+  );
+  assert.notEqual(expectedFerrySeconds, bakedWalkingCostSeconds);
+  assert.equal(
+    computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_BIKE_BIT),
+    Number.POSITIVE_INFINITY,
+  );
+
+  // A car-only ferry (no WALK/BIKE bit) is unreachable under Walk alone but
+  // reachable under Water alone.
+  graph.edgeModeMask[0] = EDGE_MODE_CAR_BIT | EDGE_MODE_WATER_BIT;
+  assert.equal(
+    computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_WALK_BIT),
+    Number.POSITIVE_INFINITY,
+  );
+  assert.ok(computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_WATER_BIT) > 0);
+
+  // With no baked maxspeed, a water edge falls back to WATER_FALLBACK_SPEED_KPH.
+  graph.edgeModeMask[0] = EDGE_MODE_WATER_BIT;
+  graph.edgeMaxspeedKph[0] = 0;
+  const fallbackMetersPerSecond = (WATER_FALLBACK_SPEED_KPH * 1000) / 3600;
+  const expectedFallbackSeconds = distanceMeters / fallbackMetersPerSecond;
+  assert.ok(
+    Math.abs(
+      computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_WATER_BIT) - expectedFallbackSeconds,
+    ) < 1e-6,
   );
 });
 

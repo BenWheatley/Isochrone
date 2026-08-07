@@ -7,8 +7,10 @@ import {
   bindModeSelectControl,
   bindPointerButtonInversionControl,
   bindThemeControl,
+  getAllowedModeMaskFromShell,
   populateLocationSelect,
 } from '../src/ui/orchestration.js';
+import { EDGE_MODE_WATER_BIT } from '../src/config/constants.js';
 
 function createEventTarget() {
   const listeners = new Map();
@@ -41,6 +43,7 @@ function createModeSelect(selectedValues = ['car']) {
     { value: 'walk', selected: selectedSet.has('walk') },
     { value: 'bike', selected: selectedSet.has('bike') },
     { value: 'car', selected: selectedSet.has('car') },
+    { value: 'water', selected: selectedSet.has('water') },
   ];
 
   return {
@@ -128,6 +131,22 @@ function createHeaderMenuFixture() {
     insideTargets,
   };
 }
+
+test('getAllowedModeMaskFromShell includes EDGE_MODE_WATER_BIT for the water option', () => {
+  const modeSelect = createModeSelect(['water']);
+  const shell = { modeSelect };
+
+  assert.equal(getAllowedModeMaskFromShell(shell), EDGE_MODE_WATER_BIT);
+});
+
+test('getAllowedModeMaskFromShell combines walk and water bits when both selected', () => {
+  const modeSelect = createModeSelect(['walk', 'water']);
+  const shell = { modeSelect };
+
+  const mask = getAllowedModeMaskFromShell(shell);
+  assert.equal(mask & EDGE_MODE_WATER_BIT, EDGE_MODE_WATER_BIT);
+  assert.notEqual(mask, EDGE_MODE_WATER_BIT);
+});
 
 test('bindModeSelectControl uses redraw for mode changes and repaint for cycle changes', () => {
   const modeSelect = createModeSelect(['car']);
