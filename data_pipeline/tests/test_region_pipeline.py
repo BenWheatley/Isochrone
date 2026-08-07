@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import gzip
 import json
 import subprocess
@@ -10,6 +11,7 @@ import pytest
 from isochrone_pipeline.region_pipeline import (
     DEFAULT_LOCATIONS_FILE,
     RegionSpec,
+    TransitFeedSpec,
     build_arg_parser,
     build_location_manifest,
     fetch_overpass_json,
@@ -196,6 +198,184 @@ def test_load_region_specs_defaults_coastal_to_false(tmp_path: Path) -> None:
 
     assert specs[0].coastal is False
     assert specs[0].coast_source is None
+
+
+def test_load_region_specs_reads_transit_feed_block(tmp_path: Path) -> None:
+    locations_file = tmp_path / "regions.json"
+    locations_file.write_text(
+        json.dumps(
+            {
+                "locations": [
+                    {
+                        "id": "berlin",
+                        "name": "Berlin",
+                        "graphFileName": "berlin-graph.bin.gz",
+                        "boundaryFileName": "berlin-district-boundaries-canvas.json",
+                        "locationRelation": ('rel["boundary"="administrative"]["wikidata"="Q64"]'),
+                        "subdivisionAdminLevel": "9",
+                        "epsg": 25833,
+                        "transitFeed": {
+                            "baseUrl": "https://example.test/gtfs/",
+                            "licence": "CC BY 4.0 — Example Transit Authority",
+                            "referenceDate": "2026-08-12",
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    specs = load_region_specs(locations_file)
+
+    assert specs[0].transit_feed is not None
+    # Trailing slash stripped for consistent f"{base_url}/{file}.csv" joins.
+    assert specs[0].transit_feed.base_url == "https://example.test/gtfs"
+    assert specs[0].transit_feed.licence == "CC BY 4.0 — Example Transit Authority"
+    assert specs[0].transit_feed.reference_date == "2026-08-12"
+    assert specs[0].transit_input_dir_name == "berlin-transit-gtfs"
+
+
+def test_load_region_specs_defaults_transit_feed_to_none(tmp_path: Path) -> None:
+    locations_file = tmp_path / "regions.json"
+    locations_file.write_text(
+        json.dumps(
+            {
+                "locations": [
+                    {
+                        "id": "paris",
+                        "name": "Paris",
+                        "graphFileName": "paris-graph.bin.gz",
+                        "boundaryFileName": "paris-district-boundaries-canvas.json",
+                        "locationRelation": ('rel["boundary"="administrative"]["wikidata"="Q90"]'),
+                        "subdivisionAdminLevel": "9",
+                        "epsg": 2154,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    specs = load_region_specs(locations_file)
+
+    assert specs[0].transit_feed is None
+
+
+def test_load_region_specs_rejects_malformed_transit_feed_reference_date(
+    tmp_path: Path,
+) -> None:
+    locations_file = tmp_path / "regions.json"
+    locations_file.write_text(
+        json.dumps(
+            {
+                "locations": [
+                    {
+                        "id": "berlin",
+                        "name": "Berlin",
+                        "graphFileName": "berlin-graph.bin.gz",
+                        "boundaryFileName": "berlin-district-boundaries-canvas.json",
+                        "locationRelation": ('rel["boundary"="administrative"]["wikidata"="Q64"]'),
+                        "subdivisionAdminLevel": "9",
+                        "epsg": 25833,
+                        "transitFeed": {
+                            "baseUrl": "https://example.test/gtfs",
+                            "licence": "CC BY 4.0",
+                            "referenceDate": "12-08-2026",
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="referenceDate"):
+        load_region_specs(locations_file)
+
+
+def test_run_fetch_pipeline_fetches_transit_only_when_component_and_feed_present(
+    tmp_path: Path,
+) -> None:
+    input_dir = tmp_path / "input"
+    stderr = StringIO()
+    fetch_calls: list[tuple[str, Path]] = []
+    spec_with_feed = dataclasses.replace(
+        _make_region_spec(region_id="berlin", name="Berlin"),
+        transit_feed=TransitFeedSpec(
+            base_url="https://example.test/gtfs",
+            licence="CC BY 4.0",
+            reference_date="2026-08-12",
+        ),
+    )
+    spec_without_feed = _make_region_spec(region_id="paris", name="Paris")
+
+    def fake_render_query(query_script: Path, *args: str) -> str:
+        return f"/* {query_script.name} */\n" + " ".join(args) + "\n"
+
+    def fake_fetch_overpass_json(**kwargs) -> None:
+        del kwargs
+
+    def fake_fetch_gtfs_transit_files(
+        *, base_url: str, output_dir: Path, max_time_seconds: int, stderr=None
+    ) -> None:
+        del max_time_seconds, stderr
+        fetch_calls.append((base_url, output_dir))
+
+    run_fetch_pipeline(
+        [spec_with_feed, spec_without_feed],
+        input_dir=input_dir,
+        overpass_url="https://overpass.example/api/interpreter",
+        max_time_seconds=600,
+        render_query_fn=fake_render_query,
+        fetch_overpass_json_fn=fake_fetch_overpass_json,
+        fetch_gtfs_transit_files_fn=fake_fetch_gtfs_transit_files,
+        fetch_components=frozenset({"routing", "boundary", "transit"}),
+        stderr=stderr,
+    )
+
+    assert fetch_calls == [
+        ("https://example.test/gtfs", input_dir / "berlin-transit-gtfs"),
+    ]
+
+
+def test_run_fetch_pipeline_skips_transit_when_component_not_requested(
+    tmp_path: Path,
+) -> None:
+    input_dir = tmp_path / "input"
+    stderr = StringIO()
+    fetch_calls: list[tuple[str, Path]] = []
+    spec_with_feed = dataclasses.replace(
+        _make_region_spec(region_id="berlin", name="Berlin"),
+        transit_feed=TransitFeedSpec(
+            base_url="https://example.test/gtfs",
+            licence="CC BY 4.0",
+            reference_date="2026-08-12",
+        ),
+    )
+
+    def fake_render_query(query_script: Path, *args: str) -> str:
+        return f"/* {query_script.name} */\n" + " ".join(args) + "\n"
+
+    def fake_fetch_overpass_json(**kwargs) -> None:
+        del kwargs
+
+    def fake_fetch_gtfs_transit_files(**kwargs) -> None:
+        fetch_calls.append((kwargs["base_url"], kwargs["output_dir"]))
+
+    run_fetch_pipeline(
+        [spec_with_feed],
+        input_dir=input_dir,
+        overpass_url="https://overpass.example/api/interpreter",
+        max_time_seconds=600,
+        render_query_fn=fake_render_query,
+        fetch_overpass_json_fn=fake_fetch_overpass_json,
+        fetch_gtfs_transit_files_fn=fake_fetch_gtfs_transit_files,
+        fetch_components=frozenset({"routing", "boundary"}),
+        stderr=stderr,
+    )
+
+    assert fetch_calls == []
 
 
 def test_committed_region_config_marks_rhode_island_coastal() -> None:

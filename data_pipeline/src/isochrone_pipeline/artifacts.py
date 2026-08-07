@@ -21,6 +21,12 @@ from isochrone_pipeline.boundary_canvas import (
     simplify_overpass_boundaries_for_canvas,
 )
 from isochrone_pipeline.graph_binary import export_graph_binary_bytes
+from isochrone_pipeline.gtfs_transit import (
+    attach_stops_to_nearest_nodes,
+    finalize_transit_extract,
+    load_transport_type_by_route_id,
+    parse_gtfs_feed,
+)
 from isochrone_pipeline.osm_graph_extract import (
     extract_walkable_graph_input,
     summarize_constraint_tag_coverage,
@@ -70,14 +76,71 @@ def write_graph_binary_artifacts(
     binary_output: Path,
     summary_output: Path,
     epsg: int,
+    transit_feed_dir: Path | None = None,
+    transit_reference_date: str | None = None,
 ) -> dict[str, Any]:
     extracted = extract_walkable_graph_input(input_path)
     tag_coverage = summarize_constraint_tag_coverage(extracted.ways)
     projected = project_nodes_to_utm(extracted.node_coords, epsg_code=epsg)
     graph = build_adjacency_graph(extracted, projected)
-    simplified = simplify_degree2_chains(graph)
 
-    payload = export_graph_binary_bytes(simplified.graph, projection=projected)
+    transit_summary: dict[str, Any] = {}
+    stop_attachment_osm_ids: set[int] = set()
+    parsed_feed = None
+    attached_stops: dict[str, Any] = {}
+    dropped_stop_count = 0
+
+    if transit_feed_dir is not None and transit_reference_date is not None:
+        parsed_feed = parse_gtfs_feed(
+            transit_feed_dir,
+            reference_date=transit_reference_date,
+            epsg_code=epsg,
+            extent_origin_easting=projected.origin_easting,
+            extent_origin_northing=projected.origin_northing,
+            extent_width_m=projected.grid_width_px * projected.pixel_size_m,
+            extent_height_m=projected.grid_height_px * projected.pixel_size_m,
+        )
+        transport_type_by_route_id = load_transport_type_by_route_id(transit_feed_dir)
+        attached_stops, dropped_stop_count = attach_stops_to_nearest_nodes(
+            parsed_feed.stops,
+            projected.node_offsets_m,
+            transport_type_by_route_id,
+        )
+        stop_attachment_osm_ids = {stop.nearest_node_osm_id for stop in attached_stops.values()}
+        transit_summary["parsed_stop_count"] = len(parsed_feed.stops)
+        transit_summary["attached_stop_count"] = len(attached_stops)
+        transit_summary["dropped_stop_count"] = dropped_stop_count
+        transit_summary["total_stop_count_in_feed"] = parsed_feed.total_stop_count
+        transit_summary["raw_connection_count"] = len(parsed_feed.connections)
+
+    simplified = simplify_degree2_chains(graph, stop_attachment_osm_ids=stop_attachment_osm_ids)
+
+    stops: tuple[Any, ...] = ()
+    transit_edges: tuple[Any, ...] = ()
+    if parsed_feed is not None:
+        osm_id_to_final_index = {
+            node.osm_id: index
+            for index, node in enumerate(simplified.graph.nodes)
+            if node.osm_id is not None
+        }
+        transit_extract = finalize_transit_extract(
+            attached_stops,
+            osm_id_to_final_index,
+            parsed_feed.connections,
+            parsed_feed.total_stop_count,
+            dropped_stop_count,
+        )
+        stops = transit_extract.stops
+        transit_edges = transit_extract.connections
+        transit_summary["final_stop_count"] = len(stops)
+        transit_summary["final_connection_count"] = len(transit_edges)
+
+    payload = export_graph_binary_bytes(
+        simplified.graph,
+        projection=projected,
+        stops=stops,
+        transit_edges=transit_edges,
+    )
 
     binary_output.parent.mkdir(parents=True, exist_ok=True)
     binary_output.write_bytes(payload)
@@ -97,6 +160,7 @@ def write_graph_binary_artifacts(
         "edge_mode_mask_counts": _edge_mode_mask_counts(simplified.graph.edges),
         "edge_mode_counts": _edge_mode_counts(simplified.graph.edges),
         "edge_mode_coverage_ratio": _edge_mode_coverage_ratio(simplified.graph.edges),
+        **({"transit": transit_summary} if transit_summary else {}),
         "header": {
             "magic": f"0x{header.magic:08X}",
             "version": header.version,

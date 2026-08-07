@@ -10,6 +10,9 @@ MAGIC = 0x49534F43
 HEADER_SIZE = 64
 NODE_RECORD_SIZE = 16
 EDGE_RECORD_SIZE = 12
+STOP_RECORD_SIZE = 24
+TEDGE_RECORD_SIZE = 20
+TRANSIT_FLAG_BIT = 1 << 0
 
 
 @dataclass(frozen=True)
@@ -50,6 +53,27 @@ class EdgeRecord:
     mode_mask: int
     maxspeed_kph: int
     road_class_id: int
+
+
+@dataclass(frozen=True)
+class StopRecord:
+    x_m: int
+    y_m: int
+    nearest_node_index: int
+    first_tedge_index: int
+    tedge_count: int
+    transport_type: int
+    name_offset: int
+
+
+@dataclass(frozen=True)
+class TransitEdgeRecord:
+    from_stop_index: int
+    to_stop_index: int
+    departure_seconds_from_midnight: int
+    travel_seconds: int
+    route_id: int
+    service_day_mask: int
 
 
 def parse_header(buffer: bytes | bytearray | memoryview) -> GraphHeader:
@@ -128,6 +152,62 @@ def parse_edge_record(buffer: bytes | bytearray | memoryview, offset: int) -> Ed
     )
 
 
+def transit_edge_table_offset(header: GraphHeader) -> int:
+    """Transit edges follow the stop table immediately; there's no separate
+    header field for this (the 64-byte header is already full) — both the
+    writer and reader derive it the same way."""
+    return header.stop_table_offset + (header.n_stops * STOP_RECORD_SIZE)
+
+
+def parse_stop_record(buffer: bytes | bytearray | memoryview, offset: int) -> StopRecord:
+    if offset < 0 or offset + STOP_RECORD_SIZE > len(buffer):
+        raise ValueError(f"Stop record offset out of range: {offset}")
+
+    (
+        x_m,
+        y_m,
+        nearest_node_index,
+        first_tedge_index,
+        tedge_count,
+        transport_type,
+        _reserved,
+        name_offset,
+    ) = struct.unpack_from("<iiIIHBBI", buffer, offset)
+    return StopRecord(
+        x_m=x_m,
+        y_m=y_m,
+        nearest_node_index=nearest_node_index,
+        first_tedge_index=first_tedge_index,
+        tedge_count=tedge_count,
+        transport_type=transport_type,
+        name_offset=name_offset,
+    )
+
+
+def parse_transit_edge_record(
+    buffer: bytes | bytearray | memoryview, offset: int
+) -> TransitEdgeRecord:
+    if offset < 0 or offset + TEDGE_RECORD_SIZE > len(buffer):
+        raise ValueError(f"Transit edge record offset out of range: {offset}")
+
+    (
+        from_stop_index,
+        to_stop_index,
+        departure_seconds_from_midnight,
+        travel_seconds,
+        route_id,
+        service_day_mask,
+    ) = struct.unpack_from("<IIIHHI", buffer, offset)
+    return TransitEdgeRecord(
+        from_stop_index=from_stop_index,
+        to_stop_index=to_stop_index,
+        departure_seconds_from_midnight=departure_seconds_from_midnight,
+        travel_seconds=travel_seconds,
+        route_id=route_id,
+        service_day_mask=service_day_mask,
+    )
+
+
 def validate_offsets(header: GraphHeader, file_size: int) -> None:
     if header.magic != MAGIC:
         raise ValueError(f"Invalid magic 0x{header.magic:08X}; expected 0x{MAGIC:08X}")
@@ -152,6 +232,15 @@ def validate_offsets(header: GraphHeader, file_size: int) -> None:
 
     if header.stop_table_offset > file_size:
         raise ValueError("stop_table_offset beyond file size")
+
+    stop_table_end = header.stop_table_offset + (header.n_stops * STOP_RECORD_SIZE)
+    if stop_table_end > file_size:
+        raise ValueError("stop table extends beyond file size")
+
+    tedge_table_offset = transit_edge_table_offset(header)
+    tedge_table_end = tedge_table_offset + (header.n_tedges * TEDGE_RECORD_SIZE)
+    if tedge_table_end > file_size:
+        raise ValueError("transit edge table extends beyond file size")
 
 
 def summarize_graph_file(path: Path) -> list[str]:

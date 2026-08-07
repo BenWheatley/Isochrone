@@ -4,11 +4,18 @@ from isochrone_pipeline.binary_reader import (
     EDGE_RECORD_SIZE,
     HEADER_SIZE,
     NODE_RECORD_SIZE,
+    STOP_RECORD_SIZE,
+    TRANSIT_FLAG_BIT,
     parse_edge_record,
     parse_header,
     parse_node_record,
+    parse_stop_record,
+    parse_transit_edge_record,
+    transit_edge_table_offset,
+    validate_offsets,
 )
 from isochrone_pipeline.graph_binary import export_graph_binary_bytes
+from isochrone_pipeline.gtfs_transit import TransitConnection, TransitStop
 from isochrone_pipeline.projection import ProjectionResult
 
 
@@ -115,3 +122,120 @@ def test_export_graph_binary_bytes_rejects_invalid_node_edge_layout() -> None:
 
     with pytest.raises(ValueError, match="source_index"):
         export_graph_binary_bytes(graph, projection=_projection())
+
+
+def _small_graph() -> AdjacencyGraph:
+    return AdjacencyGraph(
+        nodes=(
+            GraphNode(osm_id=1, x_m=0, y_m=0, first_edge_index=0, edge_count=1, flags=0),
+            GraphNode(osm_id=2, x_m=10, y_m=0, first_edge_index=1, edge_count=0, flags=0),
+        ),
+        edges=(GraphEdge(source_index=0, target_index=1, cost_seconds=7, flags=0),),
+        skipped_constraint_way_count=0,
+    )
+
+
+def test_export_graph_binary_bytes_writes_stops_and_transit_edges() -> None:
+    stops = (
+        TransitStop(
+            stop_id="s1",
+            name="Stop 1",
+            x_m=0,
+            y_m=0,
+            nearest_node_index=0,
+            walk_attach_cost_seconds=10,
+            transport_type=2,
+        ),
+        TransitStop(
+            stop_id="s2",
+            name="Stop 2",
+            x_m=10,
+            y_m=0,
+            nearest_node_index=1,
+            walk_attach_cost_seconds=5,
+            transport_type=0,
+        ),
+    )
+    connections = (
+        TransitConnection(
+            from_stop_index=0,
+            to_stop_index=1,
+            departure_seconds=28800,
+            arrival_seconds=28920,
+            route_id=3,
+            service_day_mask=0b0011111,
+        ),
+    )
+
+    payload = export_graph_binary_bytes(
+        _small_graph(), projection=_projection(), stops=stops, transit_edges=connections
+    )
+
+    header = parse_header(payload)
+    validate_offsets(header, len(payload))
+    assert header.flags & TRANSIT_FLAG_BIT
+    assert header.n_stops == 2
+    assert header.n_tedges == 1
+
+    stop0 = parse_stop_record(payload, header.stop_table_offset)
+    stop1 = parse_stop_record(payload, header.stop_table_offset + STOP_RECORD_SIZE)
+    assert stop0.nearest_node_index == 0
+    assert stop0.transport_type == 2
+    assert stop1.nearest_node_index == 1
+    assert stop1.transport_type == 0
+
+    tedge_offset = transit_edge_table_offset(header)
+    tedge0 = parse_transit_edge_record(payload, tedge_offset)
+    assert tedge0.from_stop_index == 0
+    assert tedge0.to_stop_index == 1
+    assert tedge0.departure_seconds_from_midnight == 28800
+    assert tedge0.travel_seconds == 120
+    assert tedge0.route_id == 3
+    assert tedge0.service_day_mask == 0b0011111
+    assert len(payload) == tedge_offset + len(connections) * 20
+
+
+def test_export_graph_binary_bytes_rejects_stop_with_bad_node_index() -> None:
+    stops = (
+        TransitStop(
+            stop_id="s1",
+            name="Stop 1",
+            x_m=0,
+            y_m=0,
+            nearest_node_index=99,
+            walk_attach_cost_seconds=10,
+            transport_type=0,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="nearest_node_index"):
+        export_graph_binary_bytes(_small_graph(), projection=_projection(), stops=stops)
+
+
+def test_export_graph_binary_bytes_rejects_transit_edge_with_bad_stop_index() -> None:
+    stops = (
+        TransitStop(
+            stop_id="s1",
+            name="Stop 1",
+            x_m=0,
+            y_m=0,
+            nearest_node_index=0,
+            walk_attach_cost_seconds=10,
+            transport_type=0,
+        ),
+    )
+    connections = (
+        TransitConnection(
+            from_stop_index=0,
+            to_stop_index=5,
+            departure_seconds=100,
+            arrival_seconds=200,
+            route_id=0,
+            service_day_mask=0,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="to_stop_index"):
+        export_graph_binary_bytes(
+            _small_graph(), projection=_projection(), stops=stops, transit_edges=connections
+        )
