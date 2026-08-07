@@ -1,21 +1,21 @@
 {
-  "generated_at_utc": "2026-04-08T14:31:32.826342+00:00",
+  "generated_at_utc": "2026-08-07T07:34:50.406599+00:00",
   "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/rome-routing.osm.json",
   "binary_output": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/output/rome-graph.bin",
-  "binary_size_bytes": 8421776,
-  "before_node_count": 826349,
-  "before_edge_count": 1696050,
-  "after_node_count": 200137,
-  "after_edge_count": 434960,
+  "binary_size_bytes": 8421856,
+  "before_node_count": 826386,
+  "before_edge_count": 1696122,
+  "after_node_count": 200139,
+  "after_edge_count": 434964,
   "constraint_tag_presence": {
     "access": 9080,
-    "foot": 4433,
+    "foot": 4434,
     "oneway": 31074,
     "oneway:foot": 1,
     "bicycle": 5215,
     "cycleway": 891,
     "oneway:bicycle": 292,
-    "motor_vehicle": 1677,
+    "motor_vehicle": 1678,
     "vehicle": 222,
     "sidewalk": 5836,
     "junction": 1584,
@@ -24,49 +24,54 @@
     "tracktype": 1006,
     "maxspeed": 21143,
     "maxspeed:forward": 2,
-    "maxspeed:backward": 2
+    "maxspeed:backward": 2,
+    "duration": 0
   },
   "constraint_tag_coverage_ratio": {
-    "access": 0.05840204793084374,
-    "foot": 0.028512805999716995,
-    "oneway": 0.19986621557302187,
-    "oneway:foot": 6.431943604718474e-06,
-    "bicycle": 0.03354258589860684,
-    "cycleway": 0.00573086175180416,
-    "oneway:bicycle": 0.0018781275325777944,
-    "motor_vehicle": 0.010786369425112881,
-    "vehicle": 0.0014278914802475012,
-    "sidewalk": 0.03753682287713701,
-    "junction": 0.010188198669874063,
-    "service": 0.1102628092156888,
-    "surface": 0.376468091127777,
-    "tracktype": 0.006470535266346784,
-    "maxspeed": 0.13599058363456268,
-    "maxspeed:forward": 1.2863887209436948e-05,
-    "maxspeed:backward": 1.2863887209436948e-05
+    "access": 0.058401672294581125,
+    "foot": 0.02851905451037144,
+    "oneway": 0.1998649300530632,
+    "oneway:foot": 6.431902235086026e-06,
+    "bicycle": 0.03354237015597363,
+    "cycleway": 0.00573082489146165,
+    "oneway:bicycle": 0.0018781154526451198,
+    "motor_vehicle": 0.010792731950474354,
+    "vehicle": 0.0014278822961890979,
+    "sidewalk": 0.037536581443962054,
+    "junction": 0.010188133140376266,
+    "service": 0.11026210001607975,
+    "surface": 0.3764656697218202,
+    "tracktype": 0.006470493648496543,
+    "maxspeed": 0.13598970895642387,
+    "maxspeed:forward": 1.2863804470172053e-05,
+    "maxspeed:backward": 1.2863804470172053e-05,
+    "duration": 0.0
   },
   "edge_mode_mask_counts": {
-    "7": 251592,
+    "7": 251594,
     "3": 30296,
     "1": 152790,
-    "5": 282
+    "5": 282,
+    "10": 2
   },
   "edge_mode_counts": {
-    "walk": 434960,
-    "bike": 281888,
-    "car": 251874
+    "walk": 434962,
+    "bike": 281892,
+    "car": 251876,
+    "water": 2
   },
   "edge_mode_coverage_ratio": {
-    "walk": 1.0,
-    "bike": 0.6480779841824535,
-    "car": 0.579073937833364
+    "walk": 0.9999954019183197,
+    "bike": 0.6480812205148012,
+    "car": 0.5790732106565141,
+    "water": 4.598081680322969e-06
   },
   "header": {
     "magic": "0x49534F43",
     "version": 2,
     "flags": 0,
-    "n_nodes": 200137,
-    "n_edges": 434960,
+    "n_nodes": 200139,
+    "n_edges": 434964,
     "n_stops": 0,
     "n_tedges": 0,
     "origin_easting": 270104.6093205778,
@@ -76,7 +81,7 @@
     "grid_height_px": 5422,
     "pixel_size_m": 10.0,
     "node_table_offset": 64,
-    "edge_table_offset": 3202256,
-    "stop_table_offset": 8421776
+    "edge_table_offset": 3202288,
+    "stop_table_offset": 8421856
   }
 }

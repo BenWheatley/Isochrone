@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-08-06T19:47:11.285338+00:00",
+  "generated_at_utc": "2026-08-07T07:52:51.365292+00:00",
   "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/cyprus-routing.osm.json",
   "binary_output": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/output/cyprus-graph.bin",
   "binary_size_bytes": 9065912,
@@ -24,7 +24,8 @@
     "tracktype": 5964,
     "maxspeed": 11572,
     "maxspeed:forward": 114,
-    "maxspeed:backward": 124
+    "maxspeed:backward": 124,
+    "duration": 0
   },
   "constraint_tag_coverage_ratio": {
     "access": 0.020358724140998707,
@@ -43,7 +44,8 @@
     "tracktype": 0.04081325404266094,
     "maxspeed": 0.07919030445702085,
     "maxspeed:forward": 0.0007801326225458328,
-    "maxspeed:backward": 0.0008485653087340637
+    "maxspeed:backward": 0.0008485653087340637,
+    "duration": 0.0
   },
   "edge_mode_mask_counts": {
     "7": 306916,
@@ -54,12 +56,14 @@
   "edge_mode_counts": {
     "walk": 485458,
     "bike": 420890,
-    "car": 307170
+    "car": 307170,
+    "water": 0
   },
   "edge_mode_coverage_ratio": {
     "walk": 1.0,
     "bike": 0.8669957030268324,
-    "car": 0.6327426883479106
+    "car": 0.6327426883479106,
+    "water": 0.0
   },
   "header": {
     "magic": "0x49534F43",
