@@ -321,6 +321,42 @@ test('createWalkingSearchState settles reachable nodes and computes best costs',
   assert.ok(Math.abs(state.distSeconds[2] - 12) < 0.05);
 });
 
+test('createWalkingSearchState seeds extra sources alongside the primary source', () => {
+  const graph = createFixtureGraph();
+  const withoutSeed = createWalkingSearchState(
+    graph,
+    0,
+    Number.POSITIVE_INFINITY,
+    EDGE_MODE_CAR_BIT,
+    { edgeCostPrecomputeKernel: createFixtureEdgeCostPrecomputeKernel(graph) },
+  );
+  while (!withoutSeed.isDone()) {
+    withoutSeed.expandOne();
+  }
+
+  // node 2 (terminal, no outgoing edges) is reached at ~12s by driving
+  // through node 1. Seeding it directly at 1s (as if a transit leg got
+  // there faster) must win, without affecting node 1's own distance (no
+  // edge runs from node 2 back to node 1).
+  const withSeed = createWalkingSearchState(
+    graph,
+    0,
+    Number.POSITIVE_INFINITY,
+    EDGE_MODE_CAR_BIT,
+    {
+      edgeCostPrecomputeKernel: createFixtureEdgeCostPrecomputeKernel(graph),
+      extraSeeds: [{ nodeIndex: 2, startDistSeconds: 1 }],
+    },
+  );
+  while (!withSeed.isDone()) {
+    withSeed.expandOne();
+  }
+
+  assert.ok(withoutSeed.distSeconds[2] > 1);
+  assert.equal(withSeed.distSeconds[2], 1);
+  assert.equal(withSeed.distSeconds[1], withoutSeed.distSeconds[1]);
+});
+
 test('createWalkingSearchState precomputes edge traversal cache for active mode', () => {
   const graph = createFixtureGraph();
   const state = createWalkingSearchState(

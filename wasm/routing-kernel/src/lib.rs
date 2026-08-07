@@ -242,6 +242,11 @@ fn ticks_to_seconds(ticks: u32) -> f32 {
     (ticks as f32) / COST_TICK_SCALE
 }
 
+/// `seeds` are (node_index, start_ticks) pairs. A single-source search is
+/// just the one-element case; RadixHeap::push has no source-count
+/// assumption (its `key >= self.last` invariant holds for any push order
+/// since `last` starts at 0), so seeding multiple sources up front before
+/// the pop loop begins is sufficient for correct multi-source Dijkstra.
 #[inline]
 fn run_travel_time_field_with_workspace(
     workspace: &mut SearchWorkspace,
@@ -250,7 +255,7 @@ fn run_travel_time_field_with_workspace(
     node_edge_count: &[u16],
     edge_target_node_index: &[u32],
     edge_cost_ticks: &[u32],
-    source_index: usize,
+    seeds: &[(u32, u32)],
     has_time_limit: bool,
     clamped_time_limit_ticks: u32,
 ) -> u32 {
@@ -258,8 +263,16 @@ fn run_travel_time_field_with_workspace(
     let edge_count = edge_target_node_index.len();
     workspace.prepare_for_search(node_count, node_count.min(16_384));
 
-    workspace.dist_ticks[source_index] = 0;
-    workspace.heap.push(source_index as u32, 0);
+    for &(seed_node_index, seed_start_ticks) in seeds {
+        let seed_index = seed_node_index as usize;
+        if seed_index >= node_count {
+            continue;
+        }
+        if seed_start_ticks < workspace.dist_ticks[seed_index] {
+            workspace.dist_ticks[seed_index] = seed_start_ticks;
+            workspace.heap.push(seed_node_index, seed_start_ticks);
+        }
+    }
 
     let mut settled_count = 0u32;
 
@@ -438,6 +451,7 @@ pub extern "C" fn compute_travel_time_field(
     if source_index >= node_count {
         return 0;
     }
+    let seeds = [(source_node_index, 0u32)];
 
     let has_time_limit = time_limit_seconds.is_finite() && time_limit_seconds > 0.0;
     let clamped_time_limit_ticks = if has_time_limit {
@@ -458,7 +472,7 @@ pub extern "C" fn compute_travel_time_field(
                 node_edge_count,
                 edge_target_node_index,
                 edge_cost_ticks,
-                source_index,
+                &seeds,
                 has_time_limit,
                 clamped_time_limit_ticks,
             );
@@ -475,7 +489,138 @@ pub extern "C" fn compute_travel_time_field(
             node_edge_count,
             edge_target_node_index,
             edge_cost_ticks,
-            source_index,
+            &seeds,
+            has_time_limit,
+            clamped_time_limit_ticks,
+        );
+    }
+
+    settled_count
+}
+
+#[inline]
+fn seconds_to_start_ticks(seconds: f32) -> u32 {
+    // Unlike edge costs (which must be strictly positive to advance the
+    // search), a seed's start distance is legitimately 0 (the walking
+    // origin) or any non-negative value (a transit-reached stop's elapsed
+    // arrival time) — quantize_seconds_to_ticks rejects <= 0.0 outright,
+    // so 0 is handled separately here.
+    if !seconds.is_finite() || seconds <= 0.0 {
+        0
+    } else {
+        quantize_seconds_to_ticks(seconds).unwrap_or(u32::MAX)
+    }
+}
+
+/// Multi-source variant of compute_travel_time_field: seeds the search from
+/// every (seed_node_indices[i], seed_start_dist_seconds[i]) pair instead of
+/// a single scalar source. Used for the post-CSA reseed pass — walking
+/// Dijkstra from the origin plus every transit-reached stop, all in one
+/// pass, so the result is already the walk-vs-walk+transit+walk minimum
+/// with no separate merge step needed.
+#[no_mangle]
+pub extern "C" fn compute_travel_time_field_multi_source(
+    out_dist_seconds_ptr: *mut f32,
+    node_first_edge_index_ptr: *const u32,
+    node_edge_count_ptr: *const u16,
+    node_count: usize,
+    edge_target_node_index_ptr: *const u32,
+    edge_cost_ticks_ptr: *const u32,
+    edge_count: usize,
+    seed_node_indices_ptr: *const u32,
+    seed_start_dist_seconds_ptr: *const f32,
+    seed_count: usize,
+    time_limit_seconds: f32,
+) -> u32 {
+    if out_dist_seconds_ptr.is_null()
+        || node_first_edge_index_ptr.is_null()
+        || node_edge_count_ptr.is_null()
+        || node_count == 0
+        || (edge_count > 0
+            && (edge_target_node_index_ptr.is_null() || edge_cost_ticks_ptr.is_null()))
+        || (seed_count > 0
+            && (seed_node_indices_ptr.is_null() || seed_start_dist_seconds_ptr.is_null()))
+    {
+        return 0;
+    }
+
+    let out_dist_seconds =
+        unsafe { std::slice::from_raw_parts_mut(out_dist_seconds_ptr, node_count) };
+    let node_first_edge_index =
+        unsafe { std::slice::from_raw_parts(node_first_edge_index_ptr, node_count) };
+    let node_edge_count = unsafe { std::slice::from_raw_parts(node_edge_count_ptr, node_count) };
+    let edge_target_node_index = if edge_count > 0 {
+        unsafe { std::slice::from_raw_parts(edge_target_node_index_ptr, edge_count) }
+    } else {
+        &[]
+    };
+    let edge_cost_ticks = if edge_count > 0 {
+        unsafe { std::slice::from_raw_parts(edge_cost_ticks_ptr, edge_count) }
+    } else {
+        &[]
+    };
+    let seed_node_indices = if seed_count > 0 {
+        unsafe { std::slice::from_raw_parts(seed_node_indices_ptr, seed_count) }
+    } else {
+        &[]
+    };
+    let seed_start_dist_seconds = if seed_count > 0 {
+        unsafe { std::slice::from_raw_parts(seed_start_dist_seconds_ptr, seed_count) }
+    } else {
+        &[]
+    };
+
+    for dist in out_dist_seconds.iter_mut() {
+        *dist = f32::INFINITY;
+    }
+
+    if seed_count == 0 {
+        return 0;
+    }
+
+    let seeds: Vec<(u32, u32)> = seed_node_indices
+        .iter()
+        .zip(seed_start_dist_seconds.iter())
+        .map(|(&node_index, &start_seconds)| (node_index, seconds_to_start_ticks(start_seconds)))
+        .collect();
+
+    let has_time_limit = time_limit_seconds.is_finite() && time_limit_seconds > 0.0;
+    let clamped_time_limit_ticks = if has_time_limit {
+        quantize_seconds_to_ticks(time_limit_seconds).unwrap_or(u32::MAX)
+    } else {
+        u32::MAX
+    };
+
+    let mut settled_count = 0u32;
+    let mut used_cached_workspace = false;
+
+    SEARCH_WORKSPACE.with(|workspace_cell| {
+        if let Ok(mut workspace) = workspace_cell.try_borrow_mut() {
+            settled_count = run_travel_time_field_with_workspace(
+                &mut workspace,
+                out_dist_seconds,
+                node_first_edge_index,
+                node_edge_count,
+                edge_target_node_index,
+                edge_cost_ticks,
+                &seeds,
+                has_time_limit,
+                clamped_time_limit_ticks,
+            );
+            used_cached_workspace = true;
+        }
+    });
+
+    if !used_cached_workspace {
+        let mut fallback_workspace = SearchWorkspace::new();
+        settled_count = run_travel_time_field_with_workspace(
+            &mut fallback_workspace,
+            out_dist_seconds,
+            node_first_edge_index,
+            node_edge_count,
+            edge_target_node_index,
+            edge_cost_ticks,
+            &seeds,
             has_time_limit,
             clamped_time_limit_ticks,
         );
@@ -620,6 +765,108 @@ mod tests {
 
         let bike_cost = edge_cost_seconds(EDGE_MODE_BIKE_BIT, edge_mode_mask, 0, 36, 72);
         assert!(bike_cost.is_infinite());
+    }
+
+    #[test]
+    fn multi_source_with_one_seed_matches_single_source() {
+        let node_first_edge_index = [0u32, 2, 3];
+        let node_edge_count = [2u16, 1, 0];
+        let edge_target_node_index = [1u32, 2, 2];
+        let edge_cost_ticks = [10_000u32, 25_000u32, 10_000u32];
+
+        let mut single_source_out = [f32::INFINITY; 3];
+        compute_travel_time_field(
+            single_source_out.as_mut_ptr(),
+            node_first_edge_index.as_ptr(),
+            node_edge_count.as_ptr(),
+            3,
+            edge_target_node_index.as_ptr(),
+            edge_cost_ticks.as_ptr(),
+            3,
+            0,
+            f32::INFINITY,
+        );
+
+        let seed_node_indices = [0u32];
+        let seed_start_dist_seconds = [0.0f32];
+        let mut multi_source_out = [f32::INFINITY; 3];
+        let settled_count = compute_travel_time_field_multi_source(
+            multi_source_out.as_mut_ptr(),
+            node_first_edge_index.as_ptr(),
+            node_edge_count.as_ptr(),
+            3,
+            edge_target_node_index.as_ptr(),
+            edge_cost_ticks.as_ptr(),
+            3,
+            seed_node_indices.as_ptr(),
+            seed_start_dist_seconds.as_ptr(),
+            1,
+            f32::INFINITY,
+        );
+
+        assert_eq!(settled_count, 3);
+        assert_eq!(multi_source_out, single_source_out);
+    }
+
+    #[test]
+    fn multi_source_seed_shortcuts_a_downstream_node() {
+        // Same graph as above (0 -> 1 costs 10s, 0 -> 2 costs 25s directly,
+        // 1 -> 2 costs 10s, so pure walking reaches node 2 at t=20s via
+        // node 1). Seeding node 2 directly at t=5s (as if a transit ride
+        // got there faster) must win over the walked 20s path, and must
+        // not affect node 1 (no edge runs from node 2 back to node 1).
+        let node_first_edge_index = [0u32, 2, 3];
+        let node_edge_count = [2u16, 1, 0];
+        let edge_target_node_index = [1u32, 2, 2];
+        let edge_cost_ticks = [10_000u32, 25_000u32, 10_000u32];
+
+        let seed_node_indices = [0u32, 2u32];
+        let seed_start_dist_seconds = [0.0f32, 5.0f32];
+        let mut out_dist_seconds = [f32::INFINITY; 3];
+        let settled_count = compute_travel_time_field_multi_source(
+            out_dist_seconds.as_mut_ptr(),
+            node_first_edge_index.as_ptr(),
+            node_edge_count.as_ptr(),
+            3,
+            edge_target_node_index.as_ptr(),
+            edge_cost_ticks.as_ptr(),
+            3,
+            seed_node_indices.as_ptr(),
+            seed_start_dist_seconds.as_ptr(),
+            2,
+            f32::INFINITY,
+        );
+
+        assert_eq!(settled_count, 3);
+        assert_eq!(out_dist_seconds[0], 0.0);
+        assert_eq!(out_dist_seconds[1], 10.0);
+        assert_eq!(out_dist_seconds[2], 5.0);
+    }
+
+    #[test]
+    fn multi_source_with_zero_seeds_settles_nothing() {
+        let node_first_edge_index = [0u32, 2, 3];
+        let node_edge_count = [2u16, 1, 0];
+        let edge_target_node_index = [1u32, 2, 2];
+        let edge_cost_ticks = [10_000u32, 25_000u32, 10_000u32];
+        let mut out_dist_seconds = [0.0f32; 3];
+
+        let settled_count = compute_travel_time_field_multi_source(
+            out_dist_seconds.as_mut_ptr(),
+            node_first_edge_index.as_ptr(),
+            node_edge_count.as_ptr(),
+            3,
+            edge_target_node_index.as_ptr(),
+            edge_cost_ticks.as_ptr(),
+            3,
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+            f32::INFINITY,
+        );
+
+        assert_eq!(settled_count, 0);
+        assert!(out_dist_seconds.iter().all(|dist| dist.is_infinite()));
     }
 
     #[test]

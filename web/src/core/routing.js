@@ -56,6 +56,23 @@ export function createWalkingSearchState(
   if (options.onKernelError !== null && options.onKernelError !== undefined && typeof options.onKernelError !== 'function') {
     throw new Error('options.onKernelError must be a function when provided');
   }
+  const extraSeeds = options.extraSeeds ?? [];
+  if (!Array.isArray(extraSeeds)) {
+    throw new Error('options.extraSeeds must be an array when provided');
+  }
+  for (const seed of extraSeeds) {
+    if (
+      !seed
+      || !Number.isInteger(seed.nodeIndex)
+      || seed.nodeIndex < 0
+      || seed.nodeIndex >= nNodes
+    ) {
+      throw new Error('options.extraSeeds entries must have a valid nodeIndex');
+    }
+    if (!Number.isFinite(seed.startDistSeconds) || seed.startDistSeconds < 0) {
+      throw new Error('options.extraSeeds entries must have a non-negative startDistSeconds');
+    }
+  }
 
   const nodeU32 = graph.nodeU32;
   const nodeU16 = graph.nodeU16;
@@ -84,6 +101,17 @@ export function createWalkingSearchState(
 
   distSeconds[sourceNodeIndex] = 0;
   heap.push(sourceNodeIndex, 0);
+
+  // Additional seeds (e.g. transit-reached stops from a prior CSA pass) are
+  // pushed alongside the primary source before any pops begin, so this is
+  // a true multi-source Dijkstra in one pass — matching the WASM kernel's
+  // compute_travel_time_field_multi_source approach.
+  for (const seed of extraSeeds) {
+    if (seed.startDistSeconds < distSeconds[seed.nodeIndex]) {
+      distSeconds[seed.nodeIndex] = seed.startDistSeconds;
+      heap.push(seed.nodeIndex, seed.startDistSeconds);
+    }
+  }
 
   let done = false;
   let settledCount = 0;
