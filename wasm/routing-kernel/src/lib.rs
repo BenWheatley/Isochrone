@@ -4,10 +4,12 @@ use std::cell::RefCell;
 const EDGE_MODE_WALK_BIT: u8 = 1;
 const EDGE_MODE_BIKE_BIT: u8 = 1 << 1;
 const EDGE_MODE_CAR_BIT: u8 = 1 << 2;
+const EDGE_MODE_WATER_BIT: u8 = 1 << 3;
 const ROAD_CLASS_MOTORWAY: u8 = 15;
 const WALKING_SPEED_M_S: f32 = 1.4;
 const BIKE_CRUISE_SPEED_KPH: f32 = 20.0;
 const CAR_FALLBACK_SPEED_KPH: f32 = 30.0;
+const WATER_FALLBACK_SPEED_KPH: f32 = 25.0;
 const COST_TICK_SCALE: f32 = 1_000.0;
 const RADIX_BUCKET_COUNT: usize = 33;
 
@@ -166,6 +168,23 @@ fn edge_cost_seconds(
     let walking_cost_seconds_f32 = walking_cost_seconds as f32;
     let distance_m = (walking_cost_seconds_f32 * WALKING_SPEED_M_S).max(1.0);
     let maxspeed_kph = edge_maxspeed_kph as f32;
+
+    if (edge_mode_mask & EDGE_MODE_WATER_BIT) != 0 {
+        // A ferry leg's crossing time doesn't depend on which boarding bit
+        // (walk/bike/car) matched allowed_mode_mask — always cost it at the
+        // baked ferry speed (duration-tag-derived, explicit maxspeed, or the
+        // flat fallback, already resolved at build time into edge_maxspeed_kph).
+        let water_speed_kph = if maxspeed_kph > 0.0 {
+            maxspeed_kph
+        } else {
+            WATER_FALLBACK_SPEED_KPH
+        };
+        if water_speed_kph <= 0.0 {
+            return f32::INFINITY;
+        }
+        return distance_m / (water_speed_kph * (1000.0 / 3600.0));
+    }
+
     let mut best_cost = f32::INFINITY;
 
     if (allowed_mode_mask & EDGE_MODE_WALK_BIT) != 0
@@ -587,5 +606,28 @@ mod tests {
     fn walk_disallows_motorway() {
         let cost = edge_cost_seconds(EDGE_MODE_WALK_BIT, EDGE_MODE_WALK_BIT, ROAD_CLASS_MOTORWAY, 50, 72);
         assert!(cost.is_infinite());
+    }
+
+    #[test]
+    fn water_cost_ignores_boarding_mode_and_uses_baked_speed() {
+        let edge_mode_mask = EDGE_MODE_WALK_BIT | EDGE_MODE_WATER_BIT;
+        let walk_cost = edge_cost_seconds(EDGE_MODE_WALK_BIT, edge_mode_mask, 0, 36, 72);
+        let water_cost = edge_cost_seconds(EDGE_MODE_WATER_BIT, edge_mode_mask, 0, 36, 72);
+        assert!(walk_cost.is_finite());
+        assert_eq!(walk_cost, water_cost);
+        // Ferry pace (36 kph), not walking pace (WALKING_SPEED_M_S).
+        assert!(walk_cost < 72.0);
+
+        let bike_cost = edge_cost_seconds(EDGE_MODE_BIKE_BIT, edge_mode_mask, 0, 36, 72);
+        assert!(bike_cost.is_infinite());
+    }
+
+    #[test]
+    fn water_cost_falls_back_without_baked_maxspeed() {
+        let cost = edge_cost_seconds(EDGE_MODE_WATER_BIT, EDGE_MODE_WATER_BIT, 0, 0, 72);
+        assert!(cost.is_finite());
+        let distance_m = 72.0_f32 * WALKING_SPEED_M_S;
+        let expected = distance_m / (WATER_FALLBACK_SPEED_KPH * (1000.0 / 3600.0));
+        assert!((cost - expected).abs() < 1e-3);
     }
 }
