@@ -155,10 +155,12 @@ export function getAirportFillStyle(colourTheme) {
 
 export function getWaterwayStrokeStyle(colourTheme, navigable) {
   const isLight = normalizeIsochroneTheme(colourTheme, 'dark') === 'light';
+  // Matches the inland-water fill hue (lakes/ponds) so rivers/canals read as
+  // the same "large body of water" family rather than a distinct blue.
   if (navigable) {
-    return isLight ? 'rgba(28, 108, 168, 0.85)' : 'rgba(96, 182, 230, 0.85)';
+    return isLight ? 'rgba(110, 200, 220, 0.9)' : 'rgba(18, 68, 88, 0.95)';
   }
-  return isLight ? 'rgba(28, 108, 168, 0.5)' : 'rgba(96, 182, 230, 0.5)';
+  return isLight ? 'rgba(110, 200, 220, 0.55)' : 'rgba(18, 68, 88, 0.6)';
 }
 
 function isParsedBoundaryBasemapPayload(value) {
