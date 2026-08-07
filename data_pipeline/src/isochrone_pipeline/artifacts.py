@@ -11,6 +11,7 @@ from isochrone_pipeline.adjacency import (
     MODE_MASK_BIKE,
     MODE_MASK_CAR,
     MODE_MASK_WALK,
+    MODE_MASK_WATER,
     GraphEdge,
     build_adjacency_graph,
 )
@@ -130,7 +131,10 @@ def _edge_mode_mask_counts(edges: tuple[GraphEdge, ...]) -> dict[str, int]:
 
 
 def _edge_mode_counts(edges: tuple[GraphEdge, ...]) -> dict[str, int]:
-    counts = {"walk": 0, "bike": 0, "car": 0}
+    # "walk"/"bike"/"car" now also include composite ferry edges that carry
+    # those bits (e.g. a foot+bike passenger ferry) — expected, not a
+    # regression; "water" identifies ferry edges specifically.
+    counts = {"walk": 0, "bike": 0, "car": 0, "water": 0}
     for edge in edges:
         if edge.mode_mask & MODE_MASK_WALK:
             counts["walk"] += 1
@@ -138,17 +142,20 @@ def _edge_mode_counts(edges: tuple[GraphEdge, ...]) -> dict[str, int]:
             counts["bike"] += 1
         if edge.mode_mask & MODE_MASK_CAR:
             counts["car"] += 1
+        if edge.mode_mask & MODE_MASK_WATER:
+            counts["water"] += 1
     return counts
 
 
 def _edge_mode_coverage_ratio(edges: tuple[GraphEdge, ...]) -> dict[str, float]:
     total_edges = len(edges)
     if total_edges == 0:
-        return {"walk": 0.0, "bike": 0.0, "car": 0.0}
+        return {"walk": 0.0, "bike": 0.0, "car": 0.0, "water": 0.0}
 
     mode_counts = _edge_mode_counts(edges)
     return {
         "walk": mode_counts["walk"] / total_edges,
         "bike": mode_counts["bike"] / total_edges,
         "car": mode_counts["car"] / total_edges,
+        "water": mode_counts["water"] / total_edges,
     }

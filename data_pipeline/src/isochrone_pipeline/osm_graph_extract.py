@@ -26,6 +26,7 @@ CONSTRAINT_TAGS: tuple[str, ...] = (
     "maxspeed",
     "maxspeed:forward",
     "maxspeed:backward",
+    "duration",
 )
 
 
@@ -109,6 +110,52 @@ def collect_walkable_way_candidates(
             WayCandidate(
                 osm_id=osm_id,
                 highway=highway,
+                node_ids=node_ids,
+                constraints=constraints,
+            )
+        )
+        referenced_node_ids.update(node_ids)
+
+    return WayPassResult(ways=tuple(ways), referenced_node_ids=referenced_node_ids)
+
+
+def collect_ferry_way_candidates(path: Path) -> WayPassResult:
+    ways: list[WayCandidate] = []
+    referenced_node_ids: set[int] = set()
+
+    for element in iter_overpass_elements(path):
+        if element.get("type") != "way":
+            continue
+
+        tags = element.get("tags")
+        if not isinstance(tags, dict):
+            continue
+
+        if tags.get("route") != "ferry":
+            continue
+
+        nodes = element.get("nodes")
+        if not isinstance(nodes, list):
+            continue
+
+        node_ids = tuple(node_id for node_id in nodes if isinstance(node_id, int))
+        if len(node_ids) < 2:
+            continue
+
+        osm_id = element.get("id")
+        if not isinstance(osm_id, int):
+            continue
+
+        constraints: dict[str, str] = {}
+        for tag in CONSTRAINT_TAGS:
+            tag_value = tags.get(tag)
+            if isinstance(tag_value, str):
+                constraints[tag] = tag_value
+
+        ways.append(
+            WayCandidate(
+                osm_id=osm_id,
+                highway="ferry",
                 node_ids=node_ids,
                 constraints=constraints,
             )
@@ -212,9 +259,12 @@ def extract_walkable_graph_input(
     walkable_highways: set[str] | None = None,
 ) -> WalkableGraphExtract:
     pass1 = collect_walkable_way_candidates(path, walkable_highways=walkable_highways)
-    node_coords = load_referenced_nodes(path, pass1.referenced_node_ids)
+    ferry_pass = collect_ferry_way_candidates(path)
+    referenced_node_ids = pass1.referenced_node_ids | ferry_pass.referenced_node_ids
+    node_coords = load_referenced_nodes(path, referenced_node_ids)
     connector_nodes = collect_connector_nodes(path)
-    kept_ways, dropped_way_count = drop_ways_with_missing_nodes(pass1.ways, node_coords)
+    combined_ways = pass1.ways + ferry_pass.ways
+    kept_ways, dropped_way_count = drop_ways_with_missing_nodes(combined_ways, node_coords)
 
     return WalkableGraphExtract(
         ways=kept_ways,
