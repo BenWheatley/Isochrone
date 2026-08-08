@@ -41,6 +41,7 @@ export function initializeAppShell(doc, options = {}) {
   const routingStatus = resolvedDocument.getElementById('routing-status');
   const renderBackendBadge = resolvedDocument.getElementById('render-backend-badge');
   const routingDisclaimer = resolvedDocument.getElementById('routing-disclaimer');
+  const routingDisclaimerTransit = resolvedDocument.getElementById('routing-disclaimer-transit');
   const themeSelect = resolvedDocument.getElementById('theme-select');
   const invertPointerButtonsInput = resolvedDocument.getElementById('invert-pointer-buttons');
   const modeSelect = resolvedDocument.getElementById('mode-select');
@@ -92,6 +93,9 @@ export function initializeAppShell(doc, options = {}) {
   }
   if (!routingDisclaimer || routingDisclaimer.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="routing-disclaimer">');
+  }
+  if (!routingDisclaimerTransit || routingDisclaimerTransit.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="routing-disclaimer-transit">');
   }
   if (!themeSelect || themeSelect.tagName !== 'SELECT') {
     throw new Error('index.html is missing <select id="theme-select">');
@@ -182,6 +186,7 @@ export function initializeAppShell(doc, options = {}) {
     routingStatus,
     renderBackendBadge,
     routingDisclaimer,
+    routingDisclaimerTransit,
     themeSelect,
     invertPointerButtonsInput,
     modeSelect,
@@ -492,11 +497,15 @@ export function getTransitOptionsFromShell(shell) {
 }
 
 /**
- * Toggles the "Public transit" control's visibility based on whether the
- * currently-loaded region's graph actually has transit stops (only Berlin,
- * for now) — absent/inert for every other region rather than a per-region
- * config flag. Resets the checkbox when hiding so a stale checked state
- * from a previous region doesn't linger if the row is shown again later.
+ * Toggles the "Public transit" control's visibility, and the VBB/CC BY
+ * transit attribution line, based on whether the currently-loaded region's
+ * graph actually has transit stops (only Berlin, for now) — both absent for
+ * every other region rather than a per-region config flag. Resets the
+ * checkbox when hiding so a stale checked state from a previous region
+ * doesn't linger if the row is shown again later. The SVG export's
+ * copyright notice reads both disclaimer elements' live textContent and
+ * skips routingDisclaimerTransit while hidden, so toggling `hidden` here is
+ * enough to keep exports correct too, no separate wiring needed there.
  */
 export function updateTransitControlAvailability(shell, hasTransitData) {
   if (!shell || typeof shell !== 'object') {
@@ -508,6 +517,9 @@ export function updateTransitControlAvailability(shell, hasTransitData) {
   }
   if (!hasTransitData && shell.transitEnabledInput) {
     shell.transitEnabledInput.checked = false;
+  }
+  if (shell.routingDisclaimerTransit) {
+    shell.routingDisclaimerTransit.hidden = !hasTransitData;
   }
 }
 

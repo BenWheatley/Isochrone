@@ -22,6 +22,8 @@
   "body.distanceScale.aria": "Maßstabsleiste",
   "body.disclaimer": "Hinweis: OSM-Daten können isolierte, nicht verbundene Streckenabschnitte enthalten. Kartendaten © OpenStreetMap-Mitwirkende, verfügbar unter der Open Database License (ODbL):",
   "body.disclaimer.link": "https://www.openstreetmap.org/copyright",
+  "body.disclaimer.transit": "ÖPNV-Daten © VBB (Verkehrsverbund Berlin-Brandenburg), verfügbar unter der Creative-Commons-Lizenz CC BY 4.0:",
+  "body.disclaimer.transit.link": "http://www.vbb.de/vbbgtfs",
   "legend.duration.minuteOnly": "{minutes} Min.",
   "legend.duration.hourOnly": "{hours} Std.",
   "legend.duration.hourMinute": "{hours} Std. {minutes} Min.",

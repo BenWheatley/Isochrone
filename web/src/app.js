@@ -5833,8 +5833,13 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           exportScaleBar?.label ?? shell.distanceScaleLabel?.textContent?.trim() ?? '';
         const scaleBarWidthPx = exportScaleBar?.lineWidthPx ?? 96;
         const scaleBarSegmentWidthPx = exportScaleBar?.segmentWidthPx;
-        const copyrightNotice =
-          shell.routingDisclaimer?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+        const transitDisclaimerText =
+          shell.routingDisclaimerTransit && !shell.routingDisclaimerTransit.hidden
+            ? (shell.routingDisclaimerTransit.textContent ?? '')
+            : '';
+        const copyrightNotice = `${shell.routingDisclaimer?.textContent ?? ''} ${transitDisclaimerText}`
+          .replace(/\s+/g, ' ')
+          .trim();
 
         let edgeVertexData = new Float32Array(0);
         let cycleMinutes = getColourCycleMinutesFromShell(shell);

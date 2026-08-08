@@ -458,7 +458,8 @@ body {
   background: var(--badge-cpu-bg);
 }
 
-#routing-disclaimer {
+#routing-disclaimer,
+#routing-disclaimer-transit {
   margin-left: auto;
   color: var(--disclaimer-text);
   font-size: 0.74rem;
@@ -468,7 +469,8 @@ body {
   max-width: 52rem;
 }
 
-#routing-disclaimer a {
+#routing-disclaimer a,
+#routing-disclaimer-transit a {
   color: var(--disclaimer-link);
 }
 
@@ -477,7 +479,8 @@ body {
     width: min(20rem, calc(100vw - 1.1rem));
   }
 
-  #routing-disclaimer {
+  #routing-disclaimer,
+  #routing-disclaimer-transit {
     margin-left: 0;
     text-align: left;
     max-width: none;

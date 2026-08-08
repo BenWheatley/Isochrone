@@ -195,28 +195,32 @@ test('getTransitOptionsFromShell returns NaN departureSecondsOfDay for a malform
   assert.ok(Number.isNaN(options.departureSecondsOfDay));
 });
 
-test('updateTransitControlAvailability shows the row and preserves checked state when transit data exists', () => {
+test('updateTransitControlAvailability shows the row and attribution and preserves checked state when transit data exists', () => {
   const shell = {
     transitEnabledRow: { hidden: true },
     transitEnabledInput: createCheckbox(true),
+    routingDisclaimerTransit: { hidden: true },
   };
 
   updateTransitControlAvailability(shell, true);
 
   assert.equal(shell.transitEnabledRow.hidden, false);
   assert.equal(shell.transitEnabledInput.checked, true);
+  assert.equal(shell.routingDisclaimerTransit.hidden, false);
 });
 
-test('updateTransitControlAvailability hides the row and resets the checkbox when transit data is absent', () => {
+test('updateTransitControlAvailability hides the row, attribution, and resets the checkbox when transit data is absent', () => {
   const shell = {
     transitEnabledRow: { hidden: false },
     transitEnabledInput: createCheckbox(true),
+    routingDisclaimerTransit: { hidden: false },
   };
 
   updateTransitControlAvailability(shell, false);
 
   assert.equal(shell.transitEnabledRow.hidden, true);
   assert.equal(shell.transitEnabledInput.checked, false);
+  assert.equal(shell.routingDisclaimerTransit.hidden, true);
 });
 
 test('bindModeSelectControl uses redraw for mode changes and repaint for cycle changes', () => {
