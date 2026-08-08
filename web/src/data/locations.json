@@ -5,7 +5,10 @@
       "name": "Berlin",
       "graphFileName": "graph-walk.bin.gz",
       "boundaryFileName": "berlin-district-boundaries-canvas.json",
-      "transitReferenceDate": "2026-08-12"
+      "transitDateRange": {
+        "min": "2026-08-04",
+        "max": "2026-12-12"
+      }
     },
     {
       "id": "paris",
