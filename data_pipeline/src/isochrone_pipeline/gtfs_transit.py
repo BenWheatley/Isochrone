@@ -19,7 +19,6 @@ everything to the final binary-ready index space once that's available.
 from __future__ import annotations
 
 import csv
-import datetime
 import math
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -97,6 +96,8 @@ class ParsedGtfsFeed:
     stops: dict[str, RawStop]
     connections: tuple[RawConnection, ...]
     total_stop_count: int
+    min_date: str
+    max_date: str
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,8 @@ class GtfsTransitExtract:
     route_ids: tuple[str, ...]
     dropped_stop_count: int
     total_stop_count: int
+    min_date: str
+    max_date: str
 
 
 def _iter_csv_rows(path: Path) -> Iterator[dict[str, str]]:
@@ -156,42 +159,15 @@ def _parse_gtfs_time_to_seconds(raw: str) -> int:
     return hours * 3600 + minutes * 60 + seconds
 
 
-def _weekday_index_for_iso_date(reference_date: str) -> int:
-    year, month, day = (int(part) for part in reference_date.split("-"))
-    return datetime.date(year, month, day).weekday()
+@dataclass(frozen=True)
+class _ServiceCalendarEntry:
+    day_mask: int
+    start_date: int
+    end_date: int
 
 
-def resolve_active_service_ids(feed_dir: Path, reference_date: str) -> set[str]:
-    reference_date_int = int(reference_date.replace("-", ""))
-    weekday_column = _WEEKDAY_COLUMNS[_weekday_index_for_iso_date(reference_date)]
-
-    active: set[str] = set()
-
-    calendar_path = feed_dir / "calendar.txt"
-    if calendar_path.is_file():
-        for row in _iter_csv_rows(calendar_path):
-            start_date = int(row["start_date"])
-            end_date = int(row["end_date"])
-            if start_date <= reference_date_int <= end_date and row[weekday_column].strip() == "1":
-                active.add(row["service_id"])
-
-    calendar_dates_path = feed_dir / "calendar_dates.txt"
-    if calendar_dates_path.is_file():
-        for row in _iter_csv_rows(calendar_dates_path):
-            if int(row["date"]) != reference_date_int:
-                continue
-            service_id = row["service_id"]
-            exception_type = row["exception_type"].strip()
-            if exception_type == "1":
-                active.add(service_id)
-            elif exception_type == "2":
-                active.discard(service_id)
-
-    return active
-
-
-def _resolve_service_day_masks(feed_dir: Path) -> dict[str, int]:
-    masks: dict[str, int] = {}
+def _resolve_service_calendar(feed_dir: Path) -> dict[str, _ServiceCalendarEntry]:
+    entries: dict[str, _ServiceCalendarEntry] = {}
     calendar_path = feed_dir / "calendar.txt"
     if calendar_path.is_file():
         for row in _iter_csv_rows(calendar_path):
@@ -199,16 +175,42 @@ def _resolve_service_day_masks(feed_dir: Path) -> dict[str, int]:
             for bit_index, column in enumerate(_WEEKDAY_COLUMNS):
                 if row[column].strip() == "1":
                     mask |= 1 << bit_index
-            masks[row["service_id"]] = mask
-    return masks
+            entries[row["service_id"]] = _ServiceCalendarEntry(
+                day_mask=mask,
+                start_date=int(row["start_date"]),
+                end_date=int(row["end_date"]),
+            )
+    return entries
 
 
-def _fallback_service_day_mask(reference_date: str) -> int:
-    # calendar_dates.txt-only services have no weekly pattern to read; best
-    # effort is to mark just the reference date's own weekday. This field
-    # is informational only in this MVP — the CSA scan doesn't consult it,
-    # since the connections table is already pre-filtered to one day.
-    return 1 << _weekday_index_for_iso_date(reference_date)
+def _format_gtfs_date(date_int: int) -> str:
+    text = str(date_int)
+    return f"{text[0:4]}-{text[4:6]}-{text[6:8]}"
+
+
+def resolve_recurring_service_ids_and_date_range(
+    feed_dir: Path,
+) -> tuple[set[str], str, str]:
+    """Every service_id with a nonzero weekly weekday pattern in
+    calendar.txt, plus the overall min/max date range those services cover.
+
+    calendar_dates.txt-only services (single-date add/remove exceptions,
+    e.g. holiday specials) are intentionally excluded: their activity can't
+    be expressed as a weekly bitmask, and modeling them precisely would need
+    a per-date connections table rather than the single shared table the
+    query-time CSA scan filters by weekday bit (see
+    runConnectionScanFromWalkingReachableStops in web/src/app.js, which
+    checks graph.tedgeServiceDayMask against the selected date's weekday).
+    """
+    calendar = _resolve_service_calendar(feed_dir)
+    recurring_service_ids = {
+        service_id for service_id, entry in calendar.items() if entry.day_mask != 0
+    }
+    if not recurring_service_ids:
+        raise ValueError(f"no weekday-recurring GTFS services found in {feed_dir}")
+    min_date = min(calendar[service_id].start_date for service_id in recurring_service_ids)
+    max_date = max(calendar[service_id].end_date for service_id in recurring_service_ids)
+    return recurring_service_ids, _format_gtfs_date(min_date), _format_gtfs_date(max_date)
 
 
 def load_transport_type_by_route_id(feed_dir: Path) -> dict[str, int]:
@@ -227,7 +229,6 @@ def load_transport_type_by_route_id(feed_dir: Path) -> dict[str, int]:
 def parse_gtfs_feed(
     feed_dir: Path,
     *,
-    reference_date: str,
     epsg_code: int,
     extent_origin_easting: float,
     extent_origin_northing: float,
@@ -240,7 +241,10 @@ def parse_gtfs_feed(
     Stops are filtered to a buffered bounding box around an existing walking
     graph's extent; connections (hops between consecutive stop_times rows
     within a trip) are kept only when both endpoints are in that kept-stop
-    set, and only for trips whose service is active on reference_date.
+    set, and only for trips whose service recurs on some weekday (see
+    resolve_recurring_service_ids_and_date_range). Every kept connection
+    carries its true weekly service_day_mask; which ones apply to a given
+    query date is decided later, at CSA scan time in the browser.
     """
     transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg_code}", always_xy=True)
 
@@ -272,9 +276,11 @@ def parse_gtfs_feed(
         if min_easting <= easting <= max_easting and min_northing <= northing <= max_northing:
             kept_stop_ids.add(stop_id)
 
-    active_service_ids = resolve_active_service_ids(feed_dir, reference_date)
-    service_day_masks = _resolve_service_day_masks(feed_dir)
-    fallback_mask = _fallback_service_day_mask(reference_date)
+    active_service_ids, min_date, max_date = resolve_recurring_service_ids_and_date_range(feed_dir)
+    service_day_masks = {
+        service_id: entry.day_mask
+        for service_id, entry in _resolve_service_calendar(feed_dir).items()
+    }
 
     active_trip_service: dict[str, str] = {}
     trip_route_id: dict[str, str] = {}
@@ -311,7 +317,7 @@ def parse_gtfs_feed(
         rows.sort(key=lambda entry: entry[0])
         service_id = active_trip_service[trip_id]
         route_id = trip_route_id.get(trip_id, "")
-        service_day_mask = service_day_masks.get(service_id, fallback_mask)
+        service_day_mask = service_day_masks[service_id]
         for (_, from_stop_id, _, departure_seconds), (
             _,
             to_stop_id,
@@ -352,6 +358,8 @@ def parse_gtfs_feed(
         stops=kept_stops,
         connections=tuple(connections),
         total_stop_count=total_stop_count,
+        min_date=min_date,
+        max_date=max_date,
     )
 
 
@@ -419,6 +427,8 @@ def finalize_transit_extract(
     raw_connections: tuple[RawConnection, ...],
     total_stop_count: int,
     dropped_stop_count: int,
+    min_date: str,
+    max_date: str,
 ) -> GtfsTransitExtract:
     """Resolve stop ids/OSM node ids to the final contiguous index space used
     by the binary stop/transit-edge tables, dropping any connection whose
@@ -472,4 +482,6 @@ def finalize_transit_extract(
         route_ids=tuple(route_ids),
         dropped_stop_count=dropped_stop_count,
         total_stop_count=total_stop_count,
+        min_date=min_date,
+        max_date=max_date,
     )

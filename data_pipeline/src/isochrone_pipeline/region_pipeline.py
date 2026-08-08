@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
-import re
 import shutil
 import subprocess
 import sys
@@ -35,7 +34,6 @@ QueryRenderer = Callable[..., str]
 OverpassFetcher = Callable[..., None]
 DEFAULT_FETCH_COMPONENTS: frozenset[str] = frozenset({"routing", "boundary"})
 DEFAULT_BUILD_COMPONENTS: frozenset[str] = frozenset({"graph", "boundary"})
-_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 GTFS_TRANSIT_FILE_NAMES: tuple[str, ...] = (
     "agency",
     "calendar",
@@ -59,7 +57,6 @@ class RegionDataHelpFormatter(
 class TransitFeedSpec:
     base_url: str
     licence: str
-    reference_date: str
 
 
 @dataclass(frozen=True)
@@ -202,11 +199,24 @@ def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
     return tuple(region_specs)
 
 
-def build_location_manifest(region_specs: Sequence[RegionSpec]) -> dict[str, Any]:
-    return {"locations": [_build_manifest_location_entry(spec) for spec in region_specs]}
+def build_location_manifest(
+    region_specs: Sequence[RegionSpec],
+    *,
+    transit_date_ranges: dict[str, dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    transit_date_ranges = transit_date_ranges or {}
+    return {
+        "locations": [
+            _build_manifest_location_entry(spec, transit_date_ranges.get(spec.id))
+            for spec in region_specs
+        ]
+    }
 
 
-def _build_manifest_location_entry(spec: RegionSpec) -> dict[str, Any]:
+def _build_manifest_location_entry(
+    spec: RegionSpec,
+    transit_date_range: dict[str, str] | None = None,
+) -> dict[str, Any]:
     entry: dict[str, Any] = {
         "id": spec.id,
         "name": spec.name,
@@ -215,8 +225,8 @@ def _build_manifest_location_entry(spec: RegionSpec) -> dict[str, Any]:
     }
     if spec.localized_names:
         entry["localizedNames"] = dict(spec.localized_names)
-    if spec.transit_feed is not None:
-        entry["transitReferenceDate"] = spec.transit_feed.reference_date
+    if spec.transit_feed is not None and transit_date_range is not None:
+        entry["transitDateRange"] = dict(transit_date_range)
     return entry
 
 
@@ -404,6 +414,7 @@ def run_build_pipeline(
         simplify_boundaries = simplify_boundaries or write_simplified_boundary_canvas
         export_graph_binary = export_graph_binary or write_graph_binary_artifacts
 
+    transit_date_ranges: dict[str, dict[str, str]] = {}
     for spec in region_specs:
         routing_input_path = input_dir / spec.routing_input_file_name
         boundary_input_path = input_dir / spec.boundary_input_file_name
@@ -439,20 +450,22 @@ def run_build_pipeline(
                 if not transit_input_dir.is_dir():
                     raise FileNotFoundError(f"transit input not found: {transit_input_dir}")
                 transit_kwargs["transit_feed_dir"] = transit_input_dir
-                transit_kwargs["transit_reference_date"] = spec.transit_feed.reference_date
-            export_graph_binary(
+            graph_summary = export_graph_binary(
                 input_path=routing_input_path,
                 binary_output=graph_binary_path,
                 summary_output=graph_summary_path,
                 epsg=spec.epsg,
                 **transit_kwargs,
             )
+            date_range = graph_summary.get("transit", {}).get("date_range")
+            if date_range is not None:
+                transit_date_ranges[spec.id] = date_range
 
             gz_output_path = output_dir / spec.graph_file_name
             _log(stderr, f"Gzipping routing graph for {spec.name}")
             gzip_file(graph_binary_path, gz_output_path)
 
-    return build_location_manifest(region_specs)
+    return build_location_manifest(region_specs, transit_date_ranges=transit_date_ranges)
 
 
 def render_query(query_script: Path, *args: str) -> str:
@@ -971,17 +984,10 @@ def _normalize_transit_feed(value: object, *, field_name: str) -> TransitFeedSpe
 
     base_url = _require_non_empty_string(value.get("baseUrl"), f"{field_name}.baseUrl")
     licence = _require_non_empty_string(value.get("licence"), f"{field_name}.licence")
-    reference_date = _require_non_empty_string(
-        value.get("referenceDate"),
-        f"{field_name}.referenceDate",
-    )
-    if not _DATE_PATTERN.match(reference_date):
-        raise ValueError(f"{field_name}.referenceDate must be an ISO YYYY-MM-DD date")
 
     return TransitFeedSpec(
         base_url=base_url.rstrip("/"),
         licence=licence,
-        reference_date=reference_date,
     )
 
 

@@ -217,7 +217,6 @@ def test_load_region_specs_reads_transit_feed_block(tmp_path: Path) -> None:
                         "transitFeed": {
                             "baseUrl": "https://example.test/gtfs/",
                             "licence": "CC BY 4.0 — Example Transit Authority",
-                            "referenceDate": "2026-08-12",
                         },
                     }
                 ]
@@ -232,7 +231,6 @@ def test_load_region_specs_reads_transit_feed_block(tmp_path: Path) -> None:
     # Trailing slash stripped for consistent f"{base_url}/{file}.csv" joins.
     assert specs[0].transit_feed.base_url == "https://example.test/gtfs"
     assert specs[0].transit_feed.licence == "CC BY 4.0 — Example Transit Authority"
-    assert specs[0].transit_feed.reference_date == "2026-08-12"
     assert specs[0].transit_input_dir_name == "berlin-transit-gtfs"
 
 
@@ -262,38 +260,6 @@ def test_load_region_specs_defaults_transit_feed_to_none(tmp_path: Path) -> None
     assert specs[0].transit_feed is None
 
 
-def test_load_region_specs_rejects_malformed_transit_feed_reference_date(
-    tmp_path: Path,
-) -> None:
-    locations_file = tmp_path / "regions.json"
-    locations_file.write_text(
-        json.dumps(
-            {
-                "locations": [
-                    {
-                        "id": "berlin",
-                        "name": "Berlin",
-                        "graphFileName": "berlin-graph.bin.gz",
-                        "boundaryFileName": "berlin-district-boundaries-canvas.json",
-                        "locationRelation": ('rel["boundary"="administrative"]["wikidata"="Q64"]'),
-                        "subdivisionAdminLevel": "9",
-                        "epsg": 25833,
-                        "transitFeed": {
-                            "baseUrl": "https://example.test/gtfs",
-                            "licence": "CC BY 4.0",
-                            "referenceDate": "12-08-2026",
-                        },
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ValueError, match="referenceDate"):
-        load_region_specs(locations_file)
-
-
 def test_run_fetch_pipeline_fetches_transit_only_when_component_and_feed_present(
     tmp_path: Path,
 ) -> None:
@@ -305,7 +271,6 @@ def test_run_fetch_pipeline_fetches_transit_only_when_component_and_feed_present
         transit_feed=TransitFeedSpec(
             base_url="https://example.test/gtfs",
             licence="CC BY 4.0",
-            reference_date="2026-08-12",
         ),
     )
     spec_without_feed = _make_region_spec(region_id="paris", name="Paris")
@@ -350,7 +315,6 @@ def test_run_fetch_pipeline_skips_transit_when_component_not_requested(
         transit_feed=TransitFeedSpec(
             base_url="https://example.test/gtfs",
             licence="CC BY 4.0",
-            reference_date="2026-08-12",
         ),
     )
 
@@ -432,29 +396,31 @@ def test_build_location_manifest_strips_pipeline_only_fields() -> None:
     }
 
 
-def test_build_location_manifest_includes_transit_reference_date_when_configured() -> None:
+def _berlin_region_spec_with_transit_feed() -> RegionSpec:
+    return RegionSpec(
+        id="berlin",
+        name="Berlin",
+        graph_file_name="graph-walk.bin.gz",
+        boundary_file_name="berlin-district-boundaries-canvas.json",
+        location_relation='rel(62422)["name"="Berlin"]',
+        subdivision_admin_level="9",
+        subdivision_discovery_modes=("area", "subarea"),
+        epsg=25833,
+        graph_binary_file_name="graph-walk.bin",
+        graph_summary_file_name="graph-binary-summary.json",
+        boundary_resolution=25.0,
+        boundary_units="meters",
+        transit_feed=TransitFeedSpec(
+            base_url="https://vbb-gtfs.jannisr.de/latest",
+            licence="CC BY 4.0 — VBB",
+        ),
+    )
+
+
+def test_build_location_manifest_includes_transit_date_range_when_provided() -> None:
     manifest = build_location_manifest(
-        [
-            RegionSpec(
-                id="berlin",
-                name="Berlin",
-                graph_file_name="graph-walk.bin.gz",
-                boundary_file_name="berlin-district-boundaries-canvas.json",
-                location_relation='rel(62422)["name"="Berlin"]',
-                subdivision_admin_level="9",
-                subdivision_discovery_modes=("area", "subarea"),
-                epsg=25833,
-                graph_binary_file_name="graph-walk.bin",
-                graph_summary_file_name="graph-binary-summary.json",
-                boundary_resolution=25.0,
-                boundary_units="meters",
-                transit_feed=TransitFeedSpec(
-                    base_url="https://vbb-gtfs.jannisr.de/latest",
-                    licence="CC BY 4.0 — VBB",
-                    reference_date="2026-08-12",
-                ),
-            )
-        ]
+        [_berlin_region_spec_with_transit_feed()],
+        transit_date_ranges={"berlin": {"min": "2026-01-01", "max": "2026-12-31"}},
     )
 
     assert manifest == {
@@ -464,10 +430,16 @@ def test_build_location_manifest_includes_transit_reference_date_when_configured
                 "name": "Berlin",
                 "graphFileName": "graph-walk.bin.gz",
                 "boundaryFileName": "berlin-district-boundaries-canvas.json",
-                "transitReferenceDate": "2026-08-12",
+                "transitDateRange": {"min": "2026-01-01", "max": "2026-12-31"},
             }
         ]
     }
+
+
+def test_build_location_manifest_omits_transit_date_range_when_not_yet_built() -> None:
+    manifest = build_location_manifest([_berlin_region_spec_with_transit_feed()])
+
+    assert "transitDateRange" not in manifest["locations"][0]
 
 
 def test_run_build_pipeline_writes_outputs_and_returns_manifest(

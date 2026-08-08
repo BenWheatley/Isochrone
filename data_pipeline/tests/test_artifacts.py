@@ -97,13 +97,13 @@ def test_write_graph_binary_artifacts_wires_transit_stops_and_edges(tmp_path: Pa
         summary_output=summary_output,
         epsg=25833,
         transit_feed_dir=transit_feed_dir,
-        transit_reference_date="2026-08-12",
     )
 
     assert summary["transit"]["attached_stop_count"] == 2
     assert summary["transit"]["dropped_stop_count"] == 0
     assert summary["transit"]["final_stop_count"] == 2
     assert summary["transit"]["final_connection_count"] == 1
+    assert summary["transit"]["date_range"] == {"min": "2026-01-01", "max": "2026-12-31"}
     assert summary["header"]["n_stops"] == 2
     assert summary["header"]["n_tedges"] == 1
     assert summary["header"]["flags"] & 1

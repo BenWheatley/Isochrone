@@ -7,7 +7,7 @@ from isochrone_pipeline.gtfs_transit import (
     finalize_transit_extract,
     load_transport_type_by_route_id,
     parse_gtfs_feed,
-    resolve_active_service_ids,
+    resolve_recurring_service_ids_and_date_range,
 )
 
 # EPSG:25833 (UTM 33N) projections of stops A/B/C/D below (52.5000-52.5003N,
@@ -19,6 +19,9 @@ _EXTENT_ORIGIN_EASTING = 391300.0
 _EXTENT_ORIGIN_NORTHING = 5817800.0
 _EXTENT_WIDTH_M = 200.0
 _EXTENT_HEIGHT_M = 200.0
+
+WEEKDAY_MASK = 0b0011111  # Monday..Friday (bits 0-4)
+WEEKEND_MASK = 0b1100000  # Saturday, Sunday (bits 5-6)
 
 
 def _write_gtfs_fixture(feed_dir: Path) -> None:
@@ -41,45 +44,53 @@ def _write_gtfs_fixture(feed_dir: Path) -> None:
         encoding="utf-8",
     )
 
+    # WEEKDAY and WEEKEND are both weekly-recurring (nonzero day mask) so
+    # both get included regardless of any single "reference date" — that's
+    # the whole point of the multi-day redesign. Their start/end windows
+    # differ deliberately so the aggregated min/max date range has to
+    # actually span both. SPECIAL only ever appears in calendar_dates.txt
+    # (no calendar.txt row, so its day mask is unresolvable) and must stay
+    # excluded — modeling single-date exceptions would need a per-date
+    # connections table, which is out of scope (see
+    # resolve_recurring_service_ids_and_date_range's docstring).
     (feed_dir / "calendar.txt").write_text(
         "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
         "WEEKDAY,1,1,1,1,1,0,0,20260101,20261231\n"
-        "WEEKEND_ONLY,0,0,0,0,0,1,1,20260101,20261231\n",
+        "WEEKEND,0,0,0,0,0,1,1,20260301,20260901\n",
         encoding="utf-8",
     )
 
     (feed_dir / "calendar_dates.txt").write_text(
         "service_id,date,exception_type\n"
-        # Removes WEEKDAY service specifically on the reference date.
-        "WEEKDAY,20260812,2\n"
-        # Adds an otherwise-inactive one-off service on the reference date.
+        # A one-off addition for a service with no calendar.txt row at all —
+        # must NOT make it into the recurring set or the date range.
         "SPECIAL,20260812,1\n",
         encoding="utf-8",
     )
 
     (feed_dir / "trips.txt").write_text(
         "route_id,service_id,trip_id\n"
-        "R_SUBWAY,WEEKDAY,T_REMOVED\n"  # removed by calendar_dates exception
-        "R_SUBWAY,SPECIAL,T_SPECIAL\n"  # added by calendar_dates exception
-        "R_BUS,WEEKEND_ONLY,T_WEEKEND\n"  # inactive on a Wednesday
-        "R_SUBWAY,SPECIAL,T_PAST_MIDNIGHT\n"
-        "R_SUBWAY,SPECIAL,T_TOUCHES_FAR\n"
-        "R_SUBWAY,SPECIAL,T_DIPS_OUT_AND_BACK\n",
+        "R_SUBWAY,WEEKDAY,T_MORNING\n"
+        "R_BUS,WEEKEND,T_WEEKEND\n"
+        "R_SUBWAY,SPECIAL,T_SPECIAL_ONLY\n"  # excluded: not weekly-recurring
+        "R_SUBWAY,WEEKDAY,T_PAST_MIDNIGHT\n"
+        "R_SUBWAY,WEEKDAY,T_TOUCHES_FAR\n"
+        "R_SUBWAY,WEEKDAY,T_DIPS_OUT_AND_BACK\n",
         encoding="utf-8",
     )
 
     (feed_dir / "stop_times.txt").write_text(
         "trip_id,stop_id,stop_sequence,arrival_time,departure_time\n"
-        # T_REMOVED: should be entirely excluded (service removed for the date).
-        "T_REMOVED,A,0,08:00:00,08:00:00\n"
-        "T_REMOVED,B,1,08:05:00,08:05:00\n"
-        # T_SPECIAL: active only via the calendar_dates addition.
-        "T_SPECIAL,A,0,09:00:00,09:00:00\n"
-        "T_SPECIAL,B,1,09:05:00,09:05:00\n"
-        "T_SPECIAL,C,2,09:10:00,09:10:00\n"
-        # T_WEEKEND: should be excluded (reference date is a Wednesday).
+        # T_MORNING: ordinary weekday service, two hops.
+        "T_MORNING,A,0,08:00:00,08:00:00\n"
+        "T_MORNING,B,1,08:05:00,08:05:00\n"
+        "T_MORNING,C,2,08:10:00,08:10:00\n"
+        # T_WEEKEND: weekend-only service, one hop.
         "T_WEEKEND,A,0,10:00:00,10:00:00\n"
         "T_WEEKEND,B,1,10:05:00,10:05:00\n"
+        # T_SPECIAL_ONLY: must be entirely excluded (service isn't recurring).
+        "T_SPECIAL_ONLY,A,0,09:00:00,09:00:00\n"
+        "T_SPECIAL_ONLY,B,1,09:05:00,09:05:00\n"
         # T_PAST_MIDNIGHT: GTFS past-midnight rollover time.
         "T_PAST_MIDNIGHT,B,0,25:10:00,25:10:00\n"
         "T_PAST_MIDNIGHT,C,1,25:20:00,25:20:00\n"
@@ -97,20 +108,23 @@ def _write_gtfs_fixture(feed_dir: Path) -> None:
     )
 
 
-def test_resolve_active_service_ids_applies_calendar_and_exceptions(tmp_path: Path) -> None:
+def test_resolve_recurring_service_ids_and_date_range_excludes_calendar_dates_only_services(
+    tmp_path: Path,
+) -> None:
     _write_gtfs_fixture(tmp_path)
 
-    active = resolve_active_service_ids(tmp_path, "2026-08-12")
+    service_ids, min_date, max_date = resolve_recurring_service_ids_and_date_range(tmp_path)
 
-    assert active == {"SPECIAL"}
+    assert service_ids == {"WEEKDAY", "WEEKEND"}
+    assert min_date == "2026-01-01"
+    assert max_date == "2026-12-31"
 
 
-def test_parse_gtfs_feed_filters_by_service_day_and_extent(tmp_path: Path) -> None:
+def test_parse_gtfs_feed_includes_every_recurring_weekday_pattern(tmp_path: Path) -> None:
     _write_gtfs_fixture(tmp_path)
 
     parsed = parse_gtfs_feed(
         tmp_path,
-        reference_date="2026-08-12",
         epsg_code=25833,
         extent_origin_easting=_EXTENT_ORIGIN_EASTING,
         extent_origin_northing=_EXTENT_ORIGIN_NORTHING,
@@ -120,22 +134,31 @@ def test_parse_gtfs_feed_filters_by_service_day_and_extent(tmp_path: Path) -> No
 
     assert parsed.total_stop_count == 5
     assert set(parsed.stops.keys()) == {"A", "B", "C"}
+    assert parsed.min_date == "2026-01-01"
+    assert parsed.max_date == "2026-12-31"
 
     for connection in parsed.connections:
         assert connection.route_id != ""  # sanity: every kept connection has a route
 
-    # T_SPECIAL contributes A->B and B->C (2 hops); T_PAST_MIDNIGHT
-    # contributes B->C (1 hop). T_REMOVED/T_WEEKEND are inactive on the
-    # reference date. T_TOUCHES_FAR's only hop touches FAR, so it
-    # contributes 0. T_DIPS_OUT_AND_BACK's A->FAR and FAR->D hops both
-    # touch FAR, so it also contributes 0 (no phantom A->D hop).
-    assert len(parsed.connections) == 3
+    # T_MORNING contributes A->B and B->C (2 hops); T_WEEKEND contributes
+    # A->B (1 hop); T_PAST_MIDNIGHT contributes B->C (1 hop).
+    # T_SPECIAL_ONLY is excluded entirely (not a recurring service).
+    # T_TOUCHES_FAR's only hop touches FAR, so it contributes 0.
+    # T_DIPS_OUT_AND_BACK's A->FAR and FAR->D hops both touch FAR, so it
+    # also contributes 0 (no phantom A->D hop).
+    assert len(parsed.connections) == 4
 
     departures = [connection.departure_seconds for connection in parsed.connections]
     assert departures == sorted(departures)
 
     past_midnight = next(c for c in parsed.connections if c.departure_seconds > 24 * 3600)
     assert past_midnight.departure_seconds == 25 * 3600 + 10 * 60
+    assert past_midnight.service_day_mask == WEEKDAY_MASK
+
+    by_departure = {c.departure_seconds: c for c in parsed.connections}
+    assert by_departure[8 * 3600].service_day_mask == WEEKDAY_MASK  # T_MORNING A->B
+    assert by_departure[8 * 3600 + 5 * 60].service_day_mask == WEEKDAY_MASK  # T_MORNING B->C
+    assert by_departure[10 * 3600].service_day_mask == WEEKEND_MASK  # T_WEEKEND A->B
 
     # Neither the direct A->FAR hop nor a spliced A->D phantom hop appears.
     assert all(c.to_stop_id != "FAR" and c.from_stop_id != "FAR" for c in parsed.connections)
@@ -225,12 +248,16 @@ def test_finalize_transit_extract_resolves_indices_and_drops_unattached_endpoint
         raw_connections,
         total_stop_count=5,
         dropped_stop_count=1,
+        min_date="2026-01-01",
+        max_date="2026-12-31",
     )
 
     assert len(extract.stops) == 2
     assert len(extract.connections) == 1
     assert extract.dropped_stop_count == 1
     assert extract.total_stop_count == 5
+    assert extract.min_date == "2026-01-01"
+    assert extract.max_date == "2026-12-31"
 
     stop_a = next(s for s in extract.stops if s.stop_id == "A")
     stop_b = next(s for s in extract.stops if s.stop_id == "B")

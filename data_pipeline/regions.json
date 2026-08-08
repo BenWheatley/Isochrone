@@ -11,8 +11,7 @@
       "epsg": 25833,
       "transitFeed": {
         "baseUrl": "https://vbb-gtfs.jannisr.de/latest",
-        "licence": "CC BY 4.0 — VBB (Verkehrsverbund Berlin-Brandenburg); mirrored via vbb-gtfs.jannisr.de because VBB's directly-served gtfs.zip has a reproducibly corrupted stop_times.txt entry",
-        "referenceDate": "2026-08-12"
+        "licence": "CC BY 4.0 — VBB (Verkehrsverbund Berlin-Brandenburg); mirrored via vbb-gtfs.jannisr.de because VBB's directly-served gtfs.zip has a reproducibly corrupted stop_times.txt entry"
       }
     },
     {

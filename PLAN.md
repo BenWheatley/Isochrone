@@ -814,7 +814,7 @@ Verification note (2026-08-06): confirmed against London — the tidal Thames (p
 
 *This phase is explicitly deferred from MVP. Goal: support public transport data ingestion and routing for any region, not just Berlin/Germany, by separating source formats from a canonical routing format.*
 
-**Implementation note (Berlin pilot, landed):** the sections below marked `[x]` reflect a deliberately trimmed pass — GTFS **static** only (no GTFS-RT/NeTEx/SIRI), **Berlin only**, and a **single reference service day** rather than full multi-month calendar/exception fidelity — confirmed against user intent ("proceed with Berlin specifically so I can test the result"). See `data_pipeline/src/isochrone_pipeline/gtfs_transit.py`, the `transitFeed` block in `data_pipeline/regions.json`, and `runConnectionScanFromWalkingReachableStops`/`runWalkingIsochroneFromSourceNode` in `web/src/app.js`. Full feed-registry generalization (11.1, 11.7) and realtime/NeTEx adapters (11.2.2, 11.2.3) remain deferred.
+**Implementation note (Berlin pilot, landed):** the sections below marked `[x]` reflect a deliberately trimmed pass — GTFS **static** only (no GTFS-RT/NeTEx/SIRI), **Berlin only**, and **weekday-recurring calendar patterns** rather than full `calendar_dates.txt` exception fidelity (single-date holiday overrides aren't modeled) — confirmed against user intent ("proceed with Berlin specifically so I can test the result", later extended per user request to cover every date the feed actually supports rather than one locked reference day). See `data_pipeline/src/isochrone_pipeline/gtfs_transit.py`, the `transitFeed` block in `data_pipeline/regions.json`, and `runConnectionScanFromWalkingReachableStops`/`runWalkingIsochroneFromSourceNode` in `web/src/app.js`. Full feed-registry generalization (11.1, 11.7) and realtime/NeTEx adapters (11.2.2, 11.2.3) remain deferred.
 
 ## 11.1 Define feed registry and region config
 Estimated time: 45 min
@@ -859,7 +859,7 @@ Estimated time: 2 hours
 
 Tasks
 - [x] Define canonical tables independent of source format — `TransitStop`/`TransitConnection` dataclasses in `gtfs_transit.py` (a trimmed subset: `stops` + `connections` derived from `trips`/`stop_times`, not separately-persisted `routes`/`services`/`transfers`/`agencies` tables).
-- [x] Define canonical units/types: projected meters (UTM, matching the walking graph's `epsg`) for stop geometry, seconds-since-midnight for times, compact integer indices for stop/route joins. Service-day bitmask field exists in the binary schema but isn't populated beyond the single reference day (scope trim).
+- [x] Define canonical units/types: projected meters (UTM, matching the walking graph's `epsg`) for stop geometry, seconds-since-midnight for times, compact integer indices for stop/route joins. Service-day bitmask field is populated per connection from its real GTFS weekday pattern and consulted at query time (see 11.5's day-mask indexing entry below).
 - [x] Define walking-graph linkage: stop → nearest walking-node attachment via a grid-bucketed spatial index (mirrors `findNearestNodeIndexForModeFromSpatialIndex`'s technique), with a 300m attach-radius cutoff and drop-count logging.
 - [ ] Persist canonical intermediate artifacts as deterministic JSON/Parquet snapshots for debugging and repeatable builds — not done; the only persisted transit artifact is the final binary graph (stop/tedge tables folded into `graph-walk.bin`), no intermediate canonical-table dump.
 
@@ -872,7 +872,7 @@ Tasks
 - [ ] Validate schedule monotonicity (`arrival/departure` non-decreasing along each trip) — not explicitly validated; malformed source rows would surface as CSA scan anomalies rather than a build-time check.
 - [x] Validate spatial linkage — stop attachment respects a 300m radius cutoff, with dropped-stop count logged (`dropped_stop_count` in `graph-binary-summary.json`'s `transit` block).
 - [ ] Validate referential integrity across all tables (`trip -> route/service`, `connection -> stops/trip`) — not done as a standalone gate; would fail loudly downstream instead.
-- [x] Emit per-region QA summary — `graph-binary-summary.json`'s `transit` block reports `parsed_stop_count`, `attached_stop_count`, `dropped_stop_count`, `total_stop_count_in_feed`, `raw_connection_count`, `final_stop_count`, `final_connection_count` (Berlin: 7,665 of 10,527 in-extent stops attached, 42,078 in the full feed, 935,766 final connections).
+- [x] Emit per-region QA summary — `graph-binary-summary.json`'s `transit` block reports `parsed_stop_count`, `attached_stop_count`, `dropped_stop_count`, `total_stop_count_in_feed`, `raw_connection_count`, `date_range`, `final_stop_count`, `final_connection_count` (Berlin: 7,670 of 10,688 in-extent stops attached, 42,078 in the full feed, 1,892,441 final connections spanning every weekday-recurring service in the feed's 2026-08-04–2026-12-12 calendar window).
 
 ---
 
@@ -882,7 +882,7 @@ Estimated time: 2 hours
 Tasks
 - [x] Generate CSA-ready `connections` sorted by departure time — a build-time invariant relied on by `runConnectionScanFromWalkingReachableStops`'s early-exit scan.
 - [ ] Materialize transfer edges/penalties for stop-to-stop interchange and stop-to-walk-node transfers — stop-to-walk-node attach cost exists (straight-line distance / walking speed), but there's no dedicated stop-to-stop interchange/transfer-penalty model; CSA implicitly "transfers" by walking back onto the road graph between transit legs.
-- [ ] Build service-day indexing (day masks and date exceptions) for fast query-time filtering — `service_day_mask` is populated per connection from the source trip's real GTFS calendar days, but query-time filtering isn't needed (or exercised) since the build only includes one reference day's connections; multi-day filtering is future work.
+- [x] Build service-day indexing (day masks) for fast query-time filtering — the build includes every weekday-recurring service across the feed's whole calendar window (not just one day), and `runConnectionScanFromWalkingReachableStops` in `web/src/app.js` filters each connection's `service_day_mask` against the query date's ISO weekday bit. `calendar_dates.txt` single-date exceptions (e.g. holiday schedules) are still out of scope — they can't be expressed as a weekly bitmask and would need a per-date table instead.
 - [x] Export deterministic binary transit tables and wire into graph header flags/versioning — `n_stops`/`n_tedges`/`stop_table_offset` header fields, `flags` bit 0 (`has_transit`), 24-byte stop records and 20-byte transit-edge records in `graph_binary.py`/`binary_reader.py`.
 
 ---

@@ -77,7 +77,6 @@ def write_graph_binary_artifacts(
     summary_output: Path,
     epsg: int,
     transit_feed_dir: Path | None = None,
-    transit_reference_date: str | None = None,
 ) -> dict[str, Any]:
     extracted = extract_walkable_graph_input(input_path)
     tag_coverage = summarize_constraint_tag_coverage(extracted.ways)
@@ -90,10 +89,9 @@ def write_graph_binary_artifacts(
     attached_stops: dict[str, Any] = {}
     dropped_stop_count = 0
 
-    if transit_feed_dir is not None and transit_reference_date is not None:
+    if transit_feed_dir is not None:
         parsed_feed = parse_gtfs_feed(
             transit_feed_dir,
-            reference_date=transit_reference_date,
             epsg_code=epsg,
             extent_origin_easting=projected.origin_easting,
             extent_origin_northing=projected.origin_northing,
@@ -112,6 +110,7 @@ def write_graph_binary_artifacts(
         transit_summary["dropped_stop_count"] = dropped_stop_count
         transit_summary["total_stop_count_in_feed"] = parsed_feed.total_stop_count
         transit_summary["raw_connection_count"] = len(parsed_feed.connections)
+        transit_summary["date_range"] = {"min": parsed_feed.min_date, "max": parsed_feed.max_date}
 
     simplified = simplify_degree2_chains(graph, stop_attachment_osm_ids=stop_attachment_osm_ids)
 
@@ -129,6 +128,8 @@ def write_graph_binary_artifacts(
             parsed_feed.connections,
             parsed_feed.total_stop_count,
             dropped_stop_count,
+            parsed_feed.min_date,
+            parsed_feed.max_date,
         )
         stops = transit_extract.stops
         transit_edges = transit_extract.connections
