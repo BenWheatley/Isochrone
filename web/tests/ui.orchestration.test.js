@@ -8,7 +8,9 @@ import {
   bindPointerButtonInversionControl,
   bindThemeControl,
   getAllowedModeMaskFromShell,
+  getTransitOptionsFromShell,
   populateLocationSelect,
+  updateTransitControlAvailability,
 } from '../src/ui/orchestration.js';
 import { EDGE_MODE_WATER_BIT } from '../src/config/constants.js';
 
@@ -146,6 +148,75 @@ test('getAllowedModeMaskFromShell combines walk and water bits when both selecte
   const mask = getAllowedModeMaskFromShell(shell);
   assert.equal(mask & EDGE_MODE_WATER_BIT, EDGE_MODE_WATER_BIT);
   assert.notEqual(mask, EDGE_MODE_WATER_BIT);
+});
+
+test('getTransitOptionsFromShell parses HH:MM departure time into seconds', () => {
+  const shell = {
+    departureTimeInput: createInput('08:30'),
+    transitEnabledInput: createCheckbox(true),
+    transitEnabledRow: { hidden: false },
+  };
+
+  const options = getTransitOptionsFromShell(shell);
+  assert.equal(options.transitEnabled, true);
+  assert.equal(options.departureSecondsOfDay, 8 * 3600 + 30 * 60);
+});
+
+test('getTransitOptionsFromShell reports transitEnabled=false when the control row is hidden', () => {
+  const shell = {
+    departureTimeInput: createInput('08:30'),
+    transitEnabledInput: createCheckbox(true),
+    transitEnabledRow: { hidden: true },
+  };
+
+  const options = getTransitOptionsFromShell(shell);
+  assert.equal(options.transitEnabled, false);
+});
+
+test('getTransitOptionsFromShell reports transitEnabled=false when the checkbox is unchecked', () => {
+  const shell = {
+    departureTimeInput: createInput('08:30'),
+    transitEnabledInput: createCheckbox(false),
+    transitEnabledRow: { hidden: false },
+  };
+
+  const options = getTransitOptionsFromShell(shell);
+  assert.equal(options.transitEnabled, false);
+});
+
+test('getTransitOptionsFromShell returns NaN departureSecondsOfDay for a malformed time value', () => {
+  const shell = {
+    departureTimeInput: createInput(''),
+    transitEnabledInput: createCheckbox(true),
+    transitEnabledRow: { hidden: false },
+  };
+
+  const options = getTransitOptionsFromShell(shell);
+  assert.ok(Number.isNaN(options.departureSecondsOfDay));
+});
+
+test('updateTransitControlAvailability shows the row and preserves checked state when transit data exists', () => {
+  const shell = {
+    transitEnabledRow: { hidden: true },
+    transitEnabledInput: createCheckbox(true),
+  };
+
+  updateTransitControlAvailability(shell, true);
+
+  assert.equal(shell.transitEnabledRow.hidden, false);
+  assert.equal(shell.transitEnabledInput.checked, true);
+});
+
+test('updateTransitControlAvailability hides the row and resets the checkbox when transit data is absent', () => {
+  const shell = {
+    transitEnabledRow: { hidden: false },
+    transitEnabledInput: createCheckbox(true),
+  };
+
+  updateTransitControlAvailability(shell, false);
+
+  assert.equal(shell.transitEnabledRow.hidden, true);
+  assert.equal(shell.transitEnabledInput.checked, false);
 });
 
 test('bindModeSelectControl uses redraw for mode changes and repaint for cycle changes', () => {

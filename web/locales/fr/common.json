@@ -15,6 +15,7 @@
   "body.options.mode.water": "Ferry",
   "body.options.colourCycle": "Cycle des couleurs (min)",
   "body.options.departureTime": "Heure de départ",
+  "body.options.transit": "Transports publics",
   "body.options.exportSvg": "Exporter en SVG",
   "body.map.aria": "Vue de la carte",
   "body.loading.boundaries": "Chargement des limites des districts...",

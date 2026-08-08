@@ -45,6 +45,9 @@ export function initializeAppShell(doc, options = {}) {
   const invertPointerButtonsInput = resolvedDocument.getElementById('invert-pointer-buttons');
   const modeSelect = resolvedDocument.getElementById('mode-select');
   const colourCycleMinutesInput = resolvedDocument.getElementById('colour-cycle-minutes');
+  const departureTimeInput = resolvedDocument.getElementById('departure-time');
+  const transitEnabledRow = resolvedDocument.getElementById('transit-enabled-row');
+  const transitEnabledInput = resolvedDocument.getElementById('transit-enabled');
   const exportSvgButton = resolvedDocument.getElementById('export-svg-button');
   const distanceScale = resolvedDocument.getElementById('distance-scale');
   const distanceScaleLine = resolvedDocument.getElementById('distance-scale-line');
@@ -101,6 +104,15 @@ export function initializeAppShell(doc, options = {}) {
   }
   if (!colourCycleMinutesInput || colourCycleMinutesInput.tagName !== 'INPUT') {
     throw new Error('index.html is missing <input id="colour-cycle-minutes">');
+  }
+  if (!departureTimeInput || departureTimeInput.tagName !== 'INPUT') {
+    throw new Error('index.html is missing <input id="departure-time">');
+  }
+  if (!transitEnabledRow || transitEnabledRow.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="transit-enabled-row">');
+  }
+  if (!transitEnabledInput || transitEnabledInput.tagName !== 'INPUT') {
+    throw new Error('index.html is missing <input id="transit-enabled">');
   }
   if (!exportSvgButton || exportSvgButton.tagName !== 'BUTTON') {
     throw new Error('index.html is missing <button id="export-svg-button">');
@@ -174,6 +186,9 @@ export function initializeAppShell(doc, options = {}) {
     invertPointerButtonsInput,
     modeSelect,
     colourCycleMinutesInput,
+    departureTimeInput,
+    transitEnabledRow,
+    transitEnabledInput,
     exportSvgButton,
     distanceScale,
     distanceScaleLine,
@@ -454,6 +469,48 @@ export function getColourCycleMinutesFromShell(shell) {
   return clampedCycleMinutes;
 }
 
+export function getTransitOptionsFromShell(shell) {
+  if (!shell || typeof shell !== 'object') {
+    throw new Error('shell is required');
+  }
+
+  const transitEnabled = shell.transitEnabledInput?.checked === true
+    && shell.transitEnabledRow?.hidden !== true;
+
+  const rawDepartureTime = shell.departureTimeInput?.value ?? '';
+  const match = /^(\d{2}):(\d{2})$/.exec(rawDepartureTime);
+  let departureSecondsOfDay = Number.NaN;
+  if (match) {
+    const hours = Number.parseInt(match[1], 10);
+    const minutes = Number.parseInt(match[2], 10);
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      departureSecondsOfDay = hours * 3600 + minutes * 60;
+    }
+  }
+
+  return { transitEnabled, departureSecondsOfDay };
+}
+
+/**
+ * Toggles the "Public transit" control's visibility based on whether the
+ * currently-loaded region's graph actually has transit stops (only Berlin,
+ * for now) — absent/inert for every other region rather than a per-region
+ * config flag. Resets the checkbox when hiding so a stale checked state
+ * from a previous region doesn't linger if the row is shown again later.
+ */
+export function updateTransitControlAvailability(shell, hasTransitData) {
+  if (!shell || typeof shell !== 'object') {
+    throw new Error('shell is required');
+  }
+
+  if (shell.transitEnabledRow) {
+    shell.transitEnabledRow.hidden = !hasTransitData;
+  }
+  if (!hasTransitData && shell.transitEnabledInput) {
+    shell.transitEnabledInput.checked = false;
+  }
+}
+
 export function bindModeSelectControl(shell, dependencies = {}) {
   if (!shell || typeof shell !== 'object') {
     throw new Error('shell is required');
@@ -528,17 +585,27 @@ export function bindModeSelectControl(shell, dependencies = {}) {
       maybeRequestIsochroneRedraw();
     }
   };
+  // Departure time / transit-enabled changes require a full redraw (not
+  // just a repaint) since they can change which nodes are reachable at
+  // all, not just how the existing result is coloured.
+  const handleTransitControlChange = () => {
+    maybeRequestIsochroneRedraw();
+  };
 
   getAllowedModeMaskFromShell(shell);
   getColourCycleMinutesFromShell(shell);
   renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));
   shell.modeSelect.addEventListener('change', handleSelectChange);
   shell.colourCycleMinutesInput.addEventListener('change', handleCycleChange);
+  shell.departureTimeInput?.addEventListener('change', handleTransitControlChange);
+  shell.transitEnabledInput?.addEventListener('change', handleTransitControlChange);
 
   return {
     dispose() {
       shell.modeSelect.removeEventListener('change', handleSelectChange);
       shell.colourCycleMinutesInput.removeEventListener('change', handleCycleChange);
+      shell.departureTimeInput?.removeEventListener('change', handleTransitControlChange);
+      shell.transitEnabledInput?.removeEventListener('change', handleTransitControlChange);
     },
   };
 }

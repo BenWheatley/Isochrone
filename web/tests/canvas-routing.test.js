@@ -177,6 +177,51 @@ test('requestIsochroneRedraw reruns from the last completed node', async () => {
   assert.equal(runCount, 2);
 });
 
+test('runFromCanvasPixel forwards getTransitOptionsFromShell result into routing options', async () => {
+  const { shell } = createCanvasFixture();
+  const mapData = {
+    graph: {
+      header: {
+        nNodes: 16,
+      },
+    },
+  };
+
+  let capturedOptions = null;
+  const binding = bindCanvasClickRouting(shell, mapData, {}, {
+    findNearestNodeForCanvasPixel() {
+      return { nodeIndex: 7 };
+    },
+    getAllowedModeMaskFromShell() {
+      return 4;
+    },
+    getColourCycleMinutesFromShell() {
+      return 75;
+    },
+    getTransitOptionsFromShell() {
+      return { transitEnabled: true, departureSecondsOfDay: 30_600 };
+    },
+    mapClientPointToCanvasPixel() {
+      return { xPx: 10, yPx: 12 };
+    },
+    parseNodeIndexFromLocationSearch() {
+      return null;
+    },
+    persistNodeIndexToLocation() {},
+    renderIsochroneLegendIfNeeded() {},
+    async runWalkingIsochroneFromSourceNode(_shell, _mapData, _nodeIndex, _timeLimit, options) {
+      capturedOptions = options;
+      return { cancelled: false };
+    },
+    setRoutingStatus() {},
+  });
+
+  await binding.runFromCanvasPixel(10, 12);
+
+  assert.equal(capturedOptions.transitEnabled, true);
+  assert.equal(capturedOptions.departureSecondsOfDay, 30_600);
+});
+
 test('waitForIdle resolves after active routing run completes', async () => {
   const { shell } = createCanvasFixture();
   const mapData = {

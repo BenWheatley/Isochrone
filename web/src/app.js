@@ -16,7 +16,10 @@ import {
   INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE,
   LOADING_FADE_MS,
   NODE_RECORD_SIZE,
+  STOP_RECORD_SIZE,
   SUPPORTED_GRAPH_VERSIONS,
+  TEDGE_RECORD_SIZE,
+  WALKING_SPEED_M_S,
 } from './config/constants.js';
 import {
   getEdgeTraversalCostSeconds,
@@ -61,9 +64,11 @@ import {
   bindThemeControl as bindThemeControlInternal,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
+  getTransitOptionsFromShell,
   initializeAppShell,
   bindModeSelectControl as bindModeSelectControlInternal,
   populateLocationSelect,
+  updateTransitControlAvailability,
 } from './ui/orchestration.js';
 import {
   formatCommonMessage,
@@ -123,7 +128,9 @@ export {
   bindLocationSelectControl,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
+  getTransitOptionsFromShell,
   populateLocationSelect,
+  updateTransitControlAvailability,
 } from './ui/orchestration.js';
 export {
   bindSvgExportControl,
@@ -544,6 +551,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     getAllowedModeMaskFromShell,
     getColourCycleMinutesFromShell,
     getRoutingFailedStatusText,
+    getTransitOptionsFromShell,
     mapClientPointToCanvasPixel,
     parseNodeIndexFromLocationSearch,
     persistNodeIndexToLocation,
@@ -690,17 +698,71 @@ export async function runWalkingIsochroneFromSourceNode(
 
   const runSummary = await runSearchTimeSlicedWithRendering(shell, mapData, searchState, options);
   if (!runSummary.cancelled) {
+    let finalDistSeconds = searchState.distSeconds;
+    let finalEdgeVertexData = runSummary.edgeVertexData ?? null;
+
+    const nStops = mapData.graph.header.nStops;
+    if (
+      Number.isInteger(nStops)
+      && nStops > 0
+      && options.transitEnabled
+      && Number.isFinite(options.departureSecondsOfDay)
+    ) {
+      const csaResult = runConnectionScanFromWalkingReachableStops(
+        mapData.graph,
+        finalDistSeconds,
+        {
+          departureSecondsOfDay: options.departureSecondsOfDay,
+          timeLimitSeconds,
+        },
+      );
+      if (csaResult.seedNodeIndices.length > 0) {
+        const seedNodeIndices = new Uint32Array(csaResult.seedNodeIndices.length + 1);
+        const seedStartDistSeconds = new Float32Array(csaResult.seedStartDistSeconds.length + 1);
+        seedNodeIndices[0] = sourceNodeIndex;
+        seedStartDistSeconds[0] = 0;
+        seedNodeIndices.set(csaResult.seedNodeIndices, 1);
+        seedStartDistSeconds.set(csaResult.seedStartDistSeconds, 1);
+
+        const transitDistSeconds = getOrRotateRoutingDistScratchBuffer(
+          mapData,
+          mapData.graph.header.nNodes,
+        );
+        const multiSourceResult = edgeCostPrecomputeKernel.computeTravelTimeFieldMultiSourceForGraph({
+          nodeFirstEdgeIndex: kernelGraphViews.nodeFirstEdgeIndex,
+          nodeEdgeCount: kernelGraphViews.nodeEdgeCount,
+          edgeTargetNodeIndex: kernelGraphViews.edgeTargetNodeIndex,
+          edgeCostTicks: kernelGraphViews.edgeCostTicks,
+          outDistSeconds: transitDistSeconds,
+          seedNodeIndices,
+          seedStartDistSeconds,
+          returnSharedOutputView: true,
+          timeLimitSeconds,
+        });
+        finalDistSeconds =
+          multiSourceResult
+          && multiSourceResult.outDistSecondsView instanceof Float32Array
+          && multiSourceResult.outDistSecondsView.length === transitDistSeconds.length
+            ? multiSourceResult.outDistSecondsView
+            : transitDistSeconds;
+        // Edge-interpolation vertex buffers were built from the walk-only
+        // pass; invalidate so the next render lazily rebuilds them from
+        // the transit-augmented distances (getOrBuildSnapshotEdgeVertexData
+        // is a generic function of snapshot.distSeconds, no special-casing
+        // needed here beyond clearing the stale cache).
+        finalEdgeVertexData = null;
+      }
+    }
+
     mapData.lastRoutingSnapshot = {
       sourceNodeIndex,
-      distSeconds: searchState.distSeconds,
+      distSeconds: finalDistSeconds,
       allowedModeMask,
       edgeTraversalCostSeconds,
       colourCycleMinutes: options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
-      edgeVertexData: runSummary.edgeVertexData ?? null,
-      edgeVertexDataModeMask:
-        runSummary.edgeVertexData instanceof Float32Array ? allowedModeMask : null,
+      edgeVertexData: finalEdgeVertexData,
+      edgeVertexDataModeMask: finalEdgeVertexData instanceof Float32Array ? allowedModeMask : null,
     };
-    runPostMvpTransitStub(mapData.graph, searchState);
   }
   return runSummary;
 }
@@ -1303,33 +1365,96 @@ export function rerenderIsochroneFromSnapshotWithStatus(shell, mapData, options 
   return true;
 }
 
-export function runPostMvpTransitStub(graph, walkingSearchState) {
+/**
+ * Connection Scan Algorithm pass: given a completed walking search's
+ * distSeconds and a departure time-of-day, finds the earliest transit
+ * arrival at every stop reachable from the walking-reachable set, and
+ * returns seed arrays for a second multi-source Dijkstra pass (see
+ * runWalkingIsochroneFromSourceNode). Stops are pre-filtered to a single
+ * reference service day at build time (data_pipeline/gtfs_transit.py), so
+ * this scan doesn't need to consult service_day_mask — every connection in
+ * the table is already valid for that day. Connections are stored sorted
+ * by departure time (a build-time invariant), so the scan can break out
+ * early once departures exceed the time budget.
+ */
+export function runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, options = {}) {
   validateGraphForRouting(graph);
-
-  if (!walkingSearchState || typeof walkingSearchState !== 'object') {
-    throw new Error('walkingSearchState must be an object');
-  }
-  if (typeof walkingSearchState.isDone !== 'function' || !walkingSearchState.isDone()) {
-    throw new Error('walkingSearchState must be complete before transit integration');
-  }
-
   const nStops = graph.header.nStops;
   if (!Number.isInteger(nStops) || nStops < 0) {
     throw new Error('graph.header.nStops must be a non-negative integer');
   }
   if (nStops === 0) {
-    return {
-      nStops,
-      ranCsa: false,
-      reranWalkingDijkstra: false,
-    };
+    return { seedNodeIndices: new Uint32Array(0), seedStartDistSeconds: new Float32Array(0) };
+  }
+  if (!walkDistSeconds || typeof walkDistSeconds.length !== 'number') {
+    throw new Error('walkDistSeconds must be an array-like of per-node elapsed seconds');
+  }
+  const departureSecondsOfDay = options.departureSecondsOfDay;
+  if (!Number.isFinite(departureSecondsOfDay) || departureSecondsOfDay < 0) {
+    throw new Error('options.departureSecondsOfDay must be a non-negative finite number');
+  }
+  const timeLimitSeconds =
+    Number.isFinite(options.timeLimitSeconds) && options.timeLimitSeconds > 0
+      ? options.timeLimitSeconds
+      : Number.POSITIVE_INFINITY;
+  const budgetEndSeconds = departureSecondsOfDay + timeLimitSeconds;
+
+  const earliestArrivalSeconds = new Float64Array(nStops).fill(Number.POSITIVE_INFINITY);
+  const walkAttachCostSeconds = new Float64Array(nStops);
+  const improvedByTransit = new Uint8Array(nStops);
+
+  for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
+    const nodeIndex = graph.stopNearestNodeIndex[stopIndex];
+    const dx = graph.stopX[stopIndex] - graph.nodeI32[nodeIndex * 4];
+    const dy = graph.stopY[stopIndex] - graph.nodeI32[nodeIndex * 4 + 1];
+    const attachCostSeconds = Math.sqrt(dx * dx + dy * dy) / WALKING_SPEED_M_S;
+    walkAttachCostSeconds[stopIndex] = attachCostSeconds;
+
+    const walkElapsedSeconds = walkDistSeconds[nodeIndex];
+    if (Number.isFinite(walkElapsedSeconds)) {
+      const arrivalSeconds = departureSecondsOfDay + walkElapsedSeconds + attachCostSeconds;
+      if (arrivalSeconds <= budgetEndSeconds) {
+        earliestArrivalSeconds[stopIndex] = arrivalSeconds;
+      }
+    }
   }
 
-  // POST-MVP: run CSA here, then re-run Dijkstra from transit-reached stops
+  const nTedges = graph.header.nTedges;
+  for (let tedgeIndex = 0; tedgeIndex < nTedges; tedgeIndex += 1) {
+    const departureSeconds = graph.tedgeDepartureSeconds[tedgeIndex];
+    if (departureSeconds > budgetEndSeconds) {
+      break;
+    }
+    const fromStopIndex = graph.tedgeFromStop[tedgeIndex];
+    if (departureSeconds < earliestArrivalSeconds[fromStopIndex]) {
+      continue;
+    }
+    const toStopIndex = graph.tedgeToStop[tedgeIndex];
+    const candidateArrivalSeconds = departureSeconds + graph.tedgeTravelSeconds[tedgeIndex];
+    if (candidateArrivalSeconds < earliestArrivalSeconds[toStopIndex]) {
+      earliestArrivalSeconds[toStopIndex] = candidateArrivalSeconds;
+      improvedByTransit[toStopIndex] = 1;
+    }
+  }
+
+  const seedNodeIndicesList = [];
+  const seedStartDistSecondsList = [];
+  for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
+    if (!improvedByTransit[stopIndex]) {
+      continue;
+    }
+    const elapsedSeconds =
+      earliestArrivalSeconds[stopIndex] - departureSecondsOfDay + walkAttachCostSeconds[stopIndex];
+    if (!Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) {
+      continue;
+    }
+    seedNodeIndicesList.push(graph.stopNearestNodeIndex[stopIndex]);
+    seedStartDistSecondsList.push(elapsedSeconds);
+  }
+
   return {
-    nStops,
-    ranCsa: false,
-    reranWalkingDijkstra: false,
+    seedNodeIndices: Uint32Array.from(seedNodeIndicesList),
+    seedStartDistSeconds: Float32Array.from(seedStartDistSecondsList),
   };
 }
 
@@ -1746,12 +1871,20 @@ export function parseGraphBinary(buffer) {
 
   const nNodes = view.getUint32(8, true);
   const nEdges = view.getUint32(12, true);
+  const nStops = view.getUint32(16, true);
+  const nTedges = view.getUint32(20, true);
   const nodeTableOffset = view.getUint32(52, true);
   const edgeTableOffset = view.getUint32(56, true);
   const stopTableOffset = view.getUint32(60, true);
+  // Transit edges follow the stop table immediately; there's no separate
+  // header field for this (the 64-byte header is already full) — mirrors
+  // data_pipeline's binary_reader.py transit_edge_table_offset().
+  const tedgeTableOffset = stopTableOffset + nStops * STOP_RECORD_SIZE;
 
   const nodeTableEnd = nodeTableOffset + nNodes * NODE_RECORD_SIZE;
   const edgeTableEnd = edgeTableOffset + nEdges * EDGE_RECORD_SIZE;
+  const stopTableEnd = stopTableOffset + nStops * STOP_RECORD_SIZE;
+  const tedgeTableEnd = tedgeTableOffset + nTedges * TEDGE_RECORD_SIZE;
 
   if (nodeTableOffset < HEADER_SIZE) {
     throw new Error('graph binary node table offset points inside header');
@@ -1771,8 +1904,17 @@ export function parseGraphBinary(buffer) {
   if (stopTableOffset > buffer.byteLength) {
     throw new Error('graph binary stop table offset exceeds file size');
   }
+  if (stopTableEnd > buffer.byteLength) {
+    throw new Error('graph binary stop table exceeds file size');
+  }
+  if (tedgeTableEnd > buffer.byteLength) {
+    throw new Error('graph binary transit edge table exceeds file size');
+  }
   if (nodeTableOffset % 4 !== 0 || edgeTableOffset % 4 !== 0) {
     throw new Error('graph binary table offsets must be 4-byte aligned');
+  }
+  if (stopTableOffset % 4 !== 0) {
+    throw new Error('graph binary stop table offset must be 4-byte aligned');
   }
 
   const header = {
@@ -1781,8 +1923,8 @@ export function parseGraphBinary(buffer) {
     flags: view.getUint8(5),
     nNodes,
     nEdges,
-    nStops: view.getUint32(16, true),
-    nTedges: view.getUint32(20, true),
+    nStops,
+    nTedges,
     originEasting: view.getFloat64(24, true),
     originNorthing: view.getFloat64(32, true),
     epsgCode: view.getUint16(40, true),
@@ -1792,6 +1934,7 @@ export function parseGraphBinary(buffer) {
     nodeTableOffset,
     edgeTableOffset,
     stopTableOffset,
+    tedgeTableOffset,
   };
 
   const nodeI32 = new Int32Array(buffer, nodeTableOffset, nNodes * 4);
@@ -1810,6 +1953,36 @@ export function parseGraphBinary(buffer) {
     edgeMaxspeedKph[edgeIndex] = (packedMetadata >>> 16) & 0xffff;
   }
 
+  // Stop x_m/y_m (offsets from the same origin as node x_m/y_m) double as
+  // the walk-attachment distance source: JS computes the stop-to-node walk
+  // cost on the fly from these plus the node's own position, rather than
+  // baking a redundant walk_attach_cost_seconds field into the binary.
+  const stopX = new Int32Array(nStops);
+  const stopY = new Int32Array(nStops);
+  const stopNearestNodeIndex = new Uint32Array(nStops);
+  const stopTransportType = new Uint8Array(nStops);
+  for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
+    const recordOffset = stopTableOffset + stopIndex * STOP_RECORD_SIZE;
+    stopX[stopIndex] = view.getInt32(recordOffset, true);
+    stopY[stopIndex] = view.getInt32(recordOffset + 4, true);
+    stopNearestNodeIndex[stopIndex] = view.getUint32(recordOffset + 8, true);
+    stopTransportType[stopIndex] = view.getUint8(recordOffset + 18);
+  }
+
+  const tedgeFromStop = new Uint32Array(nTedges);
+  const tedgeToStop = new Uint32Array(nTedges);
+  const tedgeDepartureSeconds = new Uint32Array(nTedges);
+  const tedgeTravelSeconds = new Uint16Array(nTedges);
+  const tedgeServiceDayMask = new Uint32Array(nTedges);
+  for (let tedgeIndex = 0; tedgeIndex < nTedges; tedgeIndex += 1) {
+    const recordOffset = tedgeTableOffset + tedgeIndex * TEDGE_RECORD_SIZE;
+    tedgeFromStop[tedgeIndex] = view.getUint32(recordOffset, true);
+    tedgeToStop[tedgeIndex] = view.getUint32(recordOffset + 4, true);
+    tedgeDepartureSeconds[tedgeIndex] = view.getUint32(recordOffset + 8, true);
+    tedgeTravelSeconds[tedgeIndex] = view.getUint16(recordOffset + 12, true);
+    tedgeServiceDayMask[tedgeIndex] = view.getUint32(recordOffset + 16, true);
+  }
+
   return {
     header,
     nodeI32,
@@ -1820,6 +1993,15 @@ export function parseGraphBinary(buffer) {
     edgeModeMask,
     edgeRoadClassId,
     edgeMaxspeedKph,
+    stopX,
+    stopY,
+    stopNearestNodeIndex,
+    stopTransportType,
+    tedgeFromStop,
+    tedgeToStop,
+    tedgeDepartureSeconds,
+    tedgeTravelSeconds,
+    tedgeServiceDayMask,
   };
 }
 
@@ -1867,6 +2049,7 @@ export async function initializeMapData(shell, options = {}) {
     const edgeCostPrecomputeKernelPromise = loadEdgeCostPrecomputeKernel(wasmKernelOptions);
     const boundaryLoad = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
     const graph = await loadGraphBinary(shell, graphOptions);
+    updateTransitControlAvailability(shell, graph.header.nStops > 0);
     const edgeCostPrecomputeKernel = await edgeCostPrecomputeKernelPromise;
     const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
     updateRenderBackendBadge(shell, renderer);

@@ -15,6 +15,7 @@
   "body.options.mode.water": "Fähre",
   "body.options.colourCycle": "Farbzyklus (Min.)",
   "body.options.departureTime": "Abfahrtszeit",
+  "body.options.transit": "Öffentlicher Verkehr",
   "body.options.exportSvg": "SVG exportieren",
   "body.map.aria": "Kartenansicht",
   "body.loading.boundaries": "Bezirksgrenzen werden geladen...",

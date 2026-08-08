@@ -201,6 +201,10 @@ body {
   align-items: center;
 }
 
+.control-row-checkbox[hidden] {
+  display: none;
+}
+
 .control-row-checkbox label {
   margin-right: 0.5rem;
 }

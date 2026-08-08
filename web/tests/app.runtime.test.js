@@ -21,6 +21,7 @@ import {
   parseGraphBinary,
   parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
+  runConnectionScanFromWalkingReachableStops,
   buildStaticEdgeVertexTemplateForMode,
   updateTravelTimesInStaticEdgeVertexTemplate,
   persistColourCycleMinutesToLocation,
@@ -205,6 +206,92 @@ function createFixtureBinaryBuffer() {
   return buffer;
 }
 
+// 3 nodes in a line (0,0) -> (100,0) -> (200,0), 2 walk/car edges costing
+// 72s each (matching WALKING_SPEED_M_S's 100m/1.39 ~ 72s convention used
+// throughout these fixtures), plus 2 stops sitting exactly on node 0 and
+// node 2 (zero walk-attach cost) connected by a single fast transit edge —
+// a "subway" that bypasses the 144s walk between them.
+function createFixtureBinaryBufferWithTransit() {
+  const headerSize = 64;
+  const nodeRecordSize = 16;
+  const edgeRecordSize = 12;
+  const stopRecordSize = 24;
+  const tedgeRecordSize = 20;
+  const nNodes = 3;
+  const nEdges = 2;
+  const nStops = 2;
+  const nTedges = 1;
+  const nodeTableOffset = headerSize;
+  const edgeTableOffset = nodeTableOffset + nNodes * nodeRecordSize;
+  const stopTableOffset = edgeTableOffset + nEdges * edgeRecordSize;
+  const tedgeTableOffset = stopTableOffset + nStops * stopRecordSize;
+  const buffer = new ArrayBuffer(tedgeTableOffset + nTedges * tedgeRecordSize);
+  const view = new DataView(buffer);
+
+  view.setUint32(0, GRAPH_MAGIC, true);
+  view.setUint8(4, 2);
+  view.setUint8(5, 1); // flags: has_transit
+  view.setUint32(8, nNodes, true);
+  view.setUint32(12, nEdges, true);
+  view.setUint32(16, nStops, true);
+  view.setUint32(20, nTedges, true);
+  view.setFloat64(24, 392000, true);
+  view.setFloat64(32, 5820000, true);
+  view.setUint16(40, 25833, true);
+  view.setUint16(42, 512, true);
+  view.setUint16(44, 512, true);
+  view.setFloat32(48, 10, true);
+  view.setUint32(52, nodeTableOffset, true);
+  view.setUint32(56, edgeTableOffset, true);
+  view.setUint32(60, stopTableOffset, true);
+
+  const nodeI32 = new Int32Array(buffer, nodeTableOffset, nNodes * 4);
+  const nodeU32 = new Uint32Array(buffer, nodeTableOffset, nNodes * 4);
+  const nodeU16 = new Uint16Array(buffer, nodeTableOffset, nNodes * 8);
+  nodeI32[0] = 0;
+  nodeI32[1] = 0;
+  nodeU32[2] = 0;
+  nodeU16[6] = 1;
+  nodeI32[4] = 100;
+  nodeI32[5] = 0;
+  nodeU32[6] = 1;
+  nodeU16[14] = 1;
+  nodeI32[8] = 200;
+  nodeI32[9] = 0;
+  nodeU32[10] = 2;
+  nodeU16[22] = 0;
+
+  const edgeU32 = new Uint32Array(buffer, edgeTableOffset, nEdges * 3);
+  const edgeU16 = new Uint16Array(buffer, edgeTableOffset, nEdges * 6);
+  const modeMask = EDGE_MODE_WALK_BIT | EDGE_MODE_CAR_BIT;
+  const roadClassId = 11;
+  const maxspeedKph = 50;
+  edgeU32[0] = 1;
+  edgeU16[2] = 72;
+  edgeU32[2] = modeMask | (roadClassId << 8) | (maxspeedKph << 16);
+  edgeU32[3] = 2;
+  edgeU16[8] = 72;
+  edgeU32[5] = modeMask | (roadClassId << 8) | (maxspeedKph << 16);
+
+  view.setInt32(stopTableOffset, 0, true); // stop 0 x_m
+  view.setInt32(stopTableOffset + 4, 0, true); // stop 0 y_m
+  view.setUint32(stopTableOffset + 8, 0, true); // stop 0 nearest_node_index
+  view.setUint8(stopTableOffset + 18, 2); // stop 0 transport_type (subway)
+  view.setInt32(stopTableOffset + stopRecordSize, 200, true); // stop 1 x_m
+  view.setInt32(stopTableOffset + stopRecordSize + 4, 0, true); // stop 1 y_m
+  view.setUint32(stopTableOffset + stopRecordSize + 8, 2, true); // stop 1 nearest_node_index
+  view.setUint8(stopTableOffset + stopRecordSize + 18, 2);
+
+  view.setUint32(tedgeTableOffset, 0, true); // from_stop_index
+  view.setUint32(tedgeTableOffset + 4, 1, true); // to_stop_index
+  view.setUint32(tedgeTableOffset + 8, 1000, true); // departure_seconds_from_midnight
+  view.setUint16(tedgeTableOffset + 12, 10, true); // travel_seconds
+  view.setUint16(tedgeTableOffset + 14, 0, true); // route_id
+  view.setUint32(tedgeTableOffset + 16, 0, true); // service_day_mask
+
+  return buffer;
+}
+
 test('MinHeap keeps ascending pop order', () => {
   const heap = new MinHeap(8);
   heap.push(4, 9);
@@ -225,6 +312,72 @@ test('parseGraphBinary decodes v2 edge mode, class, and speed metadata', () => {
   assert.equal(graph.edgeModeMask[0], EDGE_MODE_WALK_BIT | EDGE_MODE_CAR_BIT);
   assert.equal(graph.edgeRoadClassId[0], 11);
   assert.equal(graph.edgeMaxspeedKph[0], 50);
+});
+
+test('parseGraphBinary decodes stop and transit-edge tables', () => {
+  const graph = parseGraphBinary(createFixtureBinaryBufferWithTransit());
+
+  assert.equal(graph.header.nStops, 2);
+  assert.equal(graph.header.nTedges, 1);
+  assert.equal(graph.header.flags & 1, 1);
+
+  assert.equal(graph.stopX[0], 0);
+  assert.equal(graph.stopY[0], 0);
+  assert.equal(graph.stopNearestNodeIndex[0], 0);
+  assert.equal(graph.stopTransportType[0], 2);
+  assert.equal(graph.stopX[1], 200);
+  assert.equal(graph.stopNearestNodeIndex[1], 2);
+
+  assert.equal(graph.tedgeFromStop[0], 0);
+  assert.equal(graph.tedgeToStop[0], 1);
+  assert.equal(graph.tedgeDepartureSeconds[0], 1000);
+  assert.equal(graph.tedgeTravelSeconds[0], 10);
+});
+
+test('runConnectionScanFromWalkingReachableStops seeds a stop reached faster by transit', () => {
+  const graph = parseGraphBinary(createFixtureBinaryBufferWithTransit());
+  // Pure walking from node 0: node1=72s, node2=144s.
+  const walkDistSeconds = new Float32Array([0, 72, 144]);
+
+  const result = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
+    departureSecondsOfDay: 990,
+    timeLimitSeconds: 200,
+  });
+
+  assert.equal(result.seedNodeIndices.length, 1);
+  assert.equal(result.seedNodeIndices[0], 2);
+  // Board at stop 0 (t=990, zero walk-attach), ride to stop 1 arriving
+  // t=1010, walk off (zero attach) -> 20s elapsed, versus 144s on foot.
+  assert.equal(result.seedStartDistSeconds[0], 20);
+});
+
+test('runConnectionScanFromWalkingReachableStops finds no improvement when the connection departs too early', () => {
+  const graph = parseGraphBinary(createFixtureBinaryBufferWithTransit());
+  const walkDistSeconds = new Float32Array([0, 72, 144]);
+
+  // Departing at 1500 means the walker reaches stop 0 at t=1500, well
+  // after the (single, non-repeating) connection's t=1000 departure —
+  // nothing to catch.
+  const result = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
+    departureSecondsOfDay: 1500,
+    timeLimitSeconds: 200,
+  });
+
+  assert.equal(result.seedNodeIndices.length, 0);
+  assert.equal(result.seedStartDistSeconds.length, 0);
+});
+
+test('runConnectionScanFromWalkingReachableStops returns empty seeds for a graph with no stops', () => {
+  const graph = parseGraphBinary(createFixtureBinaryBuffer());
+  const walkDistSeconds = new Float32Array([0, 72]);
+
+  const result = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
+    departureSecondsOfDay: 0,
+    timeLimitSeconds: 200,
+  });
+
+  assert.equal(result.seedNodeIndices.length, 0);
+  assert.equal(result.seedStartDistSeconds.length, 0);
 });
 
 test('computeEdgeTraversalCostSeconds obeys mode and road-class constraints', () => {
