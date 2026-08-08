@@ -38,17 +38,20 @@
                 <option value="dark" data-i18n="body.options.theme.dark">Dark</option>
               </select>
             </div>
-            <div class="control-row control-row-checkbox">
-              <label for="invert-pointer-buttons" data-i18n="body.options.invertPointerButtons">
-                Left mouse button to move start/right mouse button to move map
+            <div class="control-row">
+              <label for="colour-cycle-minutes" data-i18n="body.options.colourCycle">
+                Colour cycle (min)
               </label>
               <input
-                id="invert-pointer-buttons"
-                name="invert-pointer-buttons"
-                type="checkbox"
+                id="colour-cycle-minutes"
+                name="colour-cycle-minutes"
+                type="number"
+                min="5"
+                step="5"
+                value="75"
               />
             </div>
-            <fieldset class="control-row mode-checkbox-group" id="mode-checkbox-group">
+            <fieldset class="control-row mode-checkbox-group control-group-start" id="mode-checkbox-group">
               <legend data-i18n="body.options.mode">Transport modes</legend>
               <label class="mode-checkbox-option">
                 <input class="mode-checkbox" type="checkbox" name="mode" value="walk" />
@@ -71,19 +74,6 @@
                 <span data-i18n="body.options.transit">Public transit</span>
               </label>
             </fieldset>
-            <div class="control-row">
-              <label for="colour-cycle-minutes" data-i18n="body.options.colourCycle">
-                Colour cycle (min)
-              </label>
-              <input
-                id="colour-cycle-minutes"
-                name="colour-cycle-minutes"
-                type="number"
-                min="5"
-                step="5"
-                value="75"
-              />
-            </div>
             <details class="control-subsection" id="speed-settings">
               <summary data-i18n="body.options.speedSettings">Speed settings</summary>
               <div class="control-row">
@@ -101,7 +91,17 @@
               </label>
               <input id="departure-datetime" name="departure-datetime" type="datetime-local" step="60" />
             </div>
-            <div class="control-row">
+            <div class="control-row control-row-checkbox control-group-start">
+              <label for="invert-pointer-buttons" data-i18n="body.options.invertPointerButtons">
+                Swap left/right mouse button actions
+              </label>
+              <input
+                id="invert-pointer-buttons"
+                name="invert-pointer-buttons"
+                type="checkbox"
+              />
+            </div>
+            <div class="control-row control-group-start">
               <button id="export-svg-button" type="button" disabled data-i18n="body.options.exportSvg">
                 Export SVG
               </button>

@@ -196,6 +196,28 @@ body {
   gap: 0.32rem;
 }
 
+/* Marks the first control of a new logical group (display / routing /
+   interaction / actions) with a hairline divider instead of a boxed
+   section — keeps related settings visually clustered without adding
+   another layer of chrome on top of the existing bordered subsections. */
+.control-group-start {
+  margin-top: 0.15rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--chrome-border);
+}
+
+/* Native number-input spin buttons go unused on a settings panel like this
+   (users type a value or leave the default) and just add visual noise. */
+.controls-menu-panel input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+.controls-menu-panel input[type='number']::-webkit-inner-spin-button,
+.controls-menu-panel input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 .control-row-checkbox {
   grid-template-columns: 1fr auto;
   align-items: center;
