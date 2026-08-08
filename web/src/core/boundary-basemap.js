@@ -114,6 +114,32 @@ function projectFeatureList(featureList, coordinateSpace, graphHeader, maxY, ext
   });
 }
 
+export function computeProjectedFeatureListBoundingBoxPx(projectedFeatures) {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let seenAny = false;
+
+  for (const feature of projectedFeatures ?? []) {
+    for (const path of feature?.paths ?? []) {
+      for (const point of path ?? []) {
+        const [x, y] = point;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+          continue;
+        }
+        seenAny = true;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  return seenAny ? { minX, minY, maxX, maxY } : null;
+}
+
 export function isClosedPath(path) {
   if (!Array.isArray(path) || path.length < 2) {
     return false;

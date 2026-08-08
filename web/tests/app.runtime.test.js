@@ -46,6 +46,7 @@ import {
   timeToColour,
 } from '../src/app.js';
 import {
+  computeProjectedFeatureListBoundingBoxPx,
   getAirportFillStyle,
   getBoundaryStrokeStyle,
   getBoundaryWaterFillStyle,
@@ -1866,4 +1867,31 @@ test('buildStaticEdgeNodeIndexedVertexData packs static vertex attributes for sh
   assert.equal(packed[9], template.targetNodeIndices[0]);
   assert.equal(packed[10], edgeTraversalCostSeconds[template.edgeIndices[0]]);
   assert.equal(packed[11], 1);
+});
+
+test('computeProjectedFeatureListBoundingBoxPx spans every point across every feature and path', () => {
+  const projectedFeatures = [
+    { name: 'a', paths: [[[10, 20], [30, 5]]] },
+    { name: 'b', paths: [[[-5, 40], [15, 15]], [[100, 100]]] },
+  ];
+
+  const bbox = computeProjectedFeatureListBoundingBoxPx(projectedFeatures);
+
+  assert.deepEqual(bbox, { minX: -5, minY: 5, maxX: 100, maxY: 100 });
+});
+
+test('computeProjectedFeatureListBoundingBoxPx returns null for empty or missing features', () => {
+  assert.equal(computeProjectedFeatureListBoundingBoxPx([]), null);
+  assert.equal(computeProjectedFeatureListBoundingBoxPx(undefined), null);
+  assert.equal(computeProjectedFeatureListBoundingBoxPx([{ name: 'empty', paths: [] }]), null);
+});
+
+test('computeProjectedFeatureListBoundingBoxPx ignores non-finite points', () => {
+  const projectedFeatures = [
+    { name: 'a', paths: [[[10, 20], [Number.NaN, 5], [30, Number.POSITIVE_INFINITY]]] },
+  ];
+
+  const bbox = computeProjectedFeatureListBoundingBoxPx(projectedFeatures);
+
+  assert.deepEqual(bbox, { minX: 10, minY: 20, maxX: 10, maxY: 20 });
 });

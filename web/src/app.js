@@ -41,6 +41,7 @@ import {
   resolveViewportFrame,
 } from './core/viewport.js';
 import {
+  computeProjectedFeatureListBoundingBoxPx,
   getAirportFillStyle,
   getBoundaryStrokeStyle,
   getBoundaryWaterFillStyle,
@@ -568,6 +569,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
           {
             colourTheme: resolveIsochroneTheme(),
             viewport: currentMapData.viewport,
+            fitBoundingBoxPx: currentMapData.boundaryFitBoundingBoxPx,
           },
         );
       }
@@ -1274,6 +1276,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
           graphHeightPx: mapData.graph.header.gridHeightPx,
           edgeSlackSeconds: EDGE_INTERPOLATION_SLACK_SECONDS,
           viewport,
+          fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
         },
       );
       return true;
@@ -1290,6 +1293,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
       graphWidthPx: mapData.graph.header.gridWidthPx,
       graphHeightPx: mapData.graph.header.gridHeightPx,
       viewport,
+      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
     });
     return true;
   }
@@ -1321,6 +1325,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
       cycleMinutes: colourCycleMinutes,
       colourTheme,
       viewport,
+      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
     });
     return true;
   }
@@ -1351,7 +1356,10 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
         colourTheme,
       },
     );
-    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, { viewport });
+    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
+      viewport,
+      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+    });
     return true;
   }
 
@@ -1645,6 +1653,7 @@ export function drawBoundaryBasemapAlignedToGraphGrid(
   const viewportFrame = resolveViewportFrame(graphHeader, options.viewport, {
     frameWidthPx: boundaryCanvas.width,
     frameHeightPx: boundaryCanvas.height,
+    fitBoundingBoxPx: options.fitBoundingBoxPx,
   });
 
   context.setTransform(1, 0, 0, 1, 0, 0);
@@ -2072,6 +2081,14 @@ export async function initializeMapData(shell, options = {}) {
     updateRenderBackendBadge(shell, renderer);
     layoutMapViewportToContainGraph(shell, graph.header);
     syncCanvasToDisplaySize(shell.isochroneCanvas);
+    // Default/max-zoom-out framing fits the district boundary (+5%) rather
+    // than the full routing grid, which can be dominated by far-flung
+    // ferry endpoints (see osm_graph_extract.py's grid-size-budgeted ferry
+    // inclusion) — the boundary is what a user actually expects to see on
+    // load. Panning still reaches the wider grid at that same zoom level.
+    const boundaryFitBoundingBoxPx = computeProjectedFeatureListBoundingBoxPx(
+      projectBoundaryBasemapToGraphPaths(boundaryLoad.boundaryPayload, graph.header).features,
+    );
     const alignedBoundarySummary = drawBoundaryBasemapAlignedToGraphGrid(
       shell.boundaryCanvas,
       boundaryLoad.boundaryPayload,
@@ -2079,10 +2096,14 @@ export async function initializeMapData(shell, options = {}) {
       {
         colourTheme: resolveIsochroneTheme(),
         viewport: createDefaultMapViewport(),
+        fitBoundingBoxPx: boundaryFitBoundingBoxPx,
       },
     );
     renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));
-    updateDistanceScaleBar(shell, graph.header, { viewport: createDefaultMapViewport() });
+    updateDistanceScaleBar(shell, graph.header, {
+      viewport: createDefaultMapViewport(),
+      fitBoundingBoxPx: boundaryFitBoundingBoxPx,
+    });
     if (shell.exportSvgButton) {
       shell.exportSvgButton.disabled = false;
     }
@@ -2100,6 +2121,7 @@ export async function initializeMapData(shell, options = {}) {
       boundarySummary: boundaryLoad.boundarySummary,
       alignedBoundarySummary,
       boundaryPayload: boundaryLoad.boundaryPayload,
+      boundaryFitBoundingBoxPx,
       graph,
       nodePixels,
       nodeModeMask,
@@ -2348,6 +2370,7 @@ export function updateDistanceScaleBar(shell, graphHeader, options = {}) {
   const viewportFrame = resolveViewportFrame(graphHeader, options.viewport, {
     frameWidthPx: canvasRect.width,
     frameHeightPx: canvasRect.height,
+    fitBoundingBoxPx: options.fitBoundingBoxPx,
   });
 
   const metresPerCssPixel = graphHeader.pixelSizeM / viewportFrame.effectiveScale;
@@ -2722,6 +2745,7 @@ function createCanvas2dIsochroneRenderer(canvas) {
         {
           frameWidthPx: canvas.width,
           frameHeightPx: canvas.height,
+          fitBoundingBoxPx: options.fitBoundingBoxPx,
         },
       );
       if (
@@ -3364,7 +3388,7 @@ void main(void) {
     return { width, height };
   };
 
-  const resolveRendererViewport = (graphWidthPx, graphHeightPx, viewport) =>
+  const resolveRendererViewport = (graphWidthPx, graphHeightPx, viewport, fitBoundingBoxPx) =>
     resolveViewportFrame(
       {
         gridWidthPx: graphWidthPx,
@@ -3374,6 +3398,7 @@ void main(void) {
       {
         frameWidthPx: canvas.width,
         frameHeightPx: canvas.height,
+        fitBoundingBoxPx,
       },
     );
 
@@ -3411,7 +3436,12 @@ void main(void) {
       }
 
       gl.viewport(0, 0, canvas.width, canvas.height);
-      const viewport = resolveRendererViewport(pixelGrid.widthPx, pixelGrid.heightPx, options.viewport);
+      const viewport = resolveRendererViewport(
+        pixelGrid.widthPx,
+        pixelGrid.heightPx,
+        options.viewport,
+        options.fitBoundingBoxPx,
+      );
       bindQuadToProgram(program, positionLocation);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -3475,7 +3505,12 @@ void main(void) {
       }
       const graphWidthPx = options.graphWidthPx ?? canvas.width;
       const graphHeightPx = options.graphHeightPx ?? canvas.height;
-      const viewport = resolveRendererViewport(graphWidthPx, graphHeightPx, options.viewport);
+      const viewport = resolveRendererViewport(
+        graphWidthPx,
+        graphHeightPx,
+        options.viewport,
+        options.fitBoundingBoxPx,
+      );
 
       gl.viewport(0, 0, canvas.width, canvas.height);
       if (!append) {
@@ -3572,7 +3607,12 @@ void main(void) {
       }
       const graphWidthPx = options.graphWidthPx ?? canvas.width;
       const graphHeightPx = options.graphHeightPx ?? canvas.height;
-      const viewport = resolveRendererViewport(graphWidthPx, graphHeightPx, options.viewport);
+      const viewport = resolveRendererViewport(
+        graphWidthPx,
+        graphHeightPx,
+        options.viewport,
+        options.fitBoundingBoxPx,
+      );
 
       gl.viewport(0, 0, canvas.width, canvas.height);
       if (!append) {
@@ -3695,6 +3735,7 @@ void main(void) {
         travelTimeGrid.widthPx,
         travelTimeGrid.heightPx,
         options.viewport,
+        options.fitBoundingBoxPx,
       );
       gl.viewport(0, 0, canvas.width, canvas.height);
       bindQuadToProgram(travelTimeProgram, travelTimePositionLocation);
@@ -3816,7 +3857,10 @@ export function blitPixelGridToCanvas(canvas, pixelGrid, options = {}) {
   }
   validatePixelGrid(pixelGrid);
   const renderer = getOrCreateIsochroneRenderer(canvas);
-  return renderer.draw(pixelGrid, { viewport: options.viewport });
+  return renderer.draw(pixelGrid, {
+    viewport: options.viewport,
+    fitBoundingBoxPx: options.fitBoundingBoxPx,
+  });
 }
 
 export function clearRenderedIsochrone(shell, mapData = null) {
@@ -3854,6 +3898,7 @@ export function renderReachableNodes(shell, mapData, distSeconds, options = {}) 
   );
   blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
     viewport: mapData.viewport,
+    fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
   });
   return paintedNodeCount;
 }
@@ -4564,10 +4609,14 @@ function renderInitialPassByBackend(renderContext) {
       cycleMinutes: getColourCycleMinutesFromShell(shell),
       colourTheme: renderContext.colourTheme,
       viewport,
+      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
     });
   } else {
     clearGrid(mapData.pixelGrid);
-    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, { viewport });
+    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
+      viewport,
+      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+    });
   }
 }
 
@@ -4617,6 +4666,7 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
         graphWidthPx: searchState.graph.header.gridWidthPx,
         graphHeightPx: searchState.graph.header.gridHeightPx,
         viewport,
+        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
       }),
     );
     paintedNodeCount = settledNodeCount;
@@ -4648,6 +4698,7 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
         cycleMinutes: colourCycleMinutes,
         colourTheme,
         viewport,
+        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
       }),
     );
   } else {
@@ -4678,7 +4729,10 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
       ),
     );
     profileMs('onSliceDrawMs', () =>
-      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, { viewport }),
+      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
+        viewport,
+        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+      }),
     );
   }
 
@@ -4729,6 +4783,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
             graphHeightPx: searchState.graph.header.gridHeightPx,
             edgeSlackSeconds: EDGE_INTERPOLATION_SLACK_SECONDS,
             viewport,
+            fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
           },
         ),
       );
@@ -4760,6 +4815,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
           graphWidthPx: searchState.graph.header.gridWidthPx,
           graphHeightPx: searchState.graph.header.gridHeightPx,
           viewport,
+          fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
         }),
       );
     }
@@ -4800,6 +4856,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
         cycleMinutes: colourCycleMinutes,
         colourTheme,
         viewport,
+        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
       }),
     );
   } else {
@@ -4831,7 +4888,10 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
       ),
     );
     profileMs('finalDrawMs', () =>
-      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, { viewport }),
+      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
+        viewport,
+        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+      }),
     );
   }
 
@@ -5654,6 +5714,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           {
             colourTheme: resolveIsochroneTheme(),
             viewport: mapData.viewport,
+            fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
           },
         );
       }
@@ -5662,7 +5723,10 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         colourCycleMinutes: getColourCycleMinutesFromShell(shell),
         viewport: mapData.viewport,
       });
-      updateDistanceScaleBar(shell, mapData.graph.header, { viewport: mapData.viewport });
+      updateDistanceScaleBar(shell, mapData.graph.header, {
+        viewport: mapData.viewport,
+        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+      });
     };
     const handleWindowResize = () => {
       if (!initializedMapData) {
@@ -5757,6 +5821,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
             {
               colourTheme: themeValue,
               viewport: initializedMapData.viewport,
+              fitBoundingBoxPx: initializedMapData.boundaryFitBoundingBoxPx,
             },
           );
         }

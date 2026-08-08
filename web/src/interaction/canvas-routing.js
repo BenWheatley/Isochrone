@@ -249,6 +249,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     const viewportFrame = resolveViewportFrame(mapData.graph.header, mapData.viewport, {
       frameWidthPx: shell.isochroneCanvas.width,
       frameHeightPx: shell.isochroneCanvas.height,
+      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
     });
     const { xPx, yPx } = mapScreenCanvasPixelToGraphPixel(
       viewportFrame,
@@ -432,6 +433,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
       frameHeightPx: shell.isochroneCanvas.height,
       minScale: MIN_VIEWPORT_SCALE,
       maxScale: MAX_VIEWPORT_SCALE,
+      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
     };
     const zoomedViewport = zoomMapViewportAtCanvasPixel(
       mapData.graph.header,
@@ -757,6 +759,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
         frameHeightPx: shell.isochroneCanvas.height,
         minScale: MIN_VIEWPORT_SCALE,
         maxScale: MAX_VIEWPORT_SCALE,
+        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
       },
     );
     return applyViewport(nextViewport, { updateScaleBar: false });
@@ -779,6 +782,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
         frameHeightPx: shell.isochroneCanvas.height,
         minScale: MIN_VIEWPORT_SCALE,
         maxScale: MAX_VIEWPORT_SCALE,
+        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
       },
     );
     return applyViewport(nextViewport, { updateScaleBar: true });
@@ -798,7 +802,10 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     }
     mapData.viewport = nextViewport;
     if (applyOptions.updateScaleBar === true && typeof updateDistanceScaleBar === 'function') {
-      updateDistanceScaleBar(shell, mapData.graph.header, { viewport: mapData.viewport });
+      updateDistanceScaleBar(shell, mapData.graph.header, {
+        viewport: mapData.viewport,
+        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+      });
     }
     if (typeof redrawViewport === 'function') {
       redrawViewport(shell, mapData);

@@ -1,5 +1,6 @@
 const DEFAULT_MAX_VIEWPORT_SCALE = 8;
 const DEFAULT_MIN_VIEWPORT_SCALE = 1;
+const DEFAULT_FIT_BOUNDING_BOX_PADDING_FACTOR = 1.05;
 
 export function createDefaultMapViewport() {
   return {
@@ -38,10 +39,7 @@ export function resolveViewportFrame(graphHeader, viewport = null, options = {})
   const sourceViewport =
     viewport && typeof viewport === 'object' ? viewport : createDefaultMapViewport();
   const scale = clamp(asFiniteOrFallback(sourceViewport.scale, 1), minScale, maxScale);
-  const fitScale = Math.min(
-    frameWidthPx / graphHeader.gridWidthPx,
-    frameHeightPx / graphHeader.gridHeightPx,
-  );
+  const fitScale = resolveFitScale(graphHeader, frameWidthPx, frameHeightPx, options);
   if (!(fitScale > 0)) {
     throw new Error('fitScale must be positive');
   }
@@ -132,6 +130,32 @@ export function zoomMapViewportAtCanvasPixel(
     },
     options,
   );
+}
+
+/**
+ * scale=1 normally means "the whole routing grid fits the frame" - but a
+ * region's routing grid can be dominated by far-flung ferry endpoints well
+ * beyond the area anyone actually wants to see by default (see
+ * osm_graph_extract.py's grid-size-budgeted ferry inclusion). When
+ * options.fitBoundingBoxPx is supplied (the district boundary's own pixel
+ * bounding box, padded), scale=1 instead means "that boundary fits the
+ * frame" - minScale/maxScale are untouched, so the zoom-out limit becomes
+ * the boundary view itself, while panning (bounded by the full grid in
+ * normalizeViewportAxis) still reaches the wider routing extent at that
+ * same zoom level.
+ */
+function resolveFitScale(graphHeader, frameWidthPx, frameHeightPx, options) {
+  const fitBoundingBoxPx = options.fitBoundingBoxPx ?? null;
+  if (!fitBoundingBoxPx) {
+    return Math.min(frameWidthPx / graphHeader.gridWidthPx, frameHeightPx / graphHeader.gridHeightPx);
+  }
+
+  const paddingFactor = Number.isFinite(options.fitBoundingBoxPaddingFactor)
+    ? options.fitBoundingBoxPaddingFactor
+    : DEFAULT_FIT_BOUNDING_BOX_PADDING_FACTOR;
+  const boxWidthPx = Math.max(1, (fitBoundingBoxPx.maxX - fitBoundingBoxPx.minX) * paddingFactor);
+  const boxHeightPx = Math.max(1, (fitBoundingBoxPx.maxY - fitBoundingBoxPx.minY) * paddingFactor);
+  return Math.min(frameWidthPx / boxWidthPx, frameHeightPx / boxHeightPx);
 }
 
 function validateGraphViewportHeader(graphHeader) {
