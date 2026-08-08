@@ -1,3 +1,5 @@
+import { BIKE_CRUISE_SPEED_KPH, WALKING_SPEED_M_S } from '../config/constants.js';
+
 const REQUIRED_EXPORTS = [
   'memory',
   'wasm_alloc',
@@ -160,6 +162,8 @@ export function createWasmRoutingKernelFacade(exportsObject) {
       edgeWalkCostSecondsPtr,
       edgeCount,
       allowedModeMask,
+      walkingSpeedMps = WALKING_SPEED_M_S,
+      bikeCruiseSpeedKph = BIKE_CRUISE_SPEED_KPH,
     }) {
       exportsObject.precompute_edge_costs(
         outCostSecondsPtr,
@@ -169,6 +173,8 @@ export function createWasmRoutingKernelFacade(exportsObject) {
         edgeWalkCostSecondsPtr,
         edgeCount,
         allowedModeMask,
+        walkingSpeedMps,
+        bikeCruiseSpeedKph,
       );
     },
     precomputeEdgeCostsForGraph({
@@ -178,6 +184,8 @@ export function createWasmRoutingKernelFacade(exportsObject) {
       edgeWalkCostSeconds,
       outCostSeconds,
       allowedModeMask,
+      walkingSpeedMps = WALKING_SPEED_M_S,
+      bikeCruiseSpeedKph = BIKE_CRUISE_SPEED_KPH,
     }) {
       if (!(edgeModeMask instanceof Uint8Array)) {
         throw new Error('edgeModeMask must be a Uint8Array');
@@ -224,6 +232,8 @@ export function createWasmRoutingKernelFacade(exportsObject) {
         edgeWalkCostSecondsPtr,
         edgeCount,
         allowedModeMask,
+        walkingSpeedMps,
+        bikeCruiseSpeedKph,
       );
       copyTypedArrayFromWasm(outCostSeconds, outPtr);
     },

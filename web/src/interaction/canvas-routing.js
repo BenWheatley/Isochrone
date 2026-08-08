@@ -24,6 +24,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     getAllowedModeMaskFromShell,
     getColourCycleMinutesFromShell,
     getRoutingFailedStatusText,
+    getSpeedOptionsFromShell,
     getTransitOptionsFromShell,
     mapClientPointToCanvasPixel,
     parseNodeIndexFromLocationSearch,
@@ -49,6 +50,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   }
   if (getTransitOptionsFromShell !== undefined && typeof getTransitOptionsFromShell !== 'function') {
     throw new Error('dependencies.getTransitOptionsFromShell must be a function when provided');
+  }
+  if (getSpeedOptionsFromShell !== undefined && typeof getSpeedOptionsFromShell !== 'function') {
+    throw new Error('dependencies.getSpeedOptionsFromShell must be a function when provided');
   }
   if (typeof mapClientPointToCanvasPixel !== 'function') {
     throw new Error('dependencies.mapClientPointToCanvasPixel must be a function');
@@ -140,6 +144,8 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     renderIsochroneLegendIfNeeded(shell, colourCycleMinutes);
     const transitOptions =
       typeof getTransitOptionsFromShell === 'function' ? getTransitOptionsFromShell(shell) : {};
+    const speedOptions =
+      typeof getSpeedOptionsFromShell === 'function' ? getSpeedOptionsFromShell(shell) : {};
 
     try {
       const runSummary = await runWalkingIsochroneFromSourceNode(
@@ -152,6 +158,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
           allowedModeMask,
           colourCycleMinutes,
           ...transitOptions,
+          ...speedOptions,
           skipFinalFullPass: false,
           incrementalRender,
           isCancelled: () => runToken.cancelled,

@@ -70,13 +70,22 @@
                 value="75"
               />
             </div>
-            <div class="control-row" id="departure-date-row" hidden>
-              <label for="departure-date" data-i18n="body.options.departureDate">Departure date</label>
-              <input id="departure-date" name="departure-date" type="date" />
-            </div>
-            <div class="control-row" id="departure-time-row" hidden>
-              <label for="departure-time" data-i18n="body.options.departureTime">Departure time</label>
-              <input id="departure-time" name="departure-time" type="time" value="08:00" step="60" />
+            <details class="control-subsection" id="speed-settings">
+              <summary data-i18n="body.options.speedSettings">Speed settings</summary>
+              <div class="control-row">
+                <label for="walk-speed-kph" data-i18n="body.options.walkSpeed">Walk speed (km/h)</label>
+                <input id="walk-speed-kph" name="walk-speed-kph" type="number" min="1" step="0.1" value="5" />
+              </div>
+              <div class="control-row">
+                <label for="bike-speed-kph" data-i18n="body.options.bikeSpeed">Bike speed (km/h)</label>
+                <input id="bike-speed-kph" name="bike-speed-kph" type="number" min="1" step="0.5" value="20" />
+              </div>
+            </details>
+            <div class="control-row" id="departure-datetime-row" hidden>
+              <label for="departure-datetime" data-i18n="body.options.departureDatetime">
+                Departure date &amp; time
+              </label>
+              <input id="departure-datetime" name="departure-datetime" type="datetime-local" step="60" />
             </div>
             <div class="control-row control-row-checkbox" id="transit-enabled-row" hidden>
               <label for="transit-enabled" data-i18n="body.options.transit">Public transit</label>

@@ -98,7 +98,7 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
         "invert-pointer-buttons",
         "mode-select",
         "colour-cycle-minutes",
-        "departure-time",
+        "departure-datetime",
         "export-svg-button",
         "isochrone-legend",
         "distance-scale",
@@ -142,11 +142,10 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
     assert colour_cycle_input.attrs["step"] == "5"
     assert colour_cycle_input.attrs["value"] == "75"
 
-    departure_time_input = parsed.elements_by_id["departure-time"]
-    assert departure_time_input.tag == "input"
-    assert departure_time_input.attrs["type"] == "time"
-    assert departure_time_input.attrs["value"] == "08:00"
-    assert departure_time_input.attrs["step"] == "60"
+    departure_datetime_input = parsed.elements_by_id["departure-datetime"]
+    assert departure_datetime_input.tag == "input"
+    assert departure_datetime_input.attrs["type"] == "datetime-local"
+    assert departure_datetime_input.attrs["step"] == "60"
 
     export_button = parsed.elements_by_id["export-svg-button"]
     assert export_button.tag == "button"

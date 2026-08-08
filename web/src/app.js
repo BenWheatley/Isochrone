@@ -65,6 +65,7 @@ import {
   bindThemeControl as bindThemeControlInternal,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
+  getSpeedOptionsFromShell,
   getTransitOptionsFromShell,
   initializeAppShell,
   bindModeSelectControl as bindModeSelectControlInternal,
@@ -115,20 +116,27 @@ export { createWalkingSearchState, computeEdgeTraversalCostSeconds } from './cor
 export {
   mapCanvasPixelToGraphMeters,
   mapClientPointToCanvasPixel,
+  parseBikeSpeedKphFromLocationSearch,
   parseColourCycleMinutesFromLocationSearch,
+  parseDepartureDatetimeFromLocationSearch,
   parseLocationIdFromLocationSearch,
   parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
+  parseWalkSpeedKphFromLocationSearch,
+  persistBikeSpeedKphToLocation,
   persistColourCycleMinutesToLocation,
+  persistDepartureDatetimeToLocation,
   persistLocationIdToLocation,
   persistModeValuesToLocation,
   persistNodeIndexToLocation,
+  persistWalkSpeedKphToLocation,
 } from './core/coords.js';
 export {
   initializeAppShell,
   bindLocationSelectControl,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
+  getSpeedOptionsFromShell,
   getTransitOptionsFromShell,
   populateLocationSelect,
   updateTransitControlAvailability,
@@ -552,6 +560,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     getAllowedModeMaskFromShell,
     getColourCycleMinutesFromShell,
     getRoutingFailedStatusText,
+    getSpeedOptionsFromShell,
     getTransitOptionsFromShell,
     mapClientPointToCanvasPixel,
     parseNodeIndexFromLocationSearch,
@@ -616,6 +625,8 @@ export async function runWalkingIsochroneFromSourceNode(
     throw new Error('WASM routing kernel is required and must expose precompute/search methods');
   }
 
+  const walkingSpeedMps = options.walkingSpeedMps;
+  const bikeCruiseSpeedKph = options.bikeCruiseSpeedKph;
   const edgeTraversalCostSeconds = precomputeEdgeTraversalCostSecondsCache(
     mapData.graph,
     allowedModeMask,
@@ -623,6 +634,8 @@ export async function runWalkingIsochroneFromSourceNode(
     {
       edgeCostPrecomputeKernel,
       onKernelError: options.onKernelError ?? null,
+      walkingSpeedMps,
+      bikeCruiseSpeedKph,
     },
   );
   const edgeTraversalCostTicks = getOrBuildEdgeTraversalCostTicksForMode(
@@ -719,6 +732,7 @@ export async function runWalkingIsochroneFromSourceNode(
           departureSecondsOfDay: options.departureSecondsOfDay,
           departureWeekdayIndex: options.departureWeekdayIndex,
           timeLimitSeconds,
+          walkingSpeedMps,
         },
       );
       if (csaResult.seedNodeIndices.length > 0) {
@@ -764,6 +778,8 @@ export async function runWalkingIsochroneFromSourceNode(
       sourceNodeIndex,
       distSeconds: finalDistSeconds,
       allowedModeMask,
+      walkingSpeedMps,
+      bikeCruiseSpeedKph,
       edgeTraversalCostSeconds,
       colourCycleMinutes: options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
       edgeVertexData: finalEdgeVertexData,
@@ -1437,6 +1453,10 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
       ? options.timeLimitSeconds
       : Number.POSITIVE_INFINITY;
   const budgetEndSeconds = departureSecondsOfDay + timeLimitSeconds;
+  const walkingSpeedMps =
+    Number.isFinite(options.walkingSpeedMps) && options.walkingSpeedMps > 0
+      ? options.walkingSpeedMps
+      : WALKING_SPEED_M_S;
 
   const earliestArrivalSeconds = new Float64Array(nStops).fill(Number.POSITIVE_INFINITY);
   const walkAttachCostSeconds = new Float64Array(nStops);
@@ -1446,7 +1466,7 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
     const nodeIndex = graph.stopNearestNodeIndex[stopIndex];
     const dx = graph.stopX[stopIndex] - graph.nodeI32[nodeIndex * 4];
     const dy = graph.stopY[stopIndex] - graph.nodeI32[nodeIndex * 4 + 1];
-    const attachCostSeconds = Math.sqrt(dx * dx + dy * dy) / WALKING_SPEED_M_S;
+    const attachCostSeconds = Math.sqrt(dx * dx + dy * dy) / walkingSpeedMps;
     walkAttachCostSeconds[stopIndex] = attachCostSeconds;
 
     const walkElapsedSeconds = walkDistSeconds[nodeIndex];
@@ -1579,23 +1599,36 @@ export function getOrBuildEdgeTraversalCostTicksForMode(
     graph[EDGE_TRAVERSAL_COST_TICK_CACHE_PROPERTY] = cacheByModeMask;
   }
 
-  let edgeTraversalCostTicks = cacheByModeMask[allowedModeMask];
+  // Keyed on reference identity of edgeTraversalCostSeconds (not just
+  // allowedModeMask) — precomputeEdgeTraversalCostSecondsCache hands back a
+  // freshly-keyed array whenever the effective walk/bike speed changes for
+  // the same mode mask, so a stale ticks array from a previous speed must
+  // not be reused just because the mask matches.
+  const cached = cacheByModeMask[allowedModeMask];
   if (
-    !(edgeTraversalCostTicks instanceof Uint32Array)
-    || edgeTraversalCostTicks.length < graph.header.nEdges
+    cached
+    && typeof cached === 'object'
+    && cached.sourceCostSecondsRef === edgeTraversalCostSeconds
+    && cached.ticks instanceof Uint32Array
+    && cached.ticks.length >= graph.header.nEdges
   ) {
-    edgeTraversalCostTicks = new Uint32Array(graph.header.nEdges);
-    for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
-      const costSeconds = edgeTraversalCostSeconds[edgeIndex];
-      if (!Number.isFinite(costSeconds) || costSeconds <= 0) {
-        edgeTraversalCostTicks[edgeIndex] = 0;
-        continue;
-      }
-      const ticks = Math.ceil(costSeconds * WASM_EDGE_COST_TICK_SCALE);
-      edgeTraversalCostTicks[edgeIndex] = ticks >= 0xffff_ffff ? 0xffff_ffff : ticks;
-    }
-    cacheByModeMask[allowedModeMask] = edgeTraversalCostTicks;
+    return cached.ticks;
   }
+
+  const edgeTraversalCostTicks = new Uint32Array(graph.header.nEdges);
+  for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
+    const costSeconds = edgeTraversalCostSeconds[edgeIndex];
+    if (!Number.isFinite(costSeconds) || costSeconds <= 0) {
+      edgeTraversalCostTicks[edgeIndex] = 0;
+      continue;
+    }
+    const ticks = Math.ceil(costSeconds * WASM_EDGE_COST_TICK_SCALE);
+    edgeTraversalCostTicks[edgeIndex] = ticks >= 0xffff_ffff ? 0xffff_ffff : ticks;
+  }
+  cacheByModeMask[allowedModeMask] = {
+    ticks: edgeTraversalCostTicks,
+    sourceCostSecondsRef: edgeTraversalCostSeconds,
+  };
 
   return edgeTraversalCostTicks;
 }

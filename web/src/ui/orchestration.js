@@ -1,15 +1,23 @@
 import {
+  BIKE_CRUISE_SPEED_KPH,
   DEFAULT_COLOUR_CYCLE_MINUTES,
+  DEFAULT_WALK_SPEED_KPH,
   EDGE_MODE_BIKE_BIT,
   EDGE_MODE_CAR_BIT,
   EDGE_MODE_WALK_BIT,
   EDGE_MODE_WATER_BIT,
 } from '../config/constants.js';
 import {
+  parseBikeSpeedKphFromLocationSearch,
   parseColourCycleMinutesFromLocationSearch,
+  parseDepartureDatetimeFromLocationSearch,
   parseModeValuesFromLocationSearch,
+  parseWalkSpeedKphFromLocationSearch,
+  persistBikeSpeedKphToLocation,
   persistColourCycleMinutesToLocation,
+  persistDepartureDatetimeToLocation,
   persistModeValuesToLocation,
+  persistWalkSpeedKphToLocation,
 } from '../core/coords.js';
 import {
   applyCommonMessagesToDocument,
@@ -47,10 +55,10 @@ export function initializeAppShell(doc, options = {}) {
   const invertPointerButtonsInput = resolvedDocument.getElementById('invert-pointer-buttons');
   const modeSelect = resolvedDocument.getElementById('mode-select');
   const colourCycleMinutesInput = resolvedDocument.getElementById('colour-cycle-minutes');
-  const departureDateRow = resolvedDocument.getElementById('departure-date-row');
-  const departureDateInput = resolvedDocument.getElementById('departure-date');
-  const departureTimeRow = resolvedDocument.getElementById('departure-time-row');
-  const departureTimeInput = resolvedDocument.getElementById('departure-time');
+  const walkSpeedInput = resolvedDocument.getElementById('walk-speed-kph');
+  const bikeSpeedInput = resolvedDocument.getElementById('bike-speed-kph');
+  const departureDatetimeRow = resolvedDocument.getElementById('departure-datetime-row');
+  const departureDatetimeInput = resolvedDocument.getElementById('departure-datetime');
   const transitEnabledRow = resolvedDocument.getElementById('transit-enabled-row');
   const transitEnabledInput = resolvedDocument.getElementById('transit-enabled');
   const exportSvgButton = resolvedDocument.getElementById('export-svg-button');
@@ -116,17 +124,17 @@ export function initializeAppShell(doc, options = {}) {
   if (!colourCycleMinutesInput || colourCycleMinutesInput.tagName !== 'INPUT') {
     throw new Error('index.html is missing <input id="colour-cycle-minutes">');
   }
-  if (!departureDateRow || departureDateRow.tagName !== 'DIV') {
-    throw new Error('index.html is missing <div id="departure-date-row">');
+  if (!walkSpeedInput || walkSpeedInput.tagName !== 'INPUT') {
+    throw new Error('index.html is missing <input id="walk-speed-kph">');
   }
-  if (!departureDateInput || departureDateInput.tagName !== 'INPUT') {
-    throw new Error('index.html is missing <input id="departure-date">');
+  if (!bikeSpeedInput || bikeSpeedInput.tagName !== 'INPUT') {
+    throw new Error('index.html is missing <input id="bike-speed-kph">');
   }
-  if (!departureTimeRow || departureTimeRow.tagName !== 'DIV') {
-    throw new Error('index.html is missing <div id="departure-time-row">');
+  if (!departureDatetimeRow || departureDatetimeRow.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="departure-datetime-row">');
   }
-  if (!departureTimeInput || departureTimeInput.tagName !== 'INPUT') {
-    throw new Error('index.html is missing <input id="departure-time">');
+  if (!departureDatetimeInput || departureDatetimeInput.tagName !== 'INPUT') {
+    throw new Error('index.html is missing <input id="departure-datetime">');
   }
   if (!transitEnabledRow || transitEnabledRow.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="transit-enabled-row">');
@@ -187,6 +195,17 @@ export function initializeAppShell(doc, options = {}) {
     colourCycleMinutesInput.value = String(persistedCycleMinutes);
   }
 
+  const persistedWalkSpeedKph = parseWalkSpeedKphFromLocationSearch(locationSearch);
+  walkSpeedInput.value = String(persistedWalkSpeedKph ?? DEFAULT_WALK_SPEED_KPH);
+
+  const persistedBikeSpeedKph = parseBikeSpeedKphFromLocationSearch(locationSearch);
+  bikeSpeedInput.value = String(persistedBikeSpeedKph ?? BIKE_CRUISE_SPEED_KPH);
+
+  const persistedDepartureDatetime = parseDepartureDatetimeFromLocationSearch(locationSearch);
+  if (persistedDepartureDatetime !== null) {
+    departureDatetimeInput.value = persistedDepartureDatetime;
+  }
+
   return {
     mapRegion,
     isochroneCanvas,
@@ -208,10 +227,10 @@ export function initializeAppShell(doc, options = {}) {
     invertPointerButtonsInput,
     modeSelect,
     colourCycleMinutesInput,
-    departureDateRow,
-    departureDateInput,
-    departureTimeRow,
-    departureTimeInput,
+    walkSpeedInput,
+    bikeSpeedInput,
+    departureDatetimeRow,
+    departureDatetimeInput,
     transitEnabledRow,
     transitEnabledInput,
     exportSvgButton,
@@ -515,12 +534,14 @@ export function isoWeekdayIndexForDateString(dateString) {
   return (sundayZeroIndex + 6) % 7;
 }
 
-function todayIsoDateString() {
+function nowIsoDatetimeLocalString() {
   const now = new Date();
   const year = String(now.getFullYear()).padStart(4, '0');
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
 function clampIsoDateToRange(dateString, minDateString, maxDateString) {
@@ -533,6 +554,18 @@ function clampIsoDateToRange(dateString, minDateString, maxDateString) {
   return dateString;
 }
 
+// Clamps only the date portion of a datetime-local value into
+// [minDateString, maxDateString], preserving the time-of-day portion — so
+// "now" defaults to the current date+time when today is in range, and to
+// the same time-of-day on the nearest valid date otherwise.
+function clampIsoDatetimeLocalToDateRange(datetimeLocalString, minDateString, maxDateString) {
+  const [datePart, timePart] = (datetimeLocalString ?? '').split('T');
+  const clampedDatePart = clampIsoDateToRange(datePart ?? '', minDateString, maxDateString);
+  return `${clampedDatePart}T${timePart ?? '00:00'}`;
+}
+
+const DEPARTURE_DATETIME_VALUE_PATTERN = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/;
+
 export function getTransitOptionsFromShell(shell) {
   if (!shell || typeof shell !== 'object') {
     throw new Error('shell is required');
@@ -541,25 +574,45 @@ export function getTransitOptionsFromShell(shell) {
   const transitEnabled = shell.transitEnabledInput?.checked === true
     && shell.transitEnabledRow?.hidden !== true;
 
-  const rawDepartureTime = shell.departureTimeInput?.value ?? '';
-  const match = /^(\d{2}):(\d{2})$/.exec(rawDepartureTime);
+  const rawDepartureDatetime = shell.departureDatetimeInput?.value ?? '';
+  const match = DEPARTURE_DATETIME_VALUE_PATTERN.exec(rawDepartureDatetime);
   let departureSecondsOfDay = Number.NaN;
+  let departureWeekdayIndex = Number.NaN;
   if (match) {
-    const hours = Number.parseInt(match[1], 10);
-    const minutes = Number.parseInt(match[2], 10);
+    const [, datePart, hoursText, minutesText] = match;
+    const hours = Number.parseInt(hoursText, 10);
+    const minutes = Number.parseInt(minutesText, 10);
     if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
       departureSecondsOfDay = hours * 3600 + minutes * 60;
     }
+    departureWeekdayIndex = isoWeekdayIndexForDateString(datePart);
   }
-
-  const departureWeekdayIndex = isoWeekdayIndexForDateString(shell.departureDateInput?.value);
 
   return { transitEnabled, departureSecondsOfDay, departureWeekdayIndex };
 }
 
+export function getSpeedOptionsFromShell(shell) {
+  if (!shell || typeof shell !== 'object') {
+    throw new Error('shell is required');
+  }
+
+  const walkSpeedKph = parsePositiveFloatOrNull(shell.walkSpeedInput?.value) ?? DEFAULT_WALK_SPEED_KPH;
+  const bikeCruiseSpeedKph = parsePositiveFloatOrNull(shell.bikeSpeedInput?.value) ?? BIKE_CRUISE_SPEED_KPH;
+
+  return {
+    walkingSpeedMps: walkSpeedKph / 3.6,
+    bikeCruiseSpeedKph,
+  };
+}
+
+function parsePositiveFloatOrNull(rawValue) {
+  const parsed = Number.parseFloat(rawValue ?? '');
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 /**
  * Toggles the "Public transit" control's visibility, the departure
- * date/time controls, and the VBB/CC BY transit attribution line, based on
+ * date+time control, and the VBB/CC BY transit attribution line, based on
  * whether the currently-loaded region's graph actually has transit stops
  * (only Berlin, for now) — all absent for every other region rather than a
  * per-region config flag. Resets the checkbox when hiding so a stale
@@ -570,14 +623,15 @@ export function getTransitOptionsFromShell(shell) {
  * no separate wiring needed there.
  *
  * options.transitDateRange (an object with ISO YYYY-MM-DD `min`/`max`
- * strings) constrains the departure-date input to the actual calendar
+ * strings) constrains the departure-datetime input to the actual calendar
  * window the region's GTFS build covers — every weekday-recurring service
  * across that whole window is included (single-date calendar_dates.txt
  * exceptions like holidays are not modeled; see
  * data_pipeline/gtfs_transit.py's resolve_recurring_service_ids_and_date_range).
- * The input defaults to today's date clamped into that range so a query
- * defaults to "now" whenever that's actually a valid date. options.todayIsoDate
- * overrides "today" for deterministic tests.
+ * An existing input value (e.g. restored from the URL at page load) is left
+ * alone as long as its date falls within the new range; otherwise the input
+ * defaults to "now" clamped into that range. options.nowIsoDatetime
+ * overrides "now" for deterministic tests.
  */
 export function updateTransitControlAvailability(shell, hasTransitData, options = {}) {
   if (!shell || typeof shell !== 'object') {
@@ -593,13 +647,10 @@ export function updateTransitControlAvailability(shell, hasTransitData, options 
   if (shell.routingDisclaimerTransit) {
     shell.routingDisclaimerTransit.hidden = !hasTransitData;
   }
-  if (shell.departureDateRow) {
-    shell.departureDateRow.hidden = !hasTransitData;
+  if (shell.departureDatetimeRow) {
+    shell.departureDatetimeRow.hidden = !hasTransitData;
   }
-  if (shell.departureTimeRow) {
-    shell.departureTimeRow.hidden = !hasTransitData;
-  }
-  if (shell.departureDateInput) {
+  if (shell.departureDatetimeInput) {
     const transitDateRange =
       hasTransitData
       && options.transitDateRange
@@ -608,19 +659,24 @@ export function updateTransitControlAvailability(shell, hasTransitData, options 
         ? options.transitDateRange
         : null;
     if (transitDateRange) {
-      const todayIsoDate =
-        typeof options.todayIsoDate === 'string' ? options.todayIsoDate : todayIsoDateString();
-      shell.departureDateInput.min = transitDateRange.min;
-      shell.departureDateInput.max = transitDateRange.max;
-      shell.departureDateInput.value = clampIsoDateToRange(
-        todayIsoDate,
-        transitDateRange.min,
-        transitDateRange.max,
-      );
+      shell.departureDatetimeInput.min = `${transitDateRange.min}T00:00`;
+      shell.departureDatetimeInput.max = `${transitDateRange.max}T23:59`;
+      const currentDatePart = (shell.departureDatetimeInput.value ?? '').split('T')[0];
+      const currentValueInRange =
+        currentDatePart >= transitDateRange.min && currentDatePart <= transitDateRange.max;
+      if (!currentValueInRange) {
+        const nowIsoDatetime =
+          typeof options.nowIsoDatetime === 'string' ? options.nowIsoDatetime : nowIsoDatetimeLocalString();
+        shell.departureDatetimeInput.value = clampIsoDatetimeLocalToDateRange(
+          nowIsoDatetime,
+          transitDateRange.min,
+          transitDateRange.max,
+        );
+      }
     } else {
-      shell.departureDateInput.removeAttribute('min');
-      shell.departureDateInput.removeAttribute('max');
-      shell.departureDateInput.value = '';
+      shell.departureDatetimeInput.removeAttribute('min');
+      shell.departureDatetimeInput.removeAttribute('max');
+      shell.departureDatetimeInput.value = '';
     }
   }
 }
@@ -699,26 +755,53 @@ export function bindModeSelectControl(shell, dependencies = {}) {
       maybeRequestIsochroneRedraw();
     }
   };
-  // Departure time / transit-enabled changes require a full redraw (not
-  // just a repaint) since they can change which nodes are reachable at
-  // all, not just how the existing result is coloured.
+  // Transit-enabled changes require a full redraw (not just a repaint)
+  // since they can change which nodes are reachable at all, not just how
+  // the existing result is coloured.
   const handleTransitControlChange = () => {
+    maybeRequestIsochroneRedraw();
+  };
+  const handleDepartureDatetimeChange = () => {
+    const departureDatetime = shell.departureDatetimeInput?.value ?? '';
+    if (departureDatetime.length > 0) {
+      persistDepartureDatetimeToLocation(departureDatetime);
+    }
+    maybeRequestIsochroneRedraw();
+  };
+  // Walk/bike speed changes require a full redraw too — they change the
+  // per-edge traversal cost, not just the isochrone's colouring. Persists
+  // the raw km/h input values directly (not options.walkingSpeedMps * 3.6)
+  // so the URL doesn't pick up km/h -> m/s -> km/h floating-point noise.
+  const handleSpeedControlChange = () => {
+    const walkSpeedKph = parsePositiveFloatOrNull(shell.walkSpeedInput?.value);
+    if (walkSpeedKph !== null) {
+      persistWalkSpeedKphToLocation(walkSpeedKph);
+    }
+    const bikeSpeedKph = parsePositiveFloatOrNull(shell.bikeSpeedInput?.value);
+    if (bikeSpeedKph !== null) {
+      persistBikeSpeedKphToLocation(bikeSpeedKph);
+    }
     maybeRequestIsochroneRedraw();
   };
 
   getAllowedModeMaskFromShell(shell);
   getColourCycleMinutesFromShell(shell);
+  getSpeedOptionsFromShell(shell);
   renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));
   shell.modeSelect.addEventListener('change', handleSelectChange);
   shell.colourCycleMinutesInput.addEventListener('change', handleCycleChange);
-  shell.departureTimeInput?.addEventListener('change', handleTransitControlChange);
+  shell.walkSpeedInput?.addEventListener('change', handleSpeedControlChange);
+  shell.bikeSpeedInput?.addEventListener('change', handleSpeedControlChange);
+  shell.departureDatetimeInput?.addEventListener('change', handleDepartureDatetimeChange);
   shell.transitEnabledInput?.addEventListener('change', handleTransitControlChange);
 
   return {
     dispose() {
       shell.modeSelect.removeEventListener('change', handleSelectChange);
       shell.colourCycleMinutesInput.removeEventListener('change', handleCycleChange);
-      shell.departureTimeInput?.removeEventListener('change', handleTransitControlChange);
+      shell.walkSpeedInput?.removeEventListener('change', handleSpeedControlChange);
+      shell.bikeSpeedInput?.removeEventListener('change', handleSpeedControlChange);
+      shell.departureDatetimeInput?.removeEventListener('change', handleDepartureDatetimeChange);
       shell.transitEnabledInput?.removeEventListener('change', handleTransitControlChange);
     },
   };

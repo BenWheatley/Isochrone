@@ -8,6 +8,7 @@ import {
   instantiateRoutingKernelWasmFromBytes,
   validateRoutingKernelExports,
 } from '../src/wasm/routing-kernel.js';
+import { BIKE_CRUISE_SPEED_KPH, WALKING_SPEED_M_S } from '../src/config/constants.js';
 
 test('hasWebAssemblySupport checks runtime feature availability', () => {
   assert.equal(hasWebAssemblySupport({}), false);
@@ -52,7 +53,43 @@ test('createWasmRoutingKernelFacade forwards precompute call to wasm export', ()
   });
 
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0], [1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(calls[0], [1, 2, 3, 4, 5, 6, 7, WALKING_SPEED_M_S, BIKE_CRUISE_SPEED_KPH]);
+});
+
+test('createWasmRoutingKernelFacade forwards custom walking/bike speeds to wasm export', () => {
+  const calls = [];
+  const fakeExports = {
+    memory: {},
+    wasm_alloc() {
+      return 1;
+    },
+    wasm_dealloc() {},
+    precompute_edge_costs(...args) {
+      calls.push(args);
+    },
+    compute_travel_time_field() {
+      return 0;
+    },
+    compute_travel_time_field_multi_source() {
+      return 0;
+    },
+  };
+  const facade = createWasmRoutingKernelFacade(fakeExports);
+
+  facade.precomputeEdgeCosts({
+    outCostSecondsPtr: 1,
+    edgeModeMaskPtr: 2,
+    edgeRoadClassPtr: 3,
+    edgeMaxspeedKphPtr: 4,
+    edgeWalkCostSecondsPtr: 5,
+    edgeCount: 6,
+    allowedModeMask: 7,
+    walkingSpeedMps: 2.5,
+    bikeCruiseSpeedKph: 25,
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], [1, 2, 3, 4, 5, 6, 7, 2.5, 25]);
 });
 
 test('instantiateRoutingKernelWasm uses instantiateStreaming and validates exports', async () => {

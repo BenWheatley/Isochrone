@@ -160,12 +160,21 @@ fn edge_cost_seconds(
     road_class_id: u8,
     edge_maxspeed_kph: u16,
     walking_cost_seconds: u16,
+    walking_speed_m_s: f32,
+    bike_cruise_speed_kph: f32,
 ) -> f32 {
     if (edge_mode_mask & allowed_mode_mask) == 0 || walking_cost_seconds == 0 {
         return f32::INFINITY;
     }
 
     let walking_cost_seconds_f32 = walking_cost_seconds as f32;
+    // distance_m is reconstructed from the graph's baked-in walking cost
+    // using the build-time WALKING_SPEED_M_S constant (the speed the data
+    // pipeline actually assumed when it computed walking_cost_seconds from
+    // real edge geometry) — not the caller's walking_speed_m_s parameter,
+    // which is a user preference applied only to the walk-mode cost below.
+    // Using the user's speed here would corrupt the physical distance that
+    // bike/car/water costs derive from.
     let distance_m = (walking_cost_seconds_f32 * WALKING_SPEED_M_S).max(1.0);
     let maxspeed_kph = edge_maxspeed_kph as f32;
 
@@ -191,14 +200,18 @@ fn edge_cost_seconds(
         && (edge_mode_mask & EDGE_MODE_WALK_BIT) != 0
         && road_class_id != ROAD_CLASS_MOTORWAY
     {
-        best_cost = best_cost.min(walking_cost_seconds_f32);
+        if walking_speed_m_s > 0.0 {
+            best_cost = best_cost.min(distance_m / walking_speed_m_s);
+        } else {
+            best_cost = best_cost.min(walking_cost_seconds_f32);
+        }
     }
 
     if (allowed_mode_mask & EDGE_MODE_BIKE_BIT) != 0
         && (edge_mode_mask & EDGE_MODE_BIKE_BIT) != 0
         && road_class_id != ROAD_CLASS_MOTORWAY
     {
-        let bike_speed_kph = BIKE_CRUISE_SPEED_KPH.min(maxspeed_kph);
+        let bike_speed_kph = bike_cruise_speed_kph.min(maxspeed_kph);
         if bike_speed_kph > 0.0 {
             best_cost = best_cost.min(distance_m / (bike_speed_kph * (1000.0 / 3600.0)));
         }
@@ -376,6 +389,8 @@ pub extern "C" fn precompute_edge_costs(
     edge_walk_cost_seconds_ptr: *const u16,
     edge_count: usize,
     allowed_mode_mask: u8,
+    walking_speed_m_s: f32,
+    bike_cruise_speed_kph: f32,
 ) {
     if out_cost_seconds_ptr.is_null()
         || edge_mode_mask_ptr.is_null()
@@ -386,6 +401,18 @@ pub extern "C" fn precompute_edge_costs(
     {
         return;
     }
+
+    let resolved_walking_speed_m_s = if walking_speed_m_s.is_finite() && walking_speed_m_s > 0.0 {
+        walking_speed_m_s
+    } else {
+        WALKING_SPEED_M_S
+    };
+    let resolved_bike_cruise_speed_kph =
+        if bike_cruise_speed_kph.is_finite() && bike_cruise_speed_kph > 0.0 {
+            bike_cruise_speed_kph
+        } else {
+            BIKE_CRUISE_SPEED_KPH
+        };
 
     let out_costs = unsafe { std::slice::from_raw_parts_mut(out_cost_seconds_ptr, edge_count) };
     let edge_mode_mask = unsafe { std::slice::from_raw_parts(edge_mode_mask_ptr, edge_count) };
@@ -401,6 +428,8 @@ pub extern "C" fn precompute_edge_costs(
             edge_road_class[index],
             edge_maxspeed_kph[index],
             edge_walk_cost_seconds[index],
+            resolved_walking_speed_m_s,
+            resolved_bike_cruise_speed_kph,
         );
     }
 }
@@ -741,29 +770,64 @@ mod tests {
 
     #[test]
     fn car_cost_uses_road_speed() {
-        let cost = edge_cost_seconds(EDGE_MODE_CAR_BIT, EDGE_MODE_CAR_BIT, 11, 50, 72);
+        let cost = edge_cost_seconds(EDGE_MODE_CAR_BIT, EDGE_MODE_CAR_BIT, 11, 50, 72, WALKING_SPEED_M_S, BIKE_CRUISE_SPEED_KPH);
         assert!(cost.is_finite());
         assert!(cost > 0.0);
         assert!(cost < 72.0);
     }
 
     #[test]
+    fn custom_walking_speed_rescales_walk_cost() {
+        let default_cost =
+            edge_cost_seconds(EDGE_MODE_WALK_BIT, EDGE_MODE_WALK_BIT, 0, 0, 72, WALKING_SPEED_M_S, BIKE_CRUISE_SPEED_KPH);
+        assert!((default_cost - 72.0).abs() < 0.01);
+
+        let faster_cost = edge_cost_seconds(
+            EDGE_MODE_WALK_BIT,
+            EDGE_MODE_WALK_BIT,
+            0,
+            0,
+            72,
+            WALKING_SPEED_M_S * 2.0,
+            BIKE_CRUISE_SPEED_KPH,
+        );
+        assert!((faster_cost - default_cost / 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn custom_bike_speed_rescales_bike_cost() {
+        let default_cost =
+            edge_cost_seconds(EDGE_MODE_BIKE_BIT, EDGE_MODE_BIKE_BIT, 0, 50, 72, WALKING_SPEED_M_S, BIKE_CRUISE_SPEED_KPH);
+        let faster_cost = edge_cost_seconds(
+            EDGE_MODE_BIKE_BIT,
+            EDGE_MODE_BIKE_BIT,
+            0,
+            50,
+            72,
+            WALKING_SPEED_M_S,
+            BIKE_CRUISE_SPEED_KPH * 2.0,
+        );
+        assert!(faster_cost < default_cost);
+        assert!((faster_cost - default_cost / 2.0).abs() < 0.01);
+    }
+
+    #[test]
     fn walk_disallows_motorway() {
-        let cost = edge_cost_seconds(EDGE_MODE_WALK_BIT, EDGE_MODE_WALK_BIT, ROAD_CLASS_MOTORWAY, 50, 72);
+        let cost = edge_cost_seconds(EDGE_MODE_WALK_BIT, EDGE_MODE_WALK_BIT, ROAD_CLASS_MOTORWAY, 50, 72, WALKING_SPEED_M_S, BIKE_CRUISE_SPEED_KPH);
         assert!(cost.is_infinite());
     }
 
     #[test]
     fn water_cost_ignores_boarding_mode_and_uses_baked_speed() {
         let edge_mode_mask = EDGE_MODE_WALK_BIT | EDGE_MODE_WATER_BIT;
-        let walk_cost = edge_cost_seconds(EDGE_MODE_WALK_BIT, edge_mode_mask, 0, 36, 72);
-        let water_cost = edge_cost_seconds(EDGE_MODE_WATER_BIT, edge_mode_mask, 0, 36, 72);
+        let walk_cost = edge_cost_seconds(EDGE_MODE_WALK_BIT, edge_mode_mask, 0, 36, 72, WALKING_SPEED_M_S, BIKE_CRUISE_SPEED_KPH);
+        let water_cost = edge_cost_seconds(EDGE_MODE_WATER_BIT, edge_mode_mask, 0, 36, 72, WALKING_SPEED_M_S, BIKE_CRUISE_SPEED_KPH);
         assert!(walk_cost.is_finite());
         assert_eq!(walk_cost, water_cost);
         // Ferry pace (36 kph), not walking pace (WALKING_SPEED_M_S).
         assert!(walk_cost < 72.0);
 
-        let bike_cost = edge_cost_seconds(EDGE_MODE_BIKE_BIT, edge_mode_mask, 0, 36, 72);
+        let bike_cost = edge_cost_seconds(EDGE_MODE_BIKE_BIT, edge_mode_mask, 0, 36, 72, WALKING_SPEED_M_S, BIKE_CRUISE_SPEED_KPH);
         assert!(bike_cost.is_infinite());
     }
 
@@ -871,7 +935,7 @@ mod tests {
 
     #[test]
     fn water_cost_falls_back_without_baked_maxspeed() {
-        let cost = edge_cost_seconds(EDGE_MODE_WATER_BIT, EDGE_MODE_WATER_BIT, 0, 0, 72);
+        let cost = edge_cost_seconds(EDGE_MODE_WATER_BIT, EDGE_MODE_WATER_BIT, 0, 0, 72, WALKING_SPEED_M_S, BIKE_CRUISE_SPEED_KPH);
         assert!(cost.is_finite());
         let distance_m = 72.0_f32 * WALKING_SPEED_M_S;
         let expected = distance_m / (WATER_FALLBACK_SPEED_KPH * (1000.0 / 3600.0));

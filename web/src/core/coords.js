@@ -1,9 +1,12 @@
 import {
+  BIKE_SPEED_QUERY_PARAM,
   COLOUR_CYCLE_QUERY_PARAM,
+  DEPARTURE_DATETIME_QUERY_PARAM,
   LANGUAGE_QUERY_PARAM,
   LAST_CLICKED_NODE_QUERY_PARAM,
   MODE_SELECTION_QUERY_PARAM,
   SELECTED_REGION_QUERY_PARAM,
+  WALK_SPEED_QUERY_PARAM,
 } from '../config/constants.js';
 import { validateGraphForRouting } from './graph-validation.js';
 
@@ -264,6 +267,106 @@ export function persistColourCycleMinutesToLocation(cycleMinutes, options = {}) 
   nextUrl.searchParams.set(COLOUR_CYCLE_QUERY_PARAM, cycleText);
   historyObject.replaceState(null, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
   return true;
+}
+
+const DEPARTURE_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+
+export function parseDepartureDatetimeFromLocationSearch(locationSearch) {
+  if (typeof locationSearch !== 'string' || locationSearch.length === 0) {
+    return null;
+  }
+
+  const params = new URLSearchParams(locationSearch);
+  const rawDatetime = params.get(DEPARTURE_DATETIME_QUERY_PARAM);
+  if (rawDatetime === null || !DEPARTURE_DATETIME_PATTERN.test(rawDatetime)) {
+    return null;
+  }
+  return rawDatetime;
+}
+
+export function persistDepartureDatetimeToLocation(departureDatetime, options = {}) {
+  if (typeof departureDatetime !== 'string' || !DEPARTURE_DATETIME_PATTERN.test(departureDatetime)) {
+    throw new Error('departureDatetime must be an ISO YYYY-MM-DDTHH:MM string');
+  }
+
+  const locationObject = options.locationObject ?? globalThis.location ?? null;
+  const historyObject = options.historyObject ?? globalThis.history ?? null;
+  if (!locationObject || typeof locationObject.href !== 'string') {
+    return false;
+  }
+  if (!historyObject || typeof historyObject.replaceState !== 'function') {
+    return false;
+  }
+
+  const nextUrl = new URL(locationObject.href);
+  if (nextUrl.searchParams.get(DEPARTURE_DATETIME_QUERY_PARAM) === departureDatetime) {
+    return false;
+  }
+
+  nextUrl.searchParams.set(DEPARTURE_DATETIME_QUERY_PARAM, departureDatetime);
+  historyObject.replaceState(null, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+  return true;
+}
+
+function parseSpeedKphFromLocationSearch(locationSearch, queryParam, options = {}) {
+  const minKph = options.minKph ?? 0.1;
+  const maxKph = options.maxKph ?? 200;
+  if (typeof locationSearch !== 'string' || locationSearch.length === 0) {
+    return null;
+  }
+
+  const params = new URLSearchParams(locationSearch);
+  const rawKph = params.get(queryParam);
+  if (rawKph === null) {
+    return null;
+  }
+
+  const parsedKph = Number.parseFloat(rawKph);
+  if (!Number.isFinite(parsedKph) || parsedKph < minKph || parsedKph > maxKph) {
+    return null;
+  }
+  return parsedKph;
+}
+
+function persistSpeedKphToLocation(speedKph, queryParam, options = {}) {
+  if (!Number.isFinite(speedKph) || speedKph <= 0) {
+    throw new Error('speedKph must be a positive finite number');
+  }
+
+  const locationObject = options.locationObject ?? globalThis.location ?? null;
+  const historyObject = options.historyObject ?? globalThis.history ?? null;
+  if (!locationObject || typeof locationObject.href !== 'string') {
+    return false;
+  }
+  if (!historyObject || typeof historyObject.replaceState !== 'function') {
+    return false;
+  }
+
+  const nextUrl = new URL(locationObject.href);
+  const speedText = String(speedKph);
+  if (nextUrl.searchParams.get(queryParam) === speedText) {
+    return false;
+  }
+
+  nextUrl.searchParams.set(queryParam, speedText);
+  historyObject.replaceState(null, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+  return true;
+}
+
+export function parseWalkSpeedKphFromLocationSearch(locationSearch, options = {}) {
+  return parseSpeedKphFromLocationSearch(locationSearch, WALK_SPEED_QUERY_PARAM, options);
+}
+
+export function persistWalkSpeedKphToLocation(speedKph, options = {}) {
+  return persistSpeedKphToLocation(speedKph, WALK_SPEED_QUERY_PARAM, options);
+}
+
+export function parseBikeSpeedKphFromLocationSearch(locationSearch, options = {}) {
+  return parseSpeedKphFromLocationSearch(locationSearch, BIKE_SPEED_QUERY_PARAM, options);
+}
+
+export function persistBikeSpeedKphToLocation(speedKph, options = {}) {
+  return persistSpeedKphToLocation(speedKph, BIKE_SPEED_QUERY_PARAM, options);
 }
 
 function clampInt(value, minValue, maxValue) {

@@ -8,11 +8,16 @@ import {
   bindPointerButtonInversionControl,
   bindThemeControl,
   getAllowedModeMaskFromShell,
+  getSpeedOptionsFromShell,
   getTransitOptionsFromShell,
   populateLocationSelect,
   updateTransitControlAvailability,
 } from '../src/ui/orchestration.js';
-import { EDGE_MODE_WATER_BIT } from '../src/config/constants.js';
+import {
+  BIKE_CRUISE_SPEED_KPH,
+  DEFAULT_WALK_SPEED_KPH,
+  EDGE_MODE_WATER_BIT,
+} from '../src/config/constants.js';
 
 function createEventTarget() {
   const listeners = new Map();
@@ -150,10 +155,33 @@ test('getAllowedModeMaskFromShell combines walk and water bits when both selecte
   assert.notEqual(mask, EDGE_MODE_WATER_BIT);
 });
 
-test('getTransitOptionsFromShell parses HH:MM departure time into seconds', () => {
+test('getSpeedOptionsFromShell converts km/h inputs to the expected units, defaulting when missing/invalid', () => {
+  assert.deepEqual(getSpeedOptionsFromShell({}), {
+    walkingSpeedMps: DEFAULT_WALK_SPEED_KPH / 3.6,
+    bikeCruiseSpeedKph: BIKE_CRUISE_SPEED_KPH,
+  });
+
   const shell = {
-    departureTimeInput: createInput('08:30'),
-    departureDateInput: createInput('2026-08-12'),
+    walkSpeedInput: createInput('7.2'),
+    bikeSpeedInput: createInput('25'),
+  };
+  const options = getSpeedOptionsFromShell(shell);
+  assert.ok(Math.abs(options.walkingSpeedMps - 7.2 / 3.6) < 1e-9);
+  assert.equal(options.bikeCruiseSpeedKph, 25);
+
+  const invalidShell = {
+    walkSpeedInput: createInput('not-a-number'),
+    bikeSpeedInput: createInput('-5'),
+  };
+  const fallbackOptions = getSpeedOptionsFromShell(invalidShell);
+  assert.equal(fallbackOptions.walkingSpeedMps, DEFAULT_WALK_SPEED_KPH / 3.6);
+  assert.equal(fallbackOptions.bikeCruiseSpeedKph, BIKE_CRUISE_SPEED_KPH);
+});
+
+test('getTransitOptionsFromShell parses a datetime-local value into seconds-of-day and weekday', () => {
+  const shell = {
+    // 2026-08-12 is a Wednesday.
+    departureDatetimeInput: createInput('2026-08-12T08:30'),
     transitEnabledInput: createCheckbox(true),
     transitEnabledRow: { hidden: false },
   };
@@ -161,12 +189,12 @@ test('getTransitOptionsFromShell parses HH:MM departure time into seconds', () =
   const options = getTransitOptionsFromShell(shell);
   assert.equal(options.transitEnabled, true);
   assert.equal(options.departureSecondsOfDay, 8 * 3600 + 30 * 60);
+  assert.equal(options.departureWeekdayIndex, 2);
 });
 
 test('getTransitOptionsFromShell reports transitEnabled=false when the control row is hidden', () => {
   const shell = {
-    departureTimeInput: createInput('08:30'),
-    departureDateInput: createInput('2026-08-12'),
+    departureDatetimeInput: createInput('2026-08-12T08:30'),
     transitEnabledInput: createCheckbox(true),
     transitEnabledRow: { hidden: true },
   };
@@ -177,8 +205,7 @@ test('getTransitOptionsFromShell reports transitEnabled=false when the control r
 
 test('getTransitOptionsFromShell reports transitEnabled=false when the checkbox is unchecked', () => {
   const shell = {
-    departureTimeInput: createInput('08:30'),
-    departureDateInput: createInput('2026-08-12'),
+    departureDatetimeInput: createInput('2026-08-12T08:30'),
     transitEnabledInput: createCheckbox(false),
     transitEnabledRow: { hidden: false },
   };
@@ -187,40 +214,15 @@ test('getTransitOptionsFromShell reports transitEnabled=false when the checkbox 
   assert.equal(options.transitEnabled, false);
 });
 
-test('getTransitOptionsFromShell returns NaN departureSecondsOfDay for a malformed time value', () => {
+test('getTransitOptionsFromShell returns NaN for both fields on a malformed datetime value', () => {
   const shell = {
-    departureTimeInput: createInput(''),
-    departureDateInput: createInput('2026-08-12'),
+    departureDatetimeInput: createInput(''),
     transitEnabledInput: createCheckbox(true),
     transitEnabledRow: { hidden: false },
   };
 
   const options = getTransitOptionsFromShell(shell);
   assert.ok(Number.isNaN(options.departureSecondsOfDay));
-});
-
-test('getTransitOptionsFromShell computes an ISO weekday index (Monday=0) from the departure date', () => {
-  const shell = {
-    departureTimeInput: createInput('08:30'),
-    // 2026-08-12 is a Wednesday.
-    departureDateInput: createInput('2026-08-12'),
-    transitEnabledInput: createCheckbox(true),
-    transitEnabledRow: { hidden: false },
-  };
-
-  const options = getTransitOptionsFromShell(shell);
-  assert.equal(options.departureWeekdayIndex, 2);
-});
-
-test('getTransitOptionsFromShell returns NaN departureWeekdayIndex for a malformed date value', () => {
-  const shell = {
-    departureTimeInput: createInput('08:30'),
-    departureDateInput: createInput(''),
-    transitEnabledInput: createCheckbox(true),
-    transitEnabledRow: { hidden: false },
-  };
-
-  const options = getTransitOptionsFromShell(shell);
   assert.ok(Number.isNaN(options.departureWeekdayIndex));
 });
 
@@ -239,47 +241,62 @@ function createDateInput() {
   };
 }
 
-test('updateTransitControlAvailability shows the row and attribution, and clamps the default date into the transit date range', () => {
+test('updateTransitControlAvailability shows the row and attribution, and defaults to "now" clamped into the transit date range', () => {
   const shell = {
     transitEnabledRow: { hidden: true },
     transitEnabledInput: createCheckbox(true),
     routingDisclaimerTransit: { hidden: true },
-    departureDateRow: { hidden: true },
-    departureTimeRow: { hidden: true },
-    departureDateInput: createDateInput(),
+    departureDatetimeRow: { hidden: true },
+    departureDatetimeInput: createDateInput(),
   };
 
   updateTransitControlAvailability(shell, true, {
     transitDateRange: { min: '2026-01-01', max: '2026-12-31' },
-    todayIsoDate: '2026-08-08',
+    nowIsoDatetime: '2026-08-08T09:15',
   });
 
   assert.equal(shell.transitEnabledRow.hidden, false);
   assert.equal(shell.transitEnabledInput.checked, true);
   assert.equal(shell.routingDisclaimerTransit.hidden, false);
-  assert.equal(shell.departureDateRow.hidden, false);
-  assert.equal(shell.departureTimeRow.hidden, false);
-  assert.equal(shell.departureDateInput.min, '2026-01-01');
-  assert.equal(shell.departureDateInput.max, '2026-12-31');
-  assert.equal(shell.departureDateInput.value, '2026-08-08');
+  assert.equal(shell.departureDatetimeRow.hidden, false);
+  assert.equal(shell.departureDatetimeInput.min, '2026-01-01T00:00');
+  assert.equal(shell.departureDatetimeInput.max, '2026-12-31T23:59');
+  assert.equal(shell.departureDatetimeInput.value, '2026-08-08T09:15');
 });
 
-test('updateTransitControlAvailability clamps "today" to the range bounds when today falls outside it', () => {
+test('updateTransitControlAvailability clamps "now" to the range bounds (keeping time-of-day) when now falls outside it', () => {
   const shell = {
     transitEnabledRow: { hidden: true },
     transitEnabledInput: createCheckbox(true),
     routingDisclaimerTransit: { hidden: true },
-    departureDateRow: { hidden: true },
-    departureTimeRow: { hidden: true },
-    departureDateInput: createDateInput(),
+    departureDatetimeRow: { hidden: true },
+    departureDatetimeInput: createDateInput(),
   };
 
   updateTransitControlAvailability(shell, true, {
     transitDateRange: { min: '2026-09-01', max: '2026-12-31' },
-    todayIsoDate: '2026-08-08',
+    nowIsoDatetime: '2026-08-08T09:15',
   });
 
-  assert.equal(shell.departureDateInput.value, '2026-09-01');
+  assert.equal(shell.departureDatetimeInput.value, '2026-09-01T09:15');
+});
+
+test('updateTransitControlAvailability preserves an existing value already within the transit date range', () => {
+  const shell = {
+    transitEnabledRow: { hidden: true },
+    transitEnabledInput: createCheckbox(true),
+    routingDisclaimerTransit: { hidden: true },
+    departureDatetimeRow: { hidden: true },
+    departureDatetimeInput: createDateInput(),
+  };
+  shell.departureDatetimeInput.value = '2026-10-05T14:00';
+
+  updateTransitControlAvailability(shell, true, {
+    transitDateRange: { min: '2026-09-01', max: '2026-12-31' },
+    nowIsoDatetime: '2026-08-08T09:15',
+  });
+
+  assert.equal(shell.departureDatetimeInput.value, '2026-10-05T14:00');
 });
 
 test('updateTransitControlAvailability hides the row, attribution, and resets the checkbox when transit data is absent', () => {
@@ -287,24 +304,22 @@ test('updateTransitControlAvailability hides the row, attribution, and resets th
     transitEnabledRow: { hidden: false },
     transitEnabledInput: createCheckbox(true),
     routingDisclaimerTransit: { hidden: false },
-    departureDateRow: { hidden: false },
-    departureTimeRow: { hidden: false },
-    departureDateInput: createDateInput(),
+    departureDatetimeRow: { hidden: false },
+    departureDatetimeInput: createDateInput(),
   };
-  shell.departureDateInput.min = '2026-08-12';
-  shell.departureDateInput.max = '2026-08-12';
-  shell.departureDateInput.value = '2026-08-12';
+  shell.departureDatetimeInput.min = '2026-08-12T00:00';
+  shell.departureDatetimeInput.max = '2026-08-12T23:59';
+  shell.departureDatetimeInput.value = '2026-08-12T08:00';
 
   updateTransitControlAvailability(shell, false);
 
   assert.equal(shell.transitEnabledRow.hidden, true);
   assert.equal(shell.transitEnabledInput.checked, false);
   assert.equal(shell.routingDisclaimerTransit.hidden, true);
-  assert.equal(shell.departureDateRow.hidden, true);
-  assert.equal(shell.departureTimeRow.hidden, true);
-  assert.equal(shell.departureDateInput.min, undefined);
-  assert.equal(shell.departureDateInput.max, undefined);
-  assert.equal(shell.departureDateInput.value, '');
+  assert.equal(shell.departureDatetimeRow.hidden, true);
+  assert.equal(shell.departureDatetimeInput.min, undefined);
+  assert.equal(shell.departureDatetimeInput.max, undefined);
+  assert.equal(shell.departureDatetimeInput.value, '');
 });
 
 test('bindModeSelectControl uses redraw for mode changes and repaint for cycle changes', () => {
@@ -389,6 +404,49 @@ test('bindModeSelectControl falls back to redraw when cycle repaint is unavailab
   assert.equal(legendRenderCount, 2);
 
   binding.dispose();
+});
+
+test('bindModeSelectControl redraws and persists on walk/bike speed and departure datetime changes', () => {
+  const modeSelect = createModeSelect(['car']);
+  const colourCycleMinutesInput = createInput('75');
+  const walkSpeedInput = createInput('5');
+  const bikeSpeedInput = createInput('20');
+  const departureDatetimeInput = createInput('2026-08-12T08:00');
+  const shell = {
+    modeSelect,
+    colourCycleMinutesInput,
+    walkSpeedInput,
+    bikeSpeedInput,
+    departureDatetimeInput,
+    isochroneLegend: {},
+  };
+
+  let redrawRequestCount = 0;
+  const binding = bindModeSelectControl(shell, {
+    renderIsochroneLegendIfNeeded() {},
+    requestIsochroneRedraw() {
+      redrawRequestCount += 1;
+      return true;
+    },
+  });
+
+  walkSpeedInput.value = '7';
+  walkSpeedInput.emit('change');
+  assert.equal(redrawRequestCount, 1);
+
+  bikeSpeedInput.value = '25';
+  bikeSpeedInput.emit('change');
+  assert.equal(redrawRequestCount, 2);
+
+  departureDatetimeInput.value = '2026-08-13T09:15';
+  departureDatetimeInput.emit('change');
+  assert.equal(redrawRequestCount, 3);
+
+  binding.dispose();
+  walkSpeedInput.emit('change');
+  bikeSpeedInput.emit('change');
+  departureDatetimeInput.emit('change');
+  assert.equal(redrawRequestCount, 3);
 });
 
 

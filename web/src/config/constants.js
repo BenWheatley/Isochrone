@@ -21,6 +21,12 @@ export const EDGE_MODE_CAR_BIT = 1 << 2;
 export const EDGE_MODE_WATER_BIT = 1 << 3;
 export const WALKING_SPEED_M_S = 1.39;
 export const BIKE_CRUISE_SPEED_KPH = 20;
+// UI default for the walk-speed input, derived from WALKING_SPEED_M_S (so the
+// two stay numerically consistent rather than drifting apart as separate
+// hand-picked constants) and rounded to 1 decimal for a clean display value
+// (raw WALKING_SPEED_M_S * 3.6 is 5.004, which some locales render as
+// "5,004" in a number input — easily misread as five thousand).
+export const DEFAULT_WALK_SPEED_KPH = Math.round(WALKING_SPEED_M_S * 3.6 * 10) / 10;
 export const CAR_FALLBACK_SPEED_KPH = 30;
 // Kept numerically identical to FERRY_FALLBACK_SPEED_KPH in
 // data_pipeline/src/isochrone_pipeline/adjacency.py.
@@ -33,6 +39,9 @@ export const SELECTED_REGION_QUERY_PARAM = 'region';
 export const LANGUAGE_QUERY_PARAM = 'lang';
 export const MODE_SELECTION_QUERY_PARAM = 'modes';
 export const COLOUR_CYCLE_QUERY_PARAM = 'cycle';
+export const DEPARTURE_DATETIME_QUERY_PARAM = 'departure';
+export const WALK_SPEED_QUERY_PARAM = 'walkKph';
+export const BIKE_SPEED_QUERY_PARAM = 'bikeKph';
 export const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;
 export const INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE = 3;
 export const FINAL_EDGE_INTERPOLATION_STEP_STRIDE = 1;

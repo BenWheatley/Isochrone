@@ -16,19 +16,25 @@ import {
   ensureWasmSupportOrShowError,
   findNearestNodeIndexForModeFromSpatialIndex,
   mapCanvasPixelToGraphMeters,
+  parseBikeSpeedKphFromLocationSearch,
   parseColourCycleMinutesFromLocationSearch,
+  parseDepartureDatetimeFromLocationSearch,
   parseLocationIdFromLocationSearch,
   parseGraphBinary,
   parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
+  parseWalkSpeedKphFromLocationSearch,
   runConnectionScanFromWalkingReachableStops,
   runWalkingIsochroneFromSourceNode,
   buildStaticEdgeVertexTemplateForMode,
   updateTravelTimesInStaticEdgeVertexTemplate,
+  persistBikeSpeedKphToLocation,
   persistColourCycleMinutesToLocation,
+  persistDepartureDatetimeToLocation,
   persistLocationIdToLocation,
   persistModeValuesToLocation,
   persistNodeIndexToLocation,
+  persistWalkSpeedKphToLocation,
   precomputeNodeModeMask,
   precomputeNodePixelCoordinates,
   getOrBuildSnapshotEdgeVertexData,
@@ -749,7 +755,7 @@ test('createWalkingSearchState precomputes edge traversal cache for active mode'
   }
 });
 
-test('getOrBuildEdgeTraversalCostTicksForMode quantizes and caches per mode', () => {
+test('getOrBuildEdgeTraversalCostTicksForMode quantizes, caches per source array, and invalidates on a new source', () => {
   const graph = createFixtureGraph();
   const edgeTraversalCostSeconds = new Float32Array([1.2, Number.POSITIVE_INFINITY]);
 
@@ -758,6 +764,14 @@ test('getOrBuildEdgeTraversalCostTicksForMode quantizes and caches per mode', ()
     EDGE_MODE_CAR_BIT,
     edgeTraversalCostSeconds,
   );
+  const firstAgain = getOrBuildEdgeTraversalCostTicksForMode(
+    graph,
+    EDGE_MODE_CAR_BIT,
+    edgeTraversalCostSeconds,
+  );
+  // A different edgeTraversalCostSeconds array for the same mode mask (e.g.
+  // recomputed after a walk/bike speed change) must not reuse the ticks
+  // cached from the previous array — same mask, different content.
   const second = getOrBuildEdgeTraversalCostTicksForMode(
     graph,
     EDGE_MODE_CAR_BIT,
@@ -769,9 +783,12 @@ test('getOrBuildEdgeTraversalCostTicksForMode quantizes and caches per mode', ()
     new Float32Array([0.5, 0]),
   );
 
-  assert.equal(first, second);
+  assert.equal(first, firstAgain);
   assert.equal(first[0], Math.ceil(edgeTraversalCostSeconds[0] * 1000));
   assert.equal(first[1], 0);
+  assert.notEqual(first, second);
+  assert.equal(second[0], Math.ceil(9.9 * 1000));
+  assert.equal(second[1], Math.ceil(9.9 * 1000));
   assert.notEqual(first, bike);
   assert.equal(bike[0], 500);
   assert.equal(bike[1], 0);
@@ -1647,6 +1664,62 @@ test('persistColourCycleMinutesToLocation writes cycle query value', () => {
   locationObject.href = 'https://example.test/map?foo=bar&cycle=75#viewport';
   const unchanged = persistColourCycleMinutesToLocation(75, { locationObject, historyObject });
   assert.equal(unchanged, false);
+});
+
+test('parseDepartureDatetimeFromLocationSearch validates the ISO datetime-local shape', () => {
+  assert.equal(parseDepartureDatetimeFromLocationSearch('?departure=2026-08-12T08:30'), '2026-08-12T08:30');
+  assert.equal(parseDepartureDatetimeFromLocationSearch('?departure=2026-08-12'), null);
+  assert.equal(parseDepartureDatetimeFromLocationSearch('?departure=not-a-date'), null);
+  assert.equal(parseDepartureDatetimeFromLocationSearch(''), null);
+});
+
+test('persistDepartureDatetimeToLocation writes the departure query value', () => {
+  const locationObject = { href: 'https://example.test/map?foo=bar#viewport' };
+  let replacedUrl = null;
+  const historyObject = {
+    replaceState(_state, _title, url) {
+      replacedUrl = url;
+    },
+  };
+
+  const changed = persistDepartureDatetimeToLocation('2026-08-12T08:30', { locationObject, historyObject });
+  assert.equal(changed, true);
+  assert.equal(replacedUrl, '/map?foo=bar&departure=2026-08-12T08%3A30#viewport');
+
+  locationObject.href = replacedUrl.replace('/map', 'https://example.test/map');
+  const unchanged = persistDepartureDatetimeToLocation('2026-08-12T08:30', { locationObject, historyObject });
+  assert.equal(unchanged, false);
+
+  assert.throws(() => persistDepartureDatetimeToLocation('not-a-datetime'), /ISO YYYY-MM-DDTHH:MM/);
+});
+
+test('parseWalkSpeedKphFromLocationSearch and parseBikeSpeedKphFromLocationSearch validate and bound values', () => {
+  assert.equal(parseWalkSpeedKphFromLocationSearch('?walkKph=5.5'), 5.5);
+  assert.equal(parseWalkSpeedKphFromLocationSearch('?walkKph=0'), null);
+  assert.equal(parseWalkSpeedKphFromLocationSearch('?walkKph=foo'), null);
+  assert.equal(parseWalkSpeedKphFromLocationSearch(''), null);
+
+  assert.equal(parseBikeSpeedKphFromLocationSearch('?bikeKph=25'), 25);
+  assert.equal(parseBikeSpeedKphFromLocationSearch('?bikeKph=-5'), null);
+});
+
+test('persistWalkSpeedKphToLocation and persistBikeSpeedKphToLocation write their own query params', () => {
+  const locationObject = { href: 'https://example.test/map?foo=bar#viewport' };
+  let replacedUrl = null;
+  const historyObject = {
+    replaceState(_state, _title, url) {
+      replacedUrl = url;
+    },
+  };
+
+  const walkChanged = persistWalkSpeedKphToLocation(5, { locationObject, historyObject });
+  assert.equal(walkChanged, true);
+  assert.equal(replacedUrl, '/map?foo=bar&walkKph=5#viewport');
+
+  locationObject.href = replacedUrl.replace('/map', 'https://example.test/map');
+  const bikeChanged = persistBikeSpeedKphToLocation(20, { locationObject, historyObject });
+  assert.equal(bikeChanged, true);
+  assert.equal(replacedUrl, '/map?foo=bar&walkKph=5&bikeKph=20#viewport');
 });
 
 test('rerenderIsochroneFromSnapshotWithStatus sets done status with elapsed milliseconds', () => {

@@ -90,6 +90,8 @@ export function createWalkingSearchState(
     {
       edgeCostPrecomputeKernel,
       onKernelError: options.onKernelError ?? null,
+      walkingSpeedMps: options.walkingSpeedMps,
+      bikeCruiseSpeedKph: options.bikeCruiseSpeedKph,
     },
   );
   const distSeconds = new Float64Array(nNodes);
@@ -214,7 +216,7 @@ export function createWalkingSearchState(
   };
 }
 
-export function computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask) {
+export function computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask, options = {}) {
   const edgeModeMask = graph.edgeModeMask[edgeIndex];
   if ((edgeModeMask & allowedModeMask) === 0) {
     return Infinity;
@@ -225,6 +227,22 @@ export function computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMas
     return Infinity;
   }
 
+  const walkingSpeedMps =
+    Number.isFinite(options.walkingSpeedMps) && options.walkingSpeedMps > 0
+      ? options.walkingSpeedMps
+      : WALKING_SPEED_M_S;
+  const bikeCruiseSpeedKph =
+    Number.isFinite(options.bikeCruiseSpeedKph) && options.bikeCruiseSpeedKph > 0
+      ? options.bikeCruiseSpeedKph
+      : BIKE_CRUISE_SPEED_KPH;
+
+  // distanceMeters is reconstructed from the graph's baked-in walking cost
+  // using the build-time WALKING_SPEED_M_S constant (the speed the data
+  // pipeline actually assumed when it computed walkingCostSeconds from real
+  // edge geometry) — not options.walkingSpeedMps, which is a user preference
+  // applied only to the walk-mode cost below. Using the user's speed here
+  // would corrupt the physical distance that bike/car/water costs derive
+  // from. Mirrors wasm/routing-kernel/src/lib.rs's edge_cost_seconds.
   const distanceMeters = Math.max(1, walkingCostSeconds * WALKING_SPEED_M_S);
   const edgeMaxspeedKph = graph.edgeMaxspeedKph[edgeIndex];
 
@@ -246,14 +264,14 @@ export function computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMas
   if ((allowedModeMask & EDGE_MODE_WALK_BIT) !== 0 && (edgeModeMask & EDGE_MODE_WALK_BIT) !== 0) {
     const isMotorway = graph.edgeRoadClassId[edgeIndex] === ROAD_CLASS_MOTORWAY;
     if (!isMotorway) {
-      bestCostSeconds = Math.min(bestCostSeconds, walkingCostSeconds);
+      bestCostSeconds = Math.min(bestCostSeconds, distanceMeters / walkingSpeedMps);
     }
   }
 
   if ((allowedModeMask & EDGE_MODE_BIKE_BIT) !== 0 && (edgeModeMask & EDGE_MODE_BIKE_BIT) !== 0) {
     const isMotorway = graph.edgeRoadClassId[edgeIndex] === ROAD_CLASS_MOTORWAY;
     if (!isMotorway) {
-      const bikeSpeedKph = Math.min(BIKE_CRUISE_SPEED_KPH, edgeMaxspeedKph);
+      const bikeSpeedKph = Math.min(bikeCruiseSpeedKph, edgeMaxspeedKph);
       if (bikeSpeedKph > 0) {
         const bikeMetersPerSecond = (bikeSpeedKph * 1000) / 3600;
         bestCostSeconds = Math.min(bestCostSeconds, distanceMeters / bikeMetersPerSecond);
@@ -272,28 +290,46 @@ export function computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMas
   return Number.isFinite(bestCostSeconds) ? bestCostSeconds : Infinity;
 }
 
-export function getOrCreateEdgeTraversalCostSecondsCache(graph, allowedModeMask) {
+// Cache keys fold in walkingSpeedMps/bikeCruiseSpeedKph alongside
+// allowedModeMask so a speed change doesn't reuse cost arrays precomputed
+// under a different speed. Call sites that never customize speed (e.g.
+// nearest-node spatial lookups) omit options and key into the default-speed
+// slot, which is what they want anyway.
+function resolveEdgeTraversalCostCacheKey(allowedModeMask, options) {
+  const walkingSpeedMps =
+    Number.isFinite(options?.walkingSpeedMps) && options.walkingSpeedMps > 0
+      ? options.walkingSpeedMps
+      : WALKING_SPEED_M_S;
+  const bikeCruiseSpeedKph =
+    Number.isFinite(options?.bikeCruiseSpeedKph) && options.bikeCruiseSpeedKph > 0
+      ? options.bikeCruiseSpeedKph
+      : BIKE_CRUISE_SPEED_KPH;
+  return `${allowedModeMask}:${walkingSpeedMps}:${bikeCruiseSpeedKph}`;
+}
+
+export function getOrCreateEdgeTraversalCostSecondsCache(graph, allowedModeMask, options = {}) {
   validateGraphForRouting(graph);
   if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
     throw new Error('allowedModeMask must be a positive 8-bit integer');
   }
 
+  const cacheKey = resolveEdgeTraversalCostCacheKey(allowedModeMask, options);
   let edgeTraversalCostCacheByModeMask = graph[EDGE_TRAVERSAL_COST_CACHE_PROPERTY];
   if (!edgeTraversalCostCacheByModeMask || typeof edgeTraversalCostCacheByModeMask !== 'object') {
     edgeTraversalCostCacheByModeMask = Object.create(null);
     graph[EDGE_TRAVERSAL_COST_CACHE_PROPERTY] = edgeTraversalCostCacheByModeMask;
   }
 
-  let edgeTraversalCostSeconds = edgeTraversalCostCacheByModeMask[allowedModeMask];
+  let edgeTraversalCostSeconds = edgeTraversalCostCacheByModeMask[cacheKey];
   if (
     !(edgeTraversalCostSeconds instanceof Float32Array)
     || edgeTraversalCostSeconds.length < graph.header.nEdges
   ) {
     edgeTraversalCostSeconds = new Float32Array(graph.header.nEdges);
     edgeTraversalCostSeconds.fill(Number.NaN);
-    edgeTraversalCostCacheByModeMask[allowedModeMask] = edgeTraversalCostSeconds;
+    edgeTraversalCostCacheByModeMask[cacheKey] = edgeTraversalCostSeconds;
     const readyCacheByModeMask = getOrCreateEdgeTraversalCostReadyCacheByModeMask(graph);
-    delete readyCacheByModeMask[allowedModeMask];
+    delete readyCacheByModeMask[cacheKey];
   }
 
   return edgeTraversalCostSeconds;
@@ -313,8 +349,9 @@ export function precomputeEdgeTraversalCostSecondsCache(
     throw new Error('options must be an object');
   }
 
+  const cacheKey = resolveEdgeTraversalCostCacheKey(allowedModeMask, options);
   const costSeconds = edgeTraversalCostSeconds
-    ?? getOrCreateEdgeTraversalCostSecondsCache(graph, allowedModeMask);
+    ?? getOrCreateEdgeTraversalCostSecondsCache(graph, allowedModeMask, options);
   if (!(costSeconds instanceof Float32Array) || costSeconds.length < graph.header.nEdges) {
     throw new Error('edgeTraversalCostSeconds must be a Float32Array covering graph.header.nEdges');
   }
@@ -331,7 +368,7 @@ export function precomputeEdgeTraversalCostSecondsCache(
   }
 
   const readyCacheByModeMask = getOrCreateEdgeTraversalCostReadyCacheByModeMask(graph);
-  if (readyCacheByModeMask[allowedModeMask] === costSeconds) {
+  if (readyCacheByModeMask[cacheKey] === costSeconds) {
     return costSeconds;
   }
 
@@ -343,6 +380,8 @@ export function precomputeEdgeTraversalCostSecondsCache(
       edgeWalkCostSeconds: getOrCreateEdgeWalkCostSeconds(graph),
       outCostSeconds: costSeconds,
       allowedModeMask,
+      walkingSpeedMps: options.walkingSpeedMps,
+      bikeCruiseSpeedKph: options.bikeCruiseSpeedKph,
     });
   } catch (error) {
     if (typeof options.onKernelError === 'function') {
@@ -360,7 +399,7 @@ export function precomputeEdgeTraversalCostSecondsCache(
     }
   }
 
-  readyCacheByModeMask[allowedModeMask] = costSeconds;
+  readyCacheByModeMask[cacheKey] = costSeconds;
 
   return costSeconds;
 }
