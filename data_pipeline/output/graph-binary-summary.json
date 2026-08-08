@@ -1,12 +1,12 @@
 {
-  "generated_at_utc": "2026-08-07T07:33:25.660792+00:00",
+  "generated_at_utc": "2026-08-08T00:08:20.185222+00:00",
   "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/berlin-routing.osm.json",
   "binary_output": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/output/graph-walk.bin",
-  "binary_size_bytes": 26215396,
+  "binary_size_bytes": 45305596,
   "before_node_count": 1240596,
   "before_edge_count": 2765024,
-  "after_node_count": 572976,
-  "after_edge_count": 1420643,
+  "after_node_count": 577737,
+  "after_edge_count": 1430205,
   "constraint_tag_presence": {
     "access": 44361,
     "foot": 57116,
@@ -48,32 +48,41 @@
     "duration": 5.240397541114336e-05
   },
   "edge_mode_mask_counts": {
-    "7": 597818,
-    "1": 699025,
-    "3": 118434,
-    "5": 5350,
-    "11": 16
+    "7": 605466,
+    "1": 700225,
+    "3": 119132,
+    "5": 5358,
+    "11": 24
   },
   "edge_mode_counts": {
-    "walk": 1420643,
-    "bike": 716268,
-    "car": 603168,
-    "water": 16
+    "walk": 1430205,
+    "bike": 724622,
+    "car": 610824,
+    "water": 24
   },
   "edge_mode_coverage_ratio": {
     "walk": 1.0,
-    "bike": 0.5041857806641077,
-    "car": 0.42457394292584416,
-    "water": 1.1262505780833045e-05
+    "bike": 0.5066560388196097,
+    "car": 0.4270884243867138,
+    "water": 1.67808111424586e-05
+  },
+  "transit": {
+    "parsed_stop_count": 10527,
+    "attached_stop_count": 7665,
+    "dropped_stop_count": 2862,
+    "total_stop_count_in_feed": 42078,
+    "raw_connection_count": 1062910,
+    "final_stop_count": 7665,
+    "final_connection_count": 935766
   },
   "header": {
     "magic": "0x49534F43",
     "version": 2,
-    "flags": 0,
-    "n_nodes": 572976,
-    "n_edges": 1420643,
-    "n_stops": 0,
-    "n_tedges": 0,
+    "flags": 1,
+    "n_nodes": 577737,
+    "n_edges": 1430205,
+    "n_stops": 7665,
+    "n_tedges": 935766,
     "origin_easting": 370035.4331555407,
     "origin_northing": 5799762.899206582,
     "epsg_code": 25833,
@@ -81,7 +90,7 @@
     "grid_height_px": 3743,
     "pixel_size_m": 10.0,
     "node_table_offset": 64,
-    "edge_table_offset": 9167680,
-    "stop_table_offset": 26215396
+    "edge_table_offset": 9243856,
+    "stop_table_offset": 26406316
   }
 }
