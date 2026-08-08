@@ -806,7 +806,20 @@ Tasks
 
 Verification note (2026-08-06): confirmed against London — the tidal Thames (previously rendered as a bare, gapped centerline with an unfilled border) is a single 89-member relation and now renders as a continuous filled body with correct island holes; Heathrow (a relation) and 6 smaller airfields (ways) render as a new muted airport context layer. Rolled out to the other deployed regions (berlin, paris, rome, luxembourg-country, cologne, rhode-island) the same day.
 
-**Deferred:** a "Water" transport mode was requested and explicitly deferred — the waterway data extracted here is rendering-only (line/polygon geometry, no connectivity graph); actual ferry/water routing would need a new mode bit through the full pipeline (graph extraction, binary schema, adjacency, WASM kernel, costing), comparable in size to Phase 11's transit work below.
+**Update:** the "Water" transport mode described as deferred above was subsequently implemented — see 10.8.
+
+---
+
+### 10.8 Water/ferry transport mode
+*Implements the routing half of the "Water" mode deferred in 10.7.3 above — the rendering-only waterway/sea layers already existed; this adds an actual connectivity graph and a fourth selectable mode.*
+
+Tasks
+- [x] Extract ferry ways (`route=ferry`) as a separate pass alongside the walkable-network extraction, carrying the `duration=` tag through for duration-aware speed costing — `osm_graph_extract.py`.
+- [x] Fold ferry ways into the same adjacency graph with a composite mode mask bit (`EDGE_MODE_WATER_BIT`) and duration-aware or fallback speed — `adjacency.py`.
+- [x] Add a water-mode branch to both routing kernels (Rust `edge_cost_seconds` and the JS `computeEdgeTraversalCostSeconds` reference) — ferry legs cost at the baked ferry speed regardless of which boarding mode bit matched, since a ferry crossing takes the same time whether you walked, biked, or drove onto it.
+- [x] Add "Ferry" as a fourth `#mode-select` option (now a checkbox in the "Transport modes" group, see 12.8) and rebuild every deployed region's graph with ferry edges included.
+- [x] Replace the fixed 80km per-way ferry span cutoff with a grid-size budget: ferry candidates are accepted nearest-to-the-core-network first, up to a safety margin below the binary format's actual hard limit (u16 `grid_width_px`/`grid_height_px` header fields cap extent at 65,535 × 10m/pixel ≈ 655km) — the fixed cutoff was too small for regions whose own coastline exceeds 80km (e.g. Cyprus) — `select_ferry_ways_within_grid_budget` in `osm_graph_extract.py`.
+- [x] Decouple the default/max-zoom-out viewport from the full routing grid extent, fitting the district boundary (+5% padding) instead — legitimate-but-distant ferry connections (e.g. Singapore's regional ferry routes) were otherwise dragging the default view out to include far-flung endpoints nobody wants to see by default; panning still reaches the wider ferry network at the same zoom level, since panning stays clamped against the full grid — `web/src/core/viewport.js`'s `resolveFitScale`/`createDefaultMapViewport`.
 
 ---
 
@@ -893,7 +906,7 @@ Estimated time: 2 hours
 Tasks
 - [x] Load transit tables in JS alongside existing road graph tables — `parseGraphBinary` parses stop/transit-edge tables into typed-array views, gated on `graph.header.nStops > 0` (zero-cost for every non-Berlin region).
 - [x] Implement CSA pass using walking-reachable stops as seeds, then merge back into road Dijkstra via multi-source seeding — `runConnectionScanFromWalkingReachableStops` (pass 1 → CSA scan) feeds a new WASM `compute_travel_time_field_multi_source` export (pass 2, origin + transit-improved stops as seeds) in `runWalkingIsochroneFromSourceNode`.
-- [x] Add query controls for departure time/day and transit enable/disable — `#departure-time` input and `Public transit` checkbox, wired via `getTransitOptionsFromShell`/`updateTransitControlAvailability`.
+- [x] Add query controls for departure time/day and transit enable/disable — a single `#departure-datetime` (`type="datetime-local"`) input constrained to the feed's actual calendar window, and a `Public transit` checkbox grouped alongside Walk/Bike/Car/Ferry in the "Transport modes" checkbox group (not a separate control), wired via `getTransitOptionsFromShell`/`updateTransitControlAvailability`.
 - [x] Handle missing transit tables gracefully (road-only fallback without console noise) — `nStops === 0` (every non-Berlin region today) short-circuits to the unchanged single-pass walk/bike/car/ferry behavior, and the transit checkbox is hidden rather than shown-and-inert.
 
 ---
@@ -904,7 +917,7 @@ Estimated time: 1 hour
 Tasks
 - [ ] Document repeatable onboarding steps for a new region: discover feed, validate licence, run adapters, run QA, export artifacts — not written up; today onboarding a second region means adding a `transitFeed` block to `regions.json` and rerunning `fetch|build --components graph,transit` by reading the code, not a doc.
 - [x] Add one non-Berlin fixture dataset in tests to ensure region-agnostic behavior — `data_pipeline/tests/test_gtfs_transit.py` builds a small synthetic GTFS fixture (`_write_gtfs_fixture`) covering a normal day, a past-midnight trip, an out-of-extent stop, and a `calendar_dates.txt` exception; none of the pipeline unit tests depend on the real Berlin feed.
-- [ ] Add per-region attribution templating so required legal text is emitted in UI/export outputs — pending; the OSM ODbL notice in `body.disclaimer`/`copyrightNotice` is still a single hardcoded string, not yet conditional on `graph.header.nStops > 0` to append the VBB/CC BY line for Berlin.
+- [x] Add per-region attribution templating so required legal text is emitted in UI/export outputs — `#routing-disclaimer-transit` (VBB/CC BY line) is shown/hidden by `updateTransitControlAvailability` alongside the transit checkbox (`graph.header.nStops > 0`), and the SVG export's `copyrightNotice` reads both disclaimer elements' live text, combining them into one line only when the transit line isn't hidden.
 
 ---
 
@@ -952,6 +965,7 @@ Tasks
 - [x] Write last selected start node ID to URL query parameters (`node=<graphNodeId>`) after successful routing
 - [x] On page load, read `node` from URL and restore that start node if valid for current graph
 - [x] Keep URL updates deterministic and bookmark/share safe (`history.replaceState`, preserve other params/hash)
+- [x] Extend the same pattern to transport modes (`modes=`), colour cycle (`cycle=`), departure date+time (`departure=`), and walk/bike speed (`walkKph=`/`bikeKph=`) — `web/src/core/coords.js`'s `parse*FromLocationSearch`/`persist*ToLocation` pairs, applied on init and on each control's `change` event in `web/src/ui/orchestration.js`.
 
 ## 12.6 Add map zoom and pan controls
 Estimated time: 4 hours
@@ -1011,6 +1025,27 @@ Tasks
 - [ ] Add manual verification checklist for desktop mouse, desktop trackpad, iPad touch, and mobile Safari/Chrome.
 - [ ] Decide whether camera state should also become URL-shareable (`x`, `y`, `z`) after the interaction model is stable; do not bundle that into the first implementation step.
 
+## 12.7 Configurable walk/bike speeds
+*Not in the original plan — added from user feedback ("we should probably also add walking/cycling speed options").*
+Estimated time: 2 hours
+
+Tasks
+- [x] Add walk-speed/bike-speed (km/h) inputs in a collapsed `<details>` sub-section of the options panel, since they're rarely changed — `#speed-settings` in `web/index.html`.
+- [x] Thread the configured speeds through both routing kernels — new `walking_speed_m_s`/`bike_cruise_speed_kph` params on the Rust `precompute_edge_costs` export (`wasm/routing-kernel/src/lib.rs`) and the JS reference implementation (`computeEdgeTraversalCostSeconds` in `web/src/core/routing.js`); the walk-mode cost is rescaled by the user's speed relative to the graph's build-time `WALKING_SPEED_M_S` (the speed the data pipeline assumed when it baked `walking_cost_seconds` from real edge geometry), not the other way round — only the walk/bike cost derivations change, ferry/car costs are unaffected.
+- [x] Key the per-mode edge-cost cache on `(allowedModeMask, walkingSpeedMps, bikeCruiseSpeedKph)`, not just the mode mask, so a speed change can't silently reuse a stale precomputed cost array for the same mode.
+- [x] Apply the configured walk speed to the CSA walk-attach-cost estimate too (`runConnectionScanFromWalkingReachableStops` in `web/src/app.js`), for consistency between the routing kernel and the transit-stop-attachment estimate.
+- [x] Persist both values to the URL (see 12.5).
+
+## 12.8 Single departure date+time control, and Public transit grouped with Transport modes
+*Not in the original plan — added from user feedback questioning the departure-time UX and asking "is transit as much a movement mode as ferries?".*
+Estimated time: 1.5 hours
+
+Tasks
+- [x] Merge the separate departure-date and departure-time inputs into one `<input type="datetime-local">` (`#departure-datetime`) — the date input previously had no `change` listener at all, so changing the date silently left the isochrone stale; a single input with one listener fixes that structurally rather than by remembering to wire a second listener.
+- [x] Default the input to "now" clamped into the feed's calendar window, but preserve an existing value (e.g. restored from the URL) when it's already in range.
+- [x] Convert "Transport modes" from a `<select multiple>` to a checkbox fieldset (Walk/Bike/Car/Ferry), and fold the previously-separate "Public transit" checkbox into the same group as a peer, since a normal user has no reason to think of transit as different in kind from the others.
+- [x] Keep Public transit's checked state out of the routing `allowedModeMask` computation (it's a boolean CSA-augmentation flag, not an edge-mode bit) while still including it in the shared URL-persisted checkbox-group state (see 12.5) — `getAllowedModeMaskFromShell`'s mask loop and "nothing selected" fallback in `web/src/ui/orchestration.js` explicitly filter it out.
+
 ---
 
 # Architectural Notes
@@ -1040,13 +1075,14 @@ The pipeline is parameterised from Phase 3.2 onward: `--epsg`, `--input`, `--out
 
 **MVP total: ~21 hours for a junior developer**
 
-Post-MVP adds approximately **32–34 hours** of development:
+Post-MVP adds approximately **36–40 hours** of development:
 - [x] Phase 10.4 (multimodal road schema + extraction): ~4.5 hours
 - [x] Phase 10.5 (routing hot-path performance follow-ups): ~2.5 hours (10.5.1 parallel SSSP sub-item still not implemented)
 - [x] Phase 10.6 (multi-location OSM fetch generalization): ~3.75 hours (shipped as `regions.json` + `region-data.py`, different file layout than originally planned — see 10.6 note)
 - [x] Phase 10.7 (basemap context layers: coastal water, forest, inland water, waterways, airports): ~6 hours — not in the original plan, added from user feedback
+- [x] Phase 10.8 (water/ferry transport mode, incl. the grid-budget ferry filter and boundary-fit viewport): ~4 hours — not in the original plan, added from user feedback
 - [x] Phase 11 (global public transit pipeline): ~12.25 hours (11.2.1/11.5/11.6 done for a Berlin-only GTFS-static pilot; 11.1/11.2.2/11.2.3/11.7 and full canonical-model/QA-gate fidelity in 11.3/11.4 stay deferred — see per-section notes)
-- [ ] Phase 12 (UX and sharing enhancements): ~9.5 hours (12.1/12.2/12.3/12.5 done; 12.4 and most of 12.6 still open)
+- [ ] Phase 12 (UX and sharing enhancements): ~13 hours (12.1/12.2/12.3/12.5/12.7/12.8 done; 12.4 and most of 12.6 still open)
 - [ ] Plus variable time to obtain/validate feed licences and feed-specific integration constraints.
 
 ---
@@ -1072,6 +1108,8 @@ Post-MVP adds approximately **32–34 hours** of development:
 - Canonical transit snapshots (`stops/routes/trips/connections/services/transfers`) independent of source format
 - Transit-enabled graph export with populated stop/connection tables
 - CSA runtime module and source-adapter pipeline (`GTFS`, `GTFS-RT`, `NeTEx`, `SIRI` scaffold)
+- Ferry/water routing: a fourth `Water` edge mode mask bit through the full pipeline (extraction, adjacency, WASM/JS routing kernels), grid-size-budgeted ferry inclusion, and a boundary-fit default viewport decoupled from the full (ferry-widened) routing grid
+- User-configurable walk/bike speeds (collapsed sub-menu), a single departure date+time control, and Public transit grouped as a checkbox alongside Walk/Bike/Car/Ferry — all persisted to the URL alongside the pre-existing `node`/`modes`/`cycle` params
 
 ---
 
