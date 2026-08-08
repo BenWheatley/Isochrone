@@ -22,6 +22,7 @@ import {
   parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
   runConnectionScanFromWalkingReachableStops,
+  runWalkingIsochroneFromSourceNode,
   buildStaticEdgeVertexTemplateForMode,
   updateTravelTimesInStaticEdgeVertexTemplate,
   persistColourCycleMinutesToLocation,
@@ -149,6 +150,119 @@ function createFixtureEdgeCostPrecomputeKernel(graph, options = {}) {
       for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
         outCostSeconds[edgeIndex] = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
       }
+    },
+  };
+}
+
+// A small but *correct* CSR-array Dijkstra, standing in for the WASM
+// kernel. Unlike createFixtureEdgeCostPrecomputeKernel above (which only
+// implements precomputeEdgeCostsForGraph for cost-calculation tests), this
+// also implements computeTravelTimeFieldForGraph and
+// computeTravelTimeFieldMultiSourceForGraph so it can drive
+// runWalkingIsochroneFromSourceNode end to end, including its CSA/transit
+// second pass.
+function createDijkstraEdgeCostPrecomputeKernel(graph) {
+  const WASM_EDGE_COST_TICK_SCALE_TEST = 1000;
+  const runDijkstra = ({
+    nodeFirstEdgeIndex,
+    nodeEdgeCount,
+    edgeTargetNodeIndex,
+    edgeCostTicks,
+    outDistSeconds,
+    seeds,
+    timeLimitSeconds,
+  }) => {
+    const nNodes = outDistSeconds.length;
+    outDistSeconds.fill(Number.POSITIVE_INFINITY);
+    const visited = new Uint8Array(nNodes);
+    for (const seed of seeds) {
+      if (seed.startDistSeconds < outDistSeconds[seed.nodeIndex]) {
+        outDistSeconds[seed.nodeIndex] = seed.startDistSeconds;
+      }
+    }
+    const limit = Number.isFinite(timeLimitSeconds) ? timeLimitSeconds : Number.POSITIVE_INFINITY;
+    let settledCount = 0;
+    for (;;) {
+      let bestNode = -1;
+      let bestDist = Number.POSITIVE_INFINITY;
+      for (let nodeIndex = 0; nodeIndex < nNodes; nodeIndex += 1) {
+        if (!visited[nodeIndex] && outDistSeconds[nodeIndex] < bestDist) {
+          bestDist = outDistSeconds[nodeIndex];
+          bestNode = nodeIndex;
+        }
+      }
+      if (bestNode === -1 || bestDist > limit) {
+        break;
+      }
+      visited[bestNode] = 1;
+      settledCount += 1;
+      const firstEdge = nodeFirstEdgeIndex[bestNode];
+      const edgeCount = nodeEdgeCount[bestNode];
+      for (let i = 0; i < edgeCount; i += 1) {
+        const edgeIndex = firstEdge + i;
+        const ticks = edgeCostTicks[edgeIndex];
+        if (ticks === 0) {
+          continue;
+        }
+        const targetNode = edgeTargetNodeIndex[edgeIndex];
+        const candidate = bestDist + ticks / WASM_EDGE_COST_TICK_SCALE_TEST;
+        if (candidate < outDistSeconds[targetNode]) {
+          outDistSeconds[targetNode] = candidate;
+        }
+      }
+    }
+    return { settledNodeCount: settledCount, outDistSecondsView: outDistSeconds };
+  };
+
+  return {
+    precomputeEdgeCostsForGraph({ outCostSeconds, allowedModeMask }) {
+      for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
+        const cost = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+        outCostSeconds[edgeIndex] = Number.isFinite(cost) ? cost : 0;
+      }
+    },
+    computeTravelTimeFieldForGraph({
+      nodeFirstEdgeIndex,
+      nodeEdgeCount,
+      edgeTargetNodeIndex,
+      edgeCostTicks,
+      outDistSeconds,
+      sourceNodeIndex,
+      timeLimitSeconds,
+    }) {
+      return runDijkstra({
+        nodeFirstEdgeIndex,
+        nodeEdgeCount,
+        edgeTargetNodeIndex,
+        edgeCostTicks,
+        outDistSeconds,
+        seeds: [{ nodeIndex: sourceNodeIndex, startDistSeconds: 0 }],
+        timeLimitSeconds,
+      });
+    },
+    computeTravelTimeFieldMultiSourceForGraph({
+      nodeFirstEdgeIndex,
+      nodeEdgeCount,
+      edgeTargetNodeIndex,
+      edgeCostTicks,
+      outDistSeconds,
+      seedNodeIndices,
+      seedStartDistSeconds,
+      timeLimitSeconds,
+    }) {
+      const seeds = [];
+      for (let i = 0; i < seedNodeIndices.length; i += 1) {
+        seeds.push({ nodeIndex: seedNodeIndices[i], startDistSeconds: seedStartDistSeconds[i] });
+      }
+      return runDijkstra({
+        nodeFirstEdgeIndex,
+        nodeEdgeCount,
+        edgeTargetNodeIndex,
+        edgeCostTicks,
+        outDistSeconds,
+        seeds,
+        timeLimitSeconds,
+      });
     },
   };
 }
@@ -378,6 +492,84 @@ test('runConnectionScanFromWalkingReachableStops returns empty seeds for a graph
 
   assert.equal(result.seedNodeIndices.length, 0);
   assert.equal(result.seedStartDistSeconds.length, 0);
+});
+
+test('runWalkingIsochroneFromSourceNode repaints the canvas with transit-augmented distances', async () => {
+  const graph = parseGraphBinary(createFixtureBinaryBufferWithTransit());
+  const nodePixels = precomputeNodePixelCoordinates(graph);
+  const pixelGrid = createPixelGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
+  const edgeCostPrecomputeKernel = createDijkstraEdgeCostPrecomputeKernel(graph);
+  const mapData = { graph, nodePixels, pixelGrid, edgeCostPrecomputeKernel };
+
+  let drawCallCount = 0;
+  const shell = {
+    isochroneCanvas: {
+      getContext() {
+        return null;
+      },
+      __isochroneRenderer: {
+        mode: 'cpu',
+        draw() {
+          drawCallCount += 1;
+        },
+      },
+    },
+    routingStatus: { textContent: '' },
+  };
+
+  // Node 2 is 144s away on foot (two 72s edges) but only 20s away via the
+  // fixture's transit connection (see the CSA-only test above) — a case
+  // where the transit pass must strictly improve the result.
+  await runWalkingIsochroneFromSourceNode(shell, mapData, 0, 200, {
+    allowedModeMask: EDGE_MODE_WALK_BIT,
+    transitEnabled: true,
+    departureSecondsOfDay: 990,
+    colourCycleMinutes: 60,
+  });
+
+  assert.equal(mapData.lastRoutingSnapshot.distSeconds[1], 72);
+  assert.equal(mapData.lastRoutingSnapshot.distSeconds[2], 20);
+  // The initial pass-1 (walk-only) render paints once; the transit
+  // augmentation must trigger a second paint with the improved distances,
+  // or the canvas would silently keep showing the walk-only isochrone
+  // (144s at node 2) even though the snapshot data says 20s.
+  assert.equal(drawCallCount, 2);
+});
+
+test('runWalkingIsochroneFromSourceNode does not repaint when transit finds no improvement', async () => {
+  const graph = parseGraphBinary(createFixtureBinaryBufferWithTransit());
+  const nodePixels = precomputeNodePixelCoordinates(graph);
+  const pixelGrid = createPixelGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
+  const edgeCostPrecomputeKernel = createDijkstraEdgeCostPrecomputeKernel(graph);
+  const mapData = { graph, nodePixels, pixelGrid, edgeCostPrecomputeKernel };
+
+  let drawCallCount = 0;
+  const shell = {
+    isochroneCanvas: {
+      getContext() {
+        return null;
+      },
+      __isochroneRenderer: {
+        mode: 'cpu',
+        draw() {
+          drawCallCount += 1;
+        },
+      },
+    },
+    routingStatus: { textContent: '' },
+  };
+
+  // Departing at 1500 misses the fixture's single t=1000 connection (see
+  // the matching CSA-only test above), so the walk-only result stands.
+  await runWalkingIsochroneFromSourceNode(shell, mapData, 0, 200, {
+    allowedModeMask: EDGE_MODE_WALK_BIT,
+    transitEnabled: true,
+    departureSecondsOfDay: 1500,
+    colourCycleMinutes: 60,
+  });
+
+  assert.equal(mapData.lastRoutingSnapshot.distSeconds[2], 144);
+  assert.equal(drawCallCount, 1);
 });
 
 test('computeEdgeTraversalCostSeconds obeys mode and road-class constraints', () => {

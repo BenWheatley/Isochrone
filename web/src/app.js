@@ -700,6 +700,7 @@ export async function runWalkingIsochroneFromSourceNode(
   if (!runSummary.cancelled) {
     let finalDistSeconds = searchState.distSeconds;
     let finalEdgeVertexData = runSummary.edgeVertexData ?? null;
+    let transitAugmented = false;
 
     const nStops = mapData.graph.header.nStops;
     if (
@@ -751,6 +752,7 @@ export async function runWalkingIsochroneFromSourceNode(
         // is a generic function of snapshot.distSeconds, no special-casing
         // needed here beyond clearing the stale cache).
         finalEdgeVertexData = null;
+        transitAugmented = true;
       }
     }
 
@@ -763,6 +765,21 @@ export async function runWalkingIsochroneFromSourceNode(
       edgeVertexData: finalEdgeVertexData,
       edgeVertexDataModeMask: finalEdgeVertexData instanceof Float32Array ? allowedModeMask : null,
     };
+
+    // runSearchTimeSlicedWithRendering already painted the canvas from the
+    // walk-only pass-1 distances (searchState.distSeconds) before this
+    // function ever runs CSA/pass-2 above — that paint call has no way to
+    // know a transit augmentation is coming. Without this, the canvas would
+    // silently keep showing the walk-only isochrone even though
+    // mapData.lastRoutingSnapshot (and any subsequent SVG export) reflects
+    // the correct transit-augmented times.
+    if (transitAugmented) {
+      rerenderIsochroneFromSnapshot(shell, mapData, {
+        allowedModeMask,
+        colourCycleMinutes: options.colourCycleMinutes,
+        colourTheme: options.colourTheme,
+      });
+    }
   }
   return runSummary;
 }
