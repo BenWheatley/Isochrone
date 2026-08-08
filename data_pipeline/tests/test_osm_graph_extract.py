@@ -7,6 +7,7 @@ from isochrone_pipeline.osm_graph_extract import (
     collect_walkable_way_candidates,
     extract_walkable_graph_input,
     load_referenced_nodes,
+    select_ferry_ways_within_grid_budget,
     summarize_constraint_tag_coverage,
 )
 
@@ -123,13 +124,16 @@ def test_extract_walkable_graph_input_drops_missing_node_ways(tmp_path: Path) ->
 
 
 def _write_ferry_fixture(path: Path) -> None:
+    # Footway (1, 2) and ferry (20, 21) both sit near Lake Zurich, modelling
+    # a real regional ferry that's walkably close to the core network -
+    # the case select_ferry_ways_within_grid_budget must keep.
     path.write_text(
         """
 {
   "version": 0.6,
   "elements": [
-    {"type": "node", "id": 1, "lat": 52.5, "lon": 13.4},
-    {"type": "node", "id": 2, "lat": 52.5005, "lon": 13.401},
+    {"type": "node", "id": 1, "lat": 47.366, "lon": 8.545},
+    {"type": "node", "id": 2, "lat": 47.3665, "lon": 8.5455},
     {"type": "node", "id": 20, "lat": 47.36, "lon": 8.54},
     {"type": "node", "id": 21, "lat": 47.30, "lon": 8.75},
     {
@@ -232,6 +236,94 @@ def test_extract_walkable_graph_input_drops_excessively_long_ferry_ways(
     assert 30 not in extracted.node_coords
     assert 31 not in extracted.node_coords
     assert extracted.dropped_way_count == 1
+
+
+def _write_long_coastal_ferry_fixture(path: Path) -> None:
+    # A ~90 km coastal ferry - longer than the old fixed 80 km cutoff would
+    # have allowed, but well within a large region's own extent (e.g. a
+    # real Cyprus coastal route). Must be kept: the region-size budget, not
+    # a fixed per-way distance, is what should decide this now.
+    path.write_text(
+        """
+{
+  "version": 0.6,
+  "elements": [
+    {"type": "node", "id": 1, "lat": 34.7, "lon": 33.0},
+    {"type": "node", "id": 2, "lat": 34.701, "lon": 33.001},
+    {"type": "node", "id": 50, "lat": 34.7, "lon": 33.0},
+    {"type": "node", "id": 51, "lat": 34.75, "lon": 32.0},
+    {
+      "type": "way",
+      "id": 100,
+      "nodes": [1, 2],
+      "tags": {"highway": "footway"}
+    },
+    {
+      "type": "way",
+      "id": 500,
+      "nodes": [50, 51],
+      "tags": {"route": "ferry", "duration": "01:30"}
+    }
+  ]
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+
+def test_extract_walkable_graph_input_keeps_ferry_longer_than_old_fixed_cutoff(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "long_coastal_ferry.json"
+    _write_long_coastal_ferry_fixture(source)
+
+    extracted = extract_walkable_graph_input(source)
+
+    osm_ids = {way.osm_id for way in extracted.ways}
+    assert osm_ids == {100, 500}
+    assert extracted.dropped_way_count == 0
+
+
+def test_select_ferry_ways_within_grid_budget_prefers_nearest_ferries_first() -> None:
+    core_bbox = (0.0, 0.0, 0.001, 0.001)
+    node_coords = {
+        # ~10 km from the core.
+        1: (0.09, 0.0),
+        2: (0.091, 0.0),
+        # ~50 km from the core.
+        3: (0.45, 0.0),
+        4: (0.451, 0.0),
+        # ~200 km from the core - should be dropped once the 100 km budget
+        # is used up by the nearer two.
+        5: (1.8, 0.0),
+        6: (1.801, 0.0),
+    }
+    # Declared far-to-near, to confirm selection is distance-ordered, not
+    # input-order-dependent.
+    ferry_far = WayCandidate(osm_id=300, highway="ferry", node_ids=(5, 6), constraints={})
+    ferry_mid = WayCandidate(osm_id=200, highway="ferry", node_ids=(3, 4), constraints={})
+    ferry_near = WayCandidate(osm_id=100, highway="ferry", node_ids=(1, 2), constraints={})
+
+    accepted = select_ferry_ways_within_grid_budget(
+        (ferry_far, ferry_mid, ferry_near),
+        node_coords,
+        core_bbox,
+        budget_meters=100_000.0,
+    )
+
+    accepted_ids = {way.osm_id for way in accepted}
+    assert accepted_ids == {100, 200}
+
+
+def test_select_ferry_ways_within_grid_budget_handles_no_walkable_core() -> None:
+    node_coords = {1: (10.0, 20.0), 2: (10.001, 20.001)}
+    ferry = WayCandidate(osm_id=900, highway="ferry", node_ids=(1, 2), constraints={})
+
+    accepted = select_ferry_ways_within_grid_budget(
+        (ferry,), node_coords, core_bbox=None, budget_meters=100_000.0
+    )
+
+    assert {way.osm_id for way in accepted} == {900}
 
 
 def test_summarize_constraint_tag_coverage_counts_presence() -> None:
