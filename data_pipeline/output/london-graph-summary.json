@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-08-07T07:39:43.729248+00:00",
+  "generated_at_utc": "2026-08-08T10:57:34.692379+00:00",
   "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/london-routing.osm.json",
   "binary_output": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/output/london-graph.bin",
   "binary_size_bytes": 28705212,

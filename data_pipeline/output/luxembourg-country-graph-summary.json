@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-08-07T07:35:47.356983+00:00",
+  "generated_at_utc": "2026-08-08T10:59:53.272007+00:00",
   "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/luxembourg-country-routing.osm.json",
   "binary_output": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/output/luxembourg-country-graph.bin",
   "binary_size_bytes": 6756956,

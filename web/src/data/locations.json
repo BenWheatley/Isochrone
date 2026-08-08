@@ -4,7 +4,8 @@
       "id": "berlin",
       "name": "Berlin",
       "graphFileName": "graph-walk.bin.gz",
-      "boundaryFileName": "berlin-district-boundaries-canvas.json"
+      "boundaryFileName": "berlin-district-boundaries-canvas.json",
+      "transitReferenceDate": "2026-08-12"
     },
     {
       "id": "paris",
@@ -36,7 +37,7 @@
       "graphFileName": "cologne-graph.bin.gz",
       "boundaryFileName": "cologne-district-boundaries-canvas.json",
       "localizedNames": {
-        "de": "K\u00f6ln"
+        "de": "Köln"
       }
     },
     {

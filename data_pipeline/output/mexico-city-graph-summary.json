@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-08-07T07:42:36.643849+00:00",
+  "generated_at_utc": "2026-08-08T11:01:03.435287+00:00",
   "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/mexico-city-routing.osm.json",
   "binary_output": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/output/mexico-city-graph.bin",
   "binary_size_bytes": 9793264,

@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-08-07T07:45:42.521953+00:00",
+  "generated_at_utc": "2026-08-08T11:03:23.341262+00:00",
   "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/zurich-canton-routing.osm.json",
   "binary_output": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/output/zurich-canton-graph.bin",
   "binary_size_bytes": 16562520,
