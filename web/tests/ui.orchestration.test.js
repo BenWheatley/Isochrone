@@ -16,6 +16,7 @@ import {
 import {
   BIKE_CRUISE_SPEED_KPH,
   DEFAULT_WALK_SPEED_KPH,
+  EDGE_MODE_CAR_BIT,
   EDGE_MODE_WATER_BIT,
 } from '../src/config/constants.js';
 
@@ -43,23 +44,18 @@ function createEventTarget() {
   };
 }
 
-function createModeSelect(selectedValues = ['car']) {
+function createModeCheckbox(value, checked) {
   const eventTarget = createEventTarget();
-  const selectedSet = new Set(selectedValues);
-  const options = [
-    { value: 'walk', selected: selectedSet.has('walk') },
-    { value: 'bike', selected: selectedSet.has('bike') },
-    { value: 'car', selected: selectedSet.has('car') },
-    { value: 'water', selected: selectedSet.has('water') },
-  ];
-
   return {
     ...eventTarget,
-    options,
-    get selectedOptions() {
-      return options.filter((option) => option.selected);
-    },
+    value,
+    checked,
   };
+}
+
+function createModeCheckboxes(selectedValues = ['car']) {
+  const selectedSet = new Set(selectedValues);
+  return ['walk', 'bike', 'car', 'water'].map((value) => createModeCheckbox(value, selectedSet.has(value)));
 }
 
 function createInput(initialValue = '75') {
@@ -140,19 +136,39 @@ function createHeaderMenuFixture() {
 }
 
 test('getAllowedModeMaskFromShell includes EDGE_MODE_WATER_BIT for the water option', () => {
-  const modeSelect = createModeSelect(['water']);
-  const shell = { modeSelect };
+  const modeCheckboxes = createModeCheckboxes(['water']);
+  const shell = { modeCheckboxes };
 
   assert.equal(getAllowedModeMaskFromShell(shell), EDGE_MODE_WATER_BIT);
 });
 
 test('getAllowedModeMaskFromShell combines walk and water bits when both selected', () => {
-  const modeSelect = createModeSelect(['walk', 'water']);
-  const shell = { modeSelect };
+  const modeCheckboxes = createModeCheckboxes(['walk', 'water']);
+  const shell = { modeCheckboxes };
 
   const mask = getAllowedModeMaskFromShell(shell);
   assert.equal(mask & EDGE_MODE_WATER_BIT, EDGE_MODE_WATER_BIT);
   assert.notEqual(mask, EDGE_MODE_WATER_BIT);
+});
+
+test('getAllowedModeMaskFromShell ignores the transit checkbox entirely (it is not an edge-mode bit)', () => {
+  const modeCheckboxes = createModeCheckboxes(['car']);
+  const transitEnabledInput = createModeCheckbox('transit', true);
+  modeCheckboxes.push(transitEnabledInput);
+  const shell = { modeCheckboxes, transitEnabledInput };
+
+  assert.equal(getAllowedModeMaskFromShell(shell), EDGE_MODE_CAR_BIT);
+});
+
+test('getAllowedModeMaskFromShell falls back to car without touching the transit checkbox when nothing else is selected', () => {
+  const modeCheckboxes = createModeCheckboxes([]);
+  const transitEnabledInput = createModeCheckbox('transit', true);
+  modeCheckboxes.push(transitEnabledInput);
+  const shell = { modeCheckboxes, transitEnabledInput };
+
+  assert.equal(getAllowedModeMaskFromShell(shell), EDGE_MODE_CAR_BIT);
+  assert.equal(modeCheckboxes.find((checkbox) => checkbox.value === 'car').checked, true);
+  assert.equal(transitEnabledInput.checked, true);
 });
 
 test('getSpeedOptionsFromShell converts km/h inputs to the expected units, defaulting when missing/invalid', () => {
@@ -323,10 +339,10 @@ test('updateTransitControlAvailability hides the row, attribution, and resets th
 });
 
 test('bindModeSelectControl uses redraw for mode changes and repaint for cycle changes', () => {
-  const modeSelect = createModeSelect(['car']);
+  const modeCheckboxes = createModeCheckboxes(['car']);
   const colourCycleMinutesInput = createInput('75');
   const shell = {
-    modeSelect,
+    modeCheckboxes,
     colourCycleMinutesInput,
     isochroneLegend: {},
   };
@@ -351,9 +367,11 @@ test('bindModeSelectControl uses redraw for mode changes and repaint for cycle c
   assert.equal(redrawRequestCount, 0);
   assert.equal(legendRenderCount, 1);
 
-  modeSelect.options[2].selected = false;
-  modeSelect.options[0].selected = true;
-  modeSelect.emit('change');
+  const carCheckbox = modeCheckboxes.find((checkbox) => checkbox.value === 'car');
+  const walkCheckbox = modeCheckboxes.find((checkbox) => checkbox.value === 'walk');
+  carCheckbox.checked = false;
+  walkCheckbox.checked = true;
+  walkCheckbox.emit('change');
   assert.equal(redrawRequestCount, 1);
   assert.equal(repaintRequestCount, 0);
 
@@ -364,7 +382,7 @@ test('bindModeSelectControl uses redraw for mode changes and repaint for cycle c
   assert.equal(legendRenderCount, 2);
 
   binding.dispose();
-  modeSelect.emit('change');
+  walkCheckbox.emit('change');
   colourCycleMinutesInput.emit('change');
   assert.equal(redrawRequestCount, 1);
   assert.equal(repaintRequestCount, 1);
@@ -372,10 +390,10 @@ test('bindModeSelectControl uses redraw for mode changes and repaint for cycle c
 });
 
 test('bindModeSelectControl falls back to redraw when cycle repaint is unavailable', () => {
-  const modeSelect = createModeSelect(['car']);
+  const modeCheckboxes = createModeCheckboxes(['car']);
   const colourCycleMinutesInput = createInput('75');
   const shell = {
-    modeSelect,
+    modeCheckboxes,
     colourCycleMinutesInput,
     isochroneLegend: {},
   };
@@ -407,13 +425,13 @@ test('bindModeSelectControl falls back to redraw when cycle repaint is unavailab
 });
 
 test('bindModeSelectControl redraws and persists on walk/bike speed and departure datetime changes', () => {
-  const modeSelect = createModeSelect(['car']);
+  const modeCheckboxes = createModeCheckboxes(['car']);
   const colourCycleMinutesInput = createInput('75');
   const walkSpeedInput = createInput('5');
   const bikeSpeedInput = createInput('20');
   const departureDatetimeInput = createInput('2026-08-12T08:00');
   const shell = {
-    modeSelect,
+    modeCheckboxes,
     colourCycleMinutesInput,
     walkSpeedInput,
     bikeSpeedInput,

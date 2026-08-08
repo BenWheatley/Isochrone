@@ -48,15 +48,29 @@
                 type="checkbox"
               />
             </div>
-            <div class="control-row">
-              <label for="mode-select" data-i18n="body.options.mode">Transport modes</label>
-              <select id="mode-select" name="mode-select" multiple size="4">
-                <option value="walk" data-i18n="body.options.mode.walk">Walk</option>
-                <option value="bike" data-i18n="body.options.mode.bike">Bike</option>
-                <option value="car" selected data-i18n="body.options.mode.car">Car</option>
-                <option value="water" data-i18n="body.options.mode.water">Ferry</option>
-              </select>
-            </div>
+            <fieldset class="control-row mode-checkbox-group" id="mode-checkbox-group">
+              <legend data-i18n="body.options.mode">Transport modes</legend>
+              <label class="mode-checkbox-option">
+                <input class="mode-checkbox" type="checkbox" name="mode" value="walk" />
+                <span data-i18n="body.options.mode.walk">Walk</span>
+              </label>
+              <label class="mode-checkbox-option">
+                <input class="mode-checkbox" type="checkbox" name="mode" value="bike" />
+                <span data-i18n="body.options.mode.bike">Bike</span>
+              </label>
+              <label class="mode-checkbox-option">
+                <input class="mode-checkbox" type="checkbox" name="mode" value="car" checked />
+                <span data-i18n="body.options.mode.car">Car</span>
+              </label>
+              <label class="mode-checkbox-option">
+                <input class="mode-checkbox" type="checkbox" name="mode" value="water" />
+                <span data-i18n="body.options.mode.water">Ferry</span>
+              </label>
+              <label class="mode-checkbox-option" id="transit-enabled-row" hidden>
+                <input class="mode-checkbox" id="transit-enabled" name="transit-enabled" type="checkbox" value="transit" />
+                <span data-i18n="body.options.transit">Public transit</span>
+              </label>
+            </fieldset>
             <div class="control-row">
               <label for="colour-cycle-minutes" data-i18n="body.options.colourCycle">
                 Colour cycle (min)
@@ -86,10 +100,6 @@
                 Departure date &amp; time
               </label>
               <input id="departure-datetime" name="departure-datetime" type="datetime-local" step="60" />
-            </div>
-            <div class="control-row control-row-checkbox" id="transit-enabled-row" hidden>
-              <label for="transit-enabled" data-i18n="body.options.transit">Public transit</label>
-              <input id="transit-enabled" name="transit-enabled" type="checkbox" />
             </div>
             <div class="control-row">
               <button id="export-svg-button" type="button" disabled data-i18n="body.options.exportSvg">

@@ -24,7 +24,7 @@ import {
   getCommonMessage,
 } from './localization.js';
 
-const CANONICAL_MODE_VALUES = ['walk', 'bike', 'car', 'water'];
+const CANONICAL_MODE_VALUES = ['walk', 'bike', 'car', 'water', 'transit'];
 const CANONICAL_THEME_VALUES = ['light', 'dark'];
 const THEME_STORAGE_KEY = 'isochrone-theme';
 const POINTER_BUTTON_INVERSION_STORAGE_KEY = 'isochrone-invert-pointer-buttons';
@@ -53,7 +53,8 @@ export function initializeAppShell(doc, options = {}) {
   const routingDisclaimerTransit = resolvedDocument.getElementById('routing-disclaimer-transit');
   const themeSelect = resolvedDocument.getElementById('theme-select');
   const invertPointerButtonsInput = resolvedDocument.getElementById('invert-pointer-buttons');
-  const modeSelect = resolvedDocument.getElementById('mode-select');
+  const modeCheckboxGroup = resolvedDocument.getElementById('mode-checkbox-group');
+  const modeCheckboxes = Array.from(resolvedDocument.querySelectorAll('.mode-checkbox'));
   const colourCycleMinutesInput = resolvedDocument.getElementById('colour-cycle-minutes');
   const walkSpeedInput = resolvedDocument.getElementById('walk-speed-kph');
   const bikeSpeedInput = resolvedDocument.getElementById('bike-speed-kph');
@@ -118,8 +119,11 @@ export function initializeAppShell(doc, options = {}) {
   if (!invertPointerButtonsInput || invertPointerButtonsInput.tagName !== 'INPUT') {
     throw new Error('index.html is missing <input id="invert-pointer-buttons">');
   }
-  if (!modeSelect || modeSelect.tagName !== 'SELECT') {
-    throw new Error('index.html is missing <select id="mode-select">');
+  if (!modeCheckboxGroup || modeCheckboxGroup.tagName !== 'FIELDSET') {
+    throw new Error('index.html is missing <fieldset id="mode-checkbox-group">');
+  }
+  if (modeCheckboxes.length === 0) {
+    throw new Error('index.html is missing .mode-checkbox inputs inside #mode-checkbox-group');
   }
   if (!colourCycleMinutesInput || colourCycleMinutesInput.tagName !== 'INPUT') {
     throw new Error('index.html is missing <input id="colour-cycle-minutes">');
@@ -136,8 +140,8 @@ export function initializeAppShell(doc, options = {}) {
   if (!departureDatetimeInput || departureDatetimeInput.tagName !== 'INPUT') {
     throw new Error('index.html is missing <input id="departure-datetime">');
   }
-  if (!transitEnabledRow || transitEnabledRow.tagName !== 'DIV') {
-    throw new Error('index.html is missing <div id="transit-enabled-row">');
+  if (!transitEnabledRow || transitEnabledRow.tagName !== 'LABEL') {
+    throw new Error('index.html is missing <label id="transit-enabled-row">');
   }
   if (!transitEnabledInput || transitEnabledInput.tagName !== 'INPUT') {
     throw new Error('index.html is missing <input id="transit-enabled">');
@@ -183,9 +187,9 @@ export function initializeAppShell(doc, options = {}) {
   const locationSearch = globalThis.location?.search ?? '';
   const persistedModeValues = parseModeValuesFromLocationSearch(locationSearch);
   if (persistedModeValues !== null && persistedModeValues.length > 0) {
-    setSelectedModeValues(modeSelect, persistedModeValues);
+    setSelectedModeValues(modeCheckboxes, persistedModeValues);
   } else {
-    setSelectedModeValues(modeSelect, ['car']);
+    setSelectedModeValues(modeCheckboxes, ['car']);
   }
 
   const persistedCycleMinutes = parseColourCycleMinutesFromLocationSearch(locationSearch);
@@ -225,7 +229,8 @@ export function initializeAppShell(doc, options = {}) {
     routingDisclaimerTransit,
     themeSelect,
     invertPointerButtonsInput,
-    modeSelect,
+    modeCheckboxGroup,
+    modeCheckboxes,
     colourCycleMinutesInput,
     walkSpeedInput,
     bikeSpeedInput,
@@ -458,16 +463,31 @@ export function bindThemeControl(shell, options = {}) {
   };
 }
 
+// Public transit sits in the same checkbox group as Walk/Bike/Car/Ferry (it
+// reads as a peer transport mode to a normal user), but it isn't an
+// allowedModeMask bit - it's a boolean CSA-augmentation flag consumed
+// separately by getTransitOptionsFromShell. This excludes the transit
+// checkbox from the mask computation below (and from the "nothing
+// selected" fallback), while it still rides along in shell.modeCheckboxes
+// for URL persistence via getSelectedModeValues/setSelectedModeValues.
+function getRoutingModeCheckboxesFromShell(shell) {
+  const modeCheckboxes = shell.modeCheckboxes ?? [];
+  return modeCheckboxes.filter((checkbox) => checkbox !== shell.transitEnabledInput);
+}
+
 export function getAllowedModeMaskFromShell(shell) {
   if (!shell || typeof shell !== 'object') {
     throw new Error('shell is required');
   }
 
-  const selectedOptions = shell.modeSelect?.selectedOptions;
+  const routingModeCheckboxes = getRoutingModeCheckboxesFromShell(shell);
   let allowedModeMask = 0;
 
-  for (const option of selectedOptions ?? []) {
-    const optionValue = option.value;
+  for (const checkbox of routingModeCheckboxes) {
+    if (!checkbox.checked) {
+      continue;
+    }
+    const optionValue = checkbox.value;
     if (optionValue === 'walk') {
       allowedModeMask |= EDGE_MODE_WALK_BIT;
     }
@@ -483,9 +503,7 @@ export function getAllowedModeMaskFromShell(shell) {
   }
 
   if (allowedModeMask === 0) {
-    if (shell.modeSelect) {
-      setSelectedModeValues(shell.modeSelect, ['car']);
-    }
+    setSelectedModeValues(routingModeCheckboxes, ['car']);
     return EDGE_MODE_CAR_BIT;
   }
 
@@ -685,7 +703,12 @@ export function bindModeSelectControl(shell, dependencies = {}) {
   if (!shell || typeof shell !== 'object') {
     throw new Error('shell is required');
   }
-  if (!shell.modeSelect || !shell.colourCycleMinutesInput || !shell.isochroneLegend) {
+  if (
+    !shell.modeCheckboxes
+    || shell.modeCheckboxes.length === 0
+    || !shell.colourCycleMinutesInput
+    || !shell.isochroneLegend
+  ) {
     throw new Error('mode and colour controls are required');
   }
 
@@ -742,9 +765,13 @@ export function bindModeSelectControl(shell, dependencies = {}) {
     return Boolean(maybePromise);
   };
 
+  // Shared by every mode checkbox (Walk/Bike/Car/Ferry and Public transit
+  // alike, since they're presented as one group) - persists the full
+  // checked set to the URL and always redraws (not just repaints), since a
+  // mode or transit change can alter which nodes are reachable at all.
   const handleSelectChange = () => {
     getAllowedModeMaskFromShell(shell);
-    persistModeValuesToLocation(getSelectedModeValues(shell.modeSelect));
+    persistModeValuesToLocation(getSelectedModeValues(shell.modeCheckboxes));
     maybeRequestIsochroneRedraw();
   };
   const handleCycleChange = () => {
@@ -754,12 +781,6 @@ export function bindModeSelectControl(shell, dependencies = {}) {
     if (!maybeRequestIsochroneRepaint()) {
       maybeRequestIsochroneRedraw();
     }
-  };
-  // Transit-enabled changes require a full redraw (not just a repaint)
-  // since they can change which nodes are reachable at all, not just how
-  // the existing result is coloured.
-  const handleTransitControlChange = () => {
-    maybeRequestIsochroneRedraw();
   };
   const handleDepartureDatetimeChange = () => {
     const departureDatetime = shell.departureDatetimeInput?.value ?? '';
@@ -788,21 +809,23 @@ export function bindModeSelectControl(shell, dependencies = {}) {
   getColourCycleMinutesFromShell(shell);
   getSpeedOptionsFromShell(shell);
   renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));
-  shell.modeSelect.addEventListener('change', handleSelectChange);
+  for (const checkbox of shell.modeCheckboxes) {
+    checkbox.addEventListener('change', handleSelectChange);
+  }
   shell.colourCycleMinutesInput.addEventListener('change', handleCycleChange);
   shell.walkSpeedInput?.addEventListener('change', handleSpeedControlChange);
   shell.bikeSpeedInput?.addEventListener('change', handleSpeedControlChange);
   shell.departureDatetimeInput?.addEventListener('change', handleDepartureDatetimeChange);
-  shell.transitEnabledInput?.addEventListener('change', handleTransitControlChange);
 
   return {
     dispose() {
-      shell.modeSelect.removeEventListener('change', handleSelectChange);
+      for (const checkbox of shell.modeCheckboxes) {
+        checkbox.removeEventListener('change', handleSelectChange);
+      }
       shell.colourCycleMinutesInput.removeEventListener('change', handleCycleChange);
       shell.walkSpeedInput?.removeEventListener('change', handleSpeedControlChange);
       shell.bikeSpeedInput?.removeEventListener('change', handleSpeedControlChange);
       shell.departureDatetimeInput?.removeEventListener('change', handleDepartureDatetimeChange);
-      shell.transitEnabledInput?.removeEventListener('change', handleTransitControlChange);
     },
   };
 }
@@ -875,18 +898,18 @@ function clampInt(value, minValue, maxValue) {
   return value;
 }
 
-function setSelectedModeValues(modeSelect, modeValues) {
+function setSelectedModeValues(modeCheckboxes, modeValues) {
   const selectedModeSet = new Set(modeValues);
-  for (const option of modeSelect.options) {
-    option.selected = selectedModeSet.has(option.value);
+  for (const checkbox of modeCheckboxes) {
+    checkbox.checked = selectedModeSet.has(checkbox.value);
   }
 }
 
-function getSelectedModeValues(modeSelect) {
+function getSelectedModeValues(modeCheckboxes) {
   const selectedModeSet = new Set();
-  for (const option of modeSelect.options) {
-    if (option.selected && CANONICAL_MODE_VALUES.includes(option.value)) {
-      selectedModeSet.add(option.value);
+  for (const checkbox of modeCheckboxes) {
+    if (checkbox.checked && CANONICAL_MODE_VALUES.includes(checkbox.value)) {
+      selectedModeSet.add(checkbox.value);
     }
   }
   return CANONICAL_MODE_VALUES.filter((modeValue) => selectedModeSet.has(modeValue));

@@ -5436,17 +5436,28 @@ export function formatRoutingStatusNoReachable(durationMs = null, options = {}) 
 }
 
 function getSelectedTransportModeLabels(shell) {
-  if (!shell || typeof shell !== 'object' || !shell.modeSelect) {
+  if (!shell || typeof shell !== 'object' || !Array.isArray(shell.modeCheckboxes)) {
     return [];
   }
   const labels = [];
-  for (const option of shell.modeSelect.selectedOptions ?? []) {
+  for (const checkbox of shell.modeCheckboxes) {
+    if (!checkbox?.checked) {
+      continue;
+    }
+    // Skip the transit checkbox (folded into modeCheckboxes alongside
+    // Walk/Bike/Car/Ferry) while its row is hidden - no transit data for
+    // the loaded region - so a stale checked state from a previous region
+    // can't leak into the export title. Mirrors
+    // getTransitOptionsFromShell's own transitEnabledRow.hidden check.
+    const optionRow = checkbox.closest?.('.mode-checkbox-option') ?? null;
+    if (optionRow?.hidden) {
+      continue;
+    }
+    const labelSpan = optionRow?.querySelector?.('span') ?? null;
     const label =
-      typeof option?.label === 'string' && option.label.trim().length > 0
-        ? option.label.trim()
-        : typeof option?.textContent === 'string' && option.textContent.trim().length > 0
-          ? option.textContent.trim()
-          : null;
+      typeof labelSpan?.textContent === 'string' && labelSpan.textContent.trim().length > 0
+        ? labelSpan.textContent.trim()
+        : null;
     if (label) {
       labels.push(label);
     }

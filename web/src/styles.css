@@ -230,27 +230,52 @@ body {
   min-width: 5rem;
 }
 
-#mode-select,
 #theme-select {
   padding: 0.2rem 0.25rem;
   font-size: 0.85rem;
   cursor: pointer;
-}
-
-#theme-select {
   min-width: 6.75rem;
   padding: 0.3rem 0.4rem;
 }
 
-#mode-select {
-  min-width: 8.5rem;
-}
-
-#mode-select:hover,
 .controls-menu-panel button:hover:enabled,
 #theme-select:hover,
 #controls-menu-summary:hover {
   background: var(--control-hover-bg);
+}
+
+.mode-checkbox-group {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.mode-checkbox-group > legend {
+  padding: 0;
+  font-size: 0.9rem;
+  color: var(--chrome-label);
+}
+
+.mode-checkbox-option {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.88rem;
+  color: var(--control-text);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.mode-checkbox-option[hidden] {
+  display: none;
+}
+
+.mode-checkbox-option input {
+  min-width: 0;
+  width: auto;
+  cursor: pointer;
 }
 
 .controls-menu-panel button {
@@ -548,7 +573,6 @@ body {
   }
 
   #theme-select,
-  #mode-select,
   #colour-cycle-minutes,
   #walk-speed-kph,
   #bike-speed-kph,
@@ -560,13 +584,16 @@ body {
     -webkit-text-fill-color: #16344a;
   }
 
-  #mode-select option,
+  .mode-checkbox-option,
+  .mode-checkbox-group > legend {
+    color: #16344a !important;
+  }
+
   #theme-select option {
     color: #16344a !important;
     background: #ffffff !important;
   }
 
-  #mode-select option:checked,
   #theme-select option:checked {
     color: #16344a !important;
     background: #ffffff !important;
