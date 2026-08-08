@@ -2,11 +2,39 @@ const DEFAULT_MAX_VIEWPORT_SCALE = 8;
 const DEFAULT_MIN_VIEWPORT_SCALE = 1;
 const DEFAULT_FIT_BOUNDING_BOX_PADDING_FACTOR = 1.05;
 
-export function createDefaultMapViewport() {
+/**
+ * scale:1/offsetXPx:0/offsetYPx:0 means "top-left of the full routing
+ * grid" - fine when there's no fitBoundingBoxPx (resolveViewportFrame's
+ * fitScale then already covers the whole grid), but wrong once fitScale is
+ * computed from a district boundary that can sit anywhere within a
+ * ferry-widened grid (see resolveFitScale below): panning to (0,0) would
+ * show whatever's in the grid's top-left corner, not the boundary. When
+ * options.fitBoundingBoxPx is supplied, offset the default viewport to the
+ * padded box's own top-left corner instead, so it lines up with what
+ * resolveViewportFrame will actually zoom in on.
+ */
+export function createDefaultMapViewport(options = {}) {
+  const fitBoundingBoxPx = options.fitBoundingBoxPx ?? null;
+  if (!fitBoundingBoxPx) {
+    return {
+      scale: 1,
+      offsetXPx: 0,
+      offsetYPx: 0,
+    };
+  }
+
+  const paddingFactor = Number.isFinite(options.fitBoundingBoxPaddingFactor)
+    ? options.fitBoundingBoxPaddingFactor
+    : DEFAULT_FIT_BOUNDING_BOX_PADDING_FACTOR;
+  const centerX = (fitBoundingBoxPx.minX + fitBoundingBoxPx.maxX) / 2;
+  const centerY = (fitBoundingBoxPx.minY + fitBoundingBoxPx.maxY) / 2;
+  const paddedHalfWidthPx = ((fitBoundingBoxPx.maxX - fitBoundingBoxPx.minX) * paddingFactor) / 2;
+  const paddedHalfHeightPx = ((fitBoundingBoxPx.maxY - fitBoundingBoxPx.minY) * paddingFactor) / 2;
+
   return {
     scale: 1,
-    offsetXPx: 0,
-    offsetYPx: 0,
+    offsetXPx: centerX - paddedHalfWidthPx,
+    offsetYPx: centerY - paddedHalfHeightPx,
   };
 }
 
@@ -37,7 +65,12 @@ export function resolveViewportFrame(graphHeader, viewport = null, options = {})
     'frameHeightPx',
   );
   const sourceViewport =
-    viewport && typeof viewport === 'object' ? viewport : createDefaultMapViewport();
+    viewport && typeof viewport === 'object'
+      ? viewport
+      : createDefaultMapViewport({
+          fitBoundingBoxPx: options.fitBoundingBoxPx,
+          fitBoundingBoxPaddingFactor: options.fitBoundingBoxPaddingFactor,
+        });
   const scale = clamp(asFiniteOrFallback(sourceViewport.scale, 1), minScale, maxScale);
   const fitScale = resolveFitScale(graphHeader, frameWidthPx, frameHeightPx, options);
   if (!(fitScale > 0)) {

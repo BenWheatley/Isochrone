@@ -237,3 +237,29 @@ test('a scale below 1 relative to the boundary fit can still reach the full grid
 
   assert.ok(Math.abs(zoomedOutFrame.effectiveScale - gridFitScale) < 1e-9);
 });
+
+test('createDefaultMapViewport centers on the boundary box instead of the grid origin', () => {
+  // A ferry-widened grid (2000x2000) with the actual district boundary
+  // sitting far from (0,0), e.g. near the top-right corner - the bug this
+  // guards against: panning to (0,0) by default would show empty space
+  // nowhere near the region (as happened for Rhode Island).
+  const graphHeader = { gridWidthPx: 2000, gridHeightPx: 2000 };
+  const fitBoundingBoxPx = { minX: 1700, minY: 100, maxX: 1900, maxY: 300 };
+
+  const defaultViewport = createDefaultMapViewport({ fitBoundingBoxPx });
+  const frame = resolveViewportFrame(graphHeader, defaultViewport, {
+    frameWidthPx: 400,
+    frameHeightPx: 400,
+    fitBoundingBoxPx,
+  });
+
+  const boxCenterX = (fitBoundingBoxPx.minX + fitBoundingBoxPx.maxX) / 2;
+  const boxCenterY = (fitBoundingBoxPx.minY + fitBoundingBoxPx.maxY) / 2;
+  const visibleCenterX = frame.offsetXPx + frame.visibleWidthPx / 2;
+  const visibleCenterY = frame.offsetYPx + frame.visibleHeightPx / 2;
+
+  // The visible window's center should land on (or very near) the
+  // boundary's own center, not the grid's top-left corner.
+  assert.ok(Math.abs(visibleCenterX - boxCenterX) < 50);
+  assert.ok(Math.abs(visibleCenterY - boxCenterY) < 50);
+});

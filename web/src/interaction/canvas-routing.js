@@ -96,7 +96,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   let lastCompletedNodeIndex = null;
   let idleWaiterResolvers = [];
   if (!mapData.viewport) {
-    mapData.viewport = createDefaultMapViewport();
+    mapData.viewport = createDefaultMapViewport({
+      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+    });
   }
 
   const isRoutingIdle = () =>
@@ -792,7 +794,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     if (!nextViewport) {
       return false;
     }
-    const currentViewport = mapData.viewport ?? createDefaultMapViewport();
+    const currentViewport =
+      mapData.viewport ??
+      createDefaultMapViewport({ fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx });
     if (
       currentViewport.scale === nextViewport.scale
       && currentViewport.offsetXPx === nextViewport.offsetXPx

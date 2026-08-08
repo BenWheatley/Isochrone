@@ -2097,13 +2097,13 @@ export async function initializeMapData(shell, options = {}) {
       graph.header,
       {
         colourTheme: resolveIsochroneTheme(),
-        viewport: createDefaultMapViewport(),
+        viewport: createDefaultMapViewport({ fitBoundingBoxPx: boundaryFitBoundingBoxPx }),
         fitBoundingBoxPx: boundaryFitBoundingBoxPx,
       },
     );
     renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));
     updateDistanceScaleBar(shell, graph.header, {
-      viewport: createDefaultMapViewport(),
+      viewport: createDefaultMapViewport({ fitBoundingBoxPx: boundaryFitBoundingBoxPx }),
       fitBoundingBoxPx: boundaryFitBoundingBoxPx,
     });
     if (shell.exportSvgButton) {
@@ -2130,7 +2130,7 @@ export async function initializeMapData(shell, options = {}) {
       nodeSpatialIndex,
       pixelGrid,
       travelTimeGrid,
-      viewport: createDefaultMapViewport(),
+      viewport: createDefaultMapViewport({ fitBoundingBoxPx: boundaryFitBoundingBoxPx }),
       edgeCostPrecomputeKernel,
       lastRoutingSnapshot: null,
       locationName,
