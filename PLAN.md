@@ -814,12 +814,14 @@ Verification note (2026-08-06): confirmed against London — the tidal Thames (p
 
 *This phase is explicitly deferred from MVP. Goal: support public transport data ingestion and routing for any region, not just Berlin/Germany, by separating source formats from a canonical routing format.*
 
+**Implementation note (Berlin pilot, landed):** the sections below marked `[x]` reflect a deliberately trimmed pass — GTFS **static** only (no GTFS-RT/NeTEx/SIRI), **Berlin only**, and a **single reference service day** rather than full multi-month calendar/exception fidelity — confirmed against user intent ("proceed with Berlin specifically so I can test the result"). See `data_pipeline/src/isochrone_pipeline/gtfs_transit.py`, the `transitFeed` block in `data_pipeline/regions.json`, and `runConnectionScanFromWalkingReachableStops`/`runWalkingIsochroneFromSourceNode` in `web/src/app.js`. Full feed-registry generalization (11.1, 11.7) and realtime/NeTEx adapters (11.2.2, 11.2.3) remain deferred.
+
 ## 11.1 Define feed registry and region config
 Estimated time: 45 min
 
 Tasks
 - [ ] Add a feed registry file (`docs/transit_feed_registry.md` or JSON) with per-region metadata: provider, licence URL, update cadence, timezone, and feed format.
-- [ ] Add pipeline config inputs (`--region`, `--transit-feed`, `--transit-format`) so the same scripts run for any city/country.
+- [x] Add pipeline config inputs so the same scripts run for any city — done as a per-region optional `transitFeed` block in `regions.json` (`RegionSpec.transit_feed`) plus a `transit`/`gtfs` fetch+build component (`region-data.py fetch|build --components transit`), rather than the originally-sketched `--region`/`--transit-feed`/`--transit-format` CLI flags.
 - [ ] Define licence gate rules (allowed for local processing, allowed for redistribution, attribution requirements) and fail export when redistribution is disallowed.
 
 ---
@@ -831,9 +833,9 @@ Estimated time: 3 hours
 Estimated time: 1 hour 15 min
 
 Tasks
-- [ ] Parse `stops.txt`, `trips.txt`, `stop_times.txt`, `calendar.txt`, `calendar_dates.txt`, `routes.txt`, `agency.txt`.
-- [ ] Normalize timezone/day rollover semantics (`25:10:00`, etc.) into service-day-relative seconds.
-- [ ] Keep raw identifiers for traceability while emitting normalized numeric IDs.
+- [x] Parse `stops.txt`, `trips.txt`, `stop_times.txt`, `calendar.txt`, `calendar_dates.txt`, `routes.txt`, `agency.txt` — `data_pipeline/src/isochrone_pipeline/gtfs_transit.py`.
+- [x] Normalize timezone/day rollover semantics (`25:10:00`, etc.) into service-day-relative seconds.
+- [x] Keep raw identifiers for traceability while emitting normalized numeric IDs (stop/route ids resolved to compact integer indices for the binary export).
 
 ### 11.2.2 GTFS-Realtime adapter (optional overlay)
 Estimated time: 45 min
@@ -856,10 +858,10 @@ Tasks
 Estimated time: 2 hours
 
 Tasks
-- [ ] Define canonical tables independent of source format: `stops`, `routes`, `trips`, `connections`, `services`, `transfers`, `agencies`.
-- [ ] Define canonical units/types: projected meters for geometry, seconds for times, bitmasks/bitsets for service days, integer IDs for joins.
-- [ ] Define walking-graph linkage table: `stop_id -> nearest_node_index`, `walk_attach_cost_seconds`, `attach_distance_m`.
-- [ ] Persist canonical intermediate artifacts as deterministic JSON/Parquet snapshots for debugging and repeatable builds.
+- [x] Define canonical tables independent of source format — `TransitStop`/`TransitConnection` dataclasses in `gtfs_transit.py` (a trimmed subset: `stops` + `connections` derived from `trips`/`stop_times`, not separately-persisted `routes`/`services`/`transfers`/`agencies` tables).
+- [x] Define canonical units/types: projected meters (UTM, matching the walking graph's `epsg`) for stop geometry, seconds-since-midnight for times, compact integer indices for stop/route joins. Service-day bitmask field exists in the binary schema but isn't populated beyond the single reference day (scope trim).
+- [x] Define walking-graph linkage: stop → nearest walking-node attachment via a grid-bucketed spatial index (mirrors `findNearestNodeIndexForModeFromSpatialIndex`'s technique), with a 300m attach-radius cutoff and drop-count logging.
+- [ ] Persist canonical intermediate artifacts as deterministic JSON/Parquet snapshots for debugging and repeatable builds — not done; the only persisted transit artifact is the final binary graph (stop/tedge tables folded into `graph-walk.bin`), no intermediate canonical-table dump.
 
 ---
 
@@ -867,10 +869,10 @@ Tasks
 Estimated time: 1 hour 30 min
 
 Tasks
-- [ ] Validate schedule monotonicity (`arrival/departure` non-decreasing along each trip).
-- [ ] Validate spatial linkage (stop attachment distance thresholds and coverage statistics).
-- [ ] Validate referential integrity across all tables (`trip -> route/service`, `connection -> stops/trip`).
-- [ ] Emit per-region QA summary: stop count, attached-stop %, connection count, service-day coverage, dropped-record reasons.
+- [ ] Validate schedule monotonicity (`arrival/departure` non-decreasing along each trip) — not explicitly validated; malformed source rows would surface as CSA scan anomalies rather than a build-time check.
+- [x] Validate spatial linkage — stop attachment respects a 300m radius cutoff, with dropped-stop count logged (`dropped_stop_count` in `graph-binary-summary.json`'s `transit` block).
+- [ ] Validate referential integrity across all tables (`trip -> route/service`, `connection -> stops/trip`) — not done as a standalone gate; would fail loudly downstream instead.
+- [x] Emit per-region QA summary — `graph-binary-summary.json`'s `transit` block reports `parsed_stop_count`, `attached_stop_count`, `dropped_stop_count`, `total_stop_count_in_feed`, `raw_connection_count`, `final_stop_count`, `final_connection_count` (Berlin: 7,665 of 10,527 in-extent stops attached, 42,078 in the full feed, 935,766 final connections).
 
 ---
 
@@ -878,10 +880,10 @@ Tasks
 Estimated time: 2 hours
 
 Tasks
-- [ ] Generate CSA-ready `connections` sorted by departure time, with packed columns tuned for sequential scan.
-- [ ] Materialize transfer edges/penalties for stop-to-stop interchange and stop-to-walk-node transfers.
-- [ ] Build service-day indexing (day masks and date exceptions) for fast query-time filtering.
-- [ ] Export deterministic binary transit tables and wire into graph header flags/versioning.
+- [x] Generate CSA-ready `connections` sorted by departure time — a build-time invariant relied on by `runConnectionScanFromWalkingReachableStops`'s early-exit scan.
+- [ ] Materialize transfer edges/penalties for stop-to-stop interchange and stop-to-walk-node transfers — stop-to-walk-node attach cost exists (straight-line distance / walking speed), but there's no dedicated stop-to-stop interchange/transfer-penalty model; CSA implicitly "transfers" by walking back onto the road graph between transit legs.
+- [ ] Build service-day indexing (day masks and date exceptions) for fast query-time filtering — `service_day_mask` is populated per connection from the source trip's real GTFS calendar days, but query-time filtering isn't needed (or exercised) since the build only includes one reference day's connections; multi-day filtering is future work.
+- [x] Export deterministic binary transit tables and wire into graph header flags/versioning — `n_stops`/`n_tedges`/`stop_table_offset` header fields, `flags` bit 0 (`has_transit`), 24-byte stop records and 20-byte transit-edge records in `graph_binary.py`/`binary_reader.py`.
 
 ---
 
@@ -889,10 +891,10 @@ Tasks
 Estimated time: 2 hours
 
 Tasks
-- [ ] Load transit tables in JS alongside existing road graph tables.
-- [ ] Implement CSA pass using walking-reachable stops as seeds, then merge back into road Dijkstra via multi-source seeding.
-- [ ] Add query controls for departure time/day and transit enable/disable.
-- [ ] Handle missing transit tables gracefully (road-only fallback without console noise).
+- [x] Load transit tables in JS alongside existing road graph tables — `parseGraphBinary` parses stop/transit-edge tables into typed-array views, gated on `graph.header.nStops > 0` (zero-cost for every non-Berlin region).
+- [x] Implement CSA pass using walking-reachable stops as seeds, then merge back into road Dijkstra via multi-source seeding — `runConnectionScanFromWalkingReachableStops` (pass 1 → CSA scan) feeds a new WASM `compute_travel_time_field_multi_source` export (pass 2, origin + transit-improved stops as seeds) in `runWalkingIsochroneFromSourceNode`.
+- [x] Add query controls for departure time/day and transit enable/disable — `#departure-time` input and `Public transit` checkbox, wired via `getTransitOptionsFromShell`/`updateTransitControlAvailability`.
+- [x] Handle missing transit tables gracefully (road-only fallback without console noise) — `nStops === 0` (every non-Berlin region today) short-circuits to the unchanged single-pass walk/bike/car/ferry behavior, and the transit checkbox is hidden rather than shown-and-inert.
 
 ---
 
@@ -900,9 +902,9 @@ Tasks
 Estimated time: 1 hour
 
 Tasks
-- [ ] Document repeatable onboarding steps for a new region: discover feed, validate licence, run adapters, run QA, export artifacts.
-- [ ] Add one non-Berlin fixture dataset in tests to ensure region-agnostic behavior.
-- [ ] Add per-region attribution templating so required legal text is emitted in UI/export outputs.
+- [ ] Document repeatable onboarding steps for a new region: discover feed, validate licence, run adapters, run QA, export artifacts — not written up; today onboarding a second region means adding a `transitFeed` block to `regions.json` and rerunning `fetch|build --components graph,transit` by reading the code, not a doc.
+- [x] Add one non-Berlin fixture dataset in tests to ensure region-agnostic behavior — `data_pipeline/tests/test_gtfs_transit.py` builds a small synthetic GTFS fixture (`_write_gtfs_fixture`) covering a normal day, a past-midnight trip, an out-of-extent stop, and a `calendar_dates.txt` exception; none of the pipeline unit tests depend on the real Berlin feed.
+- [ ] Add per-region attribution templating so required legal text is emitted in UI/export outputs — pending; the OSM ODbL notice in `body.disclaimer`/`copyrightNotice` is still a single hardcoded string, not yet conditional on `graph.header.nStops > 0` to append the VBB/CC BY line for Berlin.
 
 ---
 
@@ -1043,7 +1045,7 @@ Post-MVP adds approximately **32–34 hours** of development:
 - [x] Phase 10.5 (routing hot-path performance follow-ups): ~2.5 hours (10.5.1 parallel SSSP sub-item still not implemented)
 - [x] Phase 10.6 (multi-location OSM fetch generalization): ~3.75 hours (shipped as `regions.json` + `region-data.py`, different file layout than originally planned — see 10.6 note)
 - [x] Phase 10.7 (basemap context layers: coastal water, forest, inland water, waterways, airports): ~6 hours — not in the original plan, added from user feedback
-- [ ] Phase 11 (global public transit pipeline): ~12.25 hours
+- [x] Phase 11 (global public transit pipeline): ~12.25 hours (11.2.1/11.5/11.6 done for a Berlin-only GTFS-static pilot; 11.1/11.2.2/11.2.3/11.7 and full canonical-model/QA-gate fidelity in 11.3/11.4 stay deferred — see per-section notes)
 - [ ] Phase 12 (UX and sharing enhancements): ~9.5 hours (12.1/12.2/12.3/12.5 done; 12.4 and most of 12.6 still open)
 - [ ] Plus variable time to obtain/validate feed licences and feed-specific integration constraints.
 
