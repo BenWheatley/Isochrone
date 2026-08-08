@@ -195,18 +195,41 @@ test('getTransitOptionsFromShell returns NaN departureSecondsOfDay for a malform
   assert.ok(Number.isNaN(options.departureSecondsOfDay));
 });
 
+function createDateInput() {
+  const attributes = {};
+  return {
+    value: '',
+    setAttribute(name, value) {
+      attributes[name] = value;
+      this[name] = value;
+    },
+    removeAttribute(name) {
+      delete attributes[name];
+      delete this[name];
+    },
+  };
+}
+
 test('updateTransitControlAvailability shows the row and attribution and preserves checked state when transit data exists', () => {
   const shell = {
     transitEnabledRow: { hidden: true },
     transitEnabledInput: createCheckbox(true),
     routingDisclaimerTransit: { hidden: true },
+    departureDateRow: { hidden: true },
+    departureTimeRow: { hidden: true },
+    departureDateInput: createDateInput(),
   };
 
-  updateTransitControlAvailability(shell, true);
+  updateTransitControlAvailability(shell, true, { transitReferenceDate: '2026-08-12' });
 
   assert.equal(shell.transitEnabledRow.hidden, false);
   assert.equal(shell.transitEnabledInput.checked, true);
   assert.equal(shell.routingDisclaimerTransit.hidden, false);
+  assert.equal(shell.departureDateRow.hidden, false);
+  assert.equal(shell.departureTimeRow.hidden, false);
+  assert.equal(shell.departureDateInput.min, '2026-08-12');
+  assert.equal(shell.departureDateInput.max, '2026-08-12');
+  assert.equal(shell.departureDateInput.value, '2026-08-12');
 });
 
 test('updateTransitControlAvailability hides the row, attribution, and resets the checkbox when transit data is absent', () => {
@@ -214,13 +237,24 @@ test('updateTransitControlAvailability hides the row, attribution, and resets th
     transitEnabledRow: { hidden: false },
     transitEnabledInput: createCheckbox(true),
     routingDisclaimerTransit: { hidden: false },
+    departureDateRow: { hidden: false },
+    departureTimeRow: { hidden: false },
+    departureDateInput: createDateInput(),
   };
+  shell.departureDateInput.min = '2026-08-12';
+  shell.departureDateInput.max = '2026-08-12';
+  shell.departureDateInput.value = '2026-08-12';
 
   updateTransitControlAvailability(shell, false);
 
   assert.equal(shell.transitEnabledRow.hidden, true);
   assert.equal(shell.transitEnabledInput.checked, false);
   assert.equal(shell.routingDisclaimerTransit.hidden, true);
+  assert.equal(shell.departureDateRow.hidden, true);
+  assert.equal(shell.departureTimeRow.hidden, true);
+  assert.equal(shell.departureDateInput.min, undefined);
+  assert.equal(shell.departureDateInput.max, undefined);
+  assert.equal(shell.departureDateInput.value, '');
 });
 
 test('bindModeSelectControl uses redraw for mode changes and repaint for cycle changes', () => {

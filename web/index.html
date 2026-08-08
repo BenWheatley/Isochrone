@@ -70,7 +70,11 @@
                 value="75"
               />
             </div>
-            <div class="control-row">
+            <div class="control-row" id="departure-date-row" hidden>
+              <label for="departure-date" data-i18n="body.options.departureDate">Departure date</label>
+              <input id="departure-date" name="departure-date" type="date" />
+            </div>
+            <div class="control-row" id="departure-time-row" hidden>
               <label for="departure-time" data-i18n="body.options.departureTime">Departure time</label>
               <input id="departure-time" name="departure-time" type="time" value="08:00" step="60" />
             </div>

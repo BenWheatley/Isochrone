@@ -14,6 +14,7 @@
   "body.options.mode.car": "Voiture",
   "body.options.mode.water": "Ferry",
   "body.options.colourCycle": "Cycle des couleurs (min)",
+  "body.options.departureDate": "Date de départ",
   "body.options.departureTime": "Heure de départ",
   "body.options.transit": "Transports publics",
   "body.options.exportSvg": "Exporter en SVG",

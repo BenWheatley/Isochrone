@@ -57,6 +57,26 @@ test('parseLocationRegistry normalizes entries and preserves optional localized 
   assert.equal(berlin.localizedNames, undefined);
 });
 
+test('parseLocationRegistry preserves an optional transitReferenceDate and omits it when absent', () => {
+  const fixture = createRegistryFixture();
+  fixture.locations[1].transitReferenceDate = '2026-08-12';
+
+  const registry = parseLocationRegistry(fixture);
+
+  const berlin = findLocationById(registry, 'berlin');
+  assert.equal(berlin.transitReferenceDate, '2026-08-12');
+
+  const paris = findLocationById(registry, 'paris');
+  assert.equal(paris.transitReferenceDate, undefined);
+});
+
+test('parseLocationRegistry rejects a malformed transitReferenceDate', () => {
+  const fixture = createRegistryFixture();
+  fixture.locations[1].transitReferenceDate = '12 August 2026';
+
+  assert.throws(() => parseLocationRegistry(fixture), /transitReferenceDate must be an ISO date/i);
+});
+
 test('parseLocationRegistry rejects malformed entries instead of accepting partial data', () => {
   assert.throws(
     () =>

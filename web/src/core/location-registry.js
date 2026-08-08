@@ -22,6 +22,19 @@ function normalizeLocaleKey(locale) {
   return locale.trim().replace('_', '-').toLowerCase();
 }
 
+const TRANSIT_REFERENCE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function normalizeTransitReferenceDate(value, fieldName) {
+  if (value === undefined) {
+    return undefined;
+  }
+  const normalized = normalizeNonEmptyString(value, fieldName);
+  if (!TRANSIT_REFERENCE_DATE_PATTERN.test(normalized)) {
+    throw new Error(`${fieldName} must be an ISO date (YYYY-MM-DD)`);
+  }
+  return normalized;
+}
+
 function normalizeLocalizedNames(value, fieldName) {
   if (value === undefined) {
     return undefined;
@@ -87,13 +100,20 @@ export function parseLocationRegistry(payload) {
       entry?.boundaryFileName,
       `locations[${index}].boundaryFileName`,
     );
+    const transitReferenceDate = normalizeTransitReferenceDate(
+      entry?.transitReferenceDate,
+      `locations[${index}].transitReferenceDate`,
+    );
     if (seenLocationIds.has(id)) {
       throw new Error(`duplicate location id: ${id}`);
     }
     seenLocationIds.add(id);
-    return localizedNames === undefined
-      ? { id, name, graphFileName, boundaryFileName }
-      : { id, name, localizedNames, graphFileName, boundaryFileName };
+    const base = { id, name, graphFileName, boundaryFileName };
+    return {
+      ...base,
+      ...(localizedNames === undefined ? null : { localizedNames }),
+      ...(transitReferenceDate === undefined ? null : { transitReferenceDate }),
+    };
   });
 
   normalizedLocations.sort(compareLocationEntriesAlphabetically);

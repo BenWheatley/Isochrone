@@ -2075,7 +2075,9 @@ export async function initializeMapData(shell, options = {}) {
     const edgeCostPrecomputeKernelPromise = loadEdgeCostPrecomputeKernel(wasmKernelOptions);
     const boundaryLoad = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
     const graph = await loadGraphBinary(shell, graphOptions);
-    updateTransitControlAvailability(shell, graph.header.nStops > 0);
+    updateTransitControlAvailability(shell, graph.header.nStops > 0, {
+      transitReferenceDate: options.transitReferenceDate,
+    });
     const edgeCostPrecomputeKernel = await edgeCostPrecomputeKernelPromise;
     const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
     updateRenderBackendBadge(shell, renderer);
@@ -5776,6 +5778,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           locationName: nextLocation.name,
           boundaries: { url: boundaryUrl },
           graph: { url: graphUrl },
+          transitReferenceDate: nextLocation.transitReferenceDate,
         });
         initializedMapData = mapData;
         currentLocationId = nextLocation.id;

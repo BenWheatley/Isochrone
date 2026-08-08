@@ -47,6 +47,9 @@ export function initializeAppShell(doc, options = {}) {
   const invertPointerButtonsInput = resolvedDocument.getElementById('invert-pointer-buttons');
   const modeSelect = resolvedDocument.getElementById('mode-select');
   const colourCycleMinutesInput = resolvedDocument.getElementById('colour-cycle-minutes');
+  const departureDateRow = resolvedDocument.getElementById('departure-date-row');
+  const departureDateInput = resolvedDocument.getElementById('departure-date');
+  const departureTimeRow = resolvedDocument.getElementById('departure-time-row');
   const departureTimeInput = resolvedDocument.getElementById('departure-time');
   const transitEnabledRow = resolvedDocument.getElementById('transit-enabled-row');
   const transitEnabledInput = resolvedDocument.getElementById('transit-enabled');
@@ -112,6 +115,15 @@ export function initializeAppShell(doc, options = {}) {
   }
   if (!colourCycleMinutesInput || colourCycleMinutesInput.tagName !== 'INPUT') {
     throw new Error('index.html is missing <input id="colour-cycle-minutes">');
+  }
+  if (!departureDateRow || departureDateRow.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="departure-date-row">');
+  }
+  if (!departureDateInput || departureDateInput.tagName !== 'INPUT') {
+    throw new Error('index.html is missing <input id="departure-date">');
+  }
+  if (!departureTimeRow || departureTimeRow.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="departure-time-row">');
   }
   if (!departureTimeInput || departureTimeInput.tagName !== 'INPUT') {
     throw new Error('index.html is missing <input id="departure-time">');
@@ -196,6 +208,9 @@ export function initializeAppShell(doc, options = {}) {
     invertPointerButtonsInput,
     modeSelect,
     colourCycleMinutesInput,
+    departureDateRow,
+    departureDateInput,
+    departureTimeRow,
     departureTimeInput,
     transitEnabledRow,
     transitEnabledInput,
@@ -502,17 +517,24 @@ export function getTransitOptionsFromShell(shell) {
 }
 
 /**
- * Toggles the "Public transit" control's visibility, and the VBB/CC BY
- * transit attribution line, based on whether the currently-loaded region's
- * graph actually has transit stops (only Berlin, for now) — both absent for
- * every other region rather than a per-region config flag. Resets the
- * checkbox when hiding so a stale checked state from a previous region
- * doesn't linger if the row is shown again later. The SVG export's
- * copyright notice reads both disclaimer elements' live textContent and
- * skips routingDisclaimerTransit while hidden, so toggling `hidden` here is
- * enough to keep exports correct too, no separate wiring needed there.
+ * Toggles the "Public transit" control's visibility, the departure
+ * date/time controls, and the VBB/CC BY transit attribution line, based on
+ * whether the currently-loaded region's graph actually has transit stops
+ * (only Berlin, for now) — all absent for every other region rather than a
+ * per-region config flag. Resets the checkbox when hiding so a stale
+ * checked state from a previous region doesn't linger if the row is shown
+ * again later. The SVG export's copyright notice reads both disclaimer
+ * elements' live textContent and skips routingDisclaimerTransit while
+ * hidden, so toggling `hidden` here is enough to keep exports correct too,
+ * no separate wiring needed there.
+ *
+ * options.transitReferenceDate (an ISO YYYY-MM-DD string) locks the
+ * departure-date input to the single day the region's GTFS build actually
+ * covers today (no multi-day calendar ingestion yet) - both min and max are
+ * set to that date so the picker is honest about the available range
+ * rather than implying a full calendar is meaningful.
  */
-export function updateTransitControlAvailability(shell, hasTransitData) {
+export function updateTransitControlAvailability(shell, hasTransitData, options = {}) {
   if (!shell || typeof shell !== 'object') {
     throw new Error('shell is required');
   }
@@ -525,6 +547,27 @@ export function updateTransitControlAvailability(shell, hasTransitData) {
   }
   if (shell.routingDisclaimerTransit) {
     shell.routingDisclaimerTransit.hidden = !hasTransitData;
+  }
+  if (shell.departureDateRow) {
+    shell.departureDateRow.hidden = !hasTransitData;
+  }
+  if (shell.departureTimeRow) {
+    shell.departureTimeRow.hidden = !hasTransitData;
+  }
+  if (shell.departureDateInput) {
+    const transitReferenceDate =
+      hasTransitData && typeof options.transitReferenceDate === 'string'
+        ? options.transitReferenceDate
+        : null;
+    if (transitReferenceDate) {
+      shell.departureDateInput.min = transitReferenceDate;
+      shell.departureDateInput.max = transitReferenceDate;
+      shell.departureDateInput.value = transitReferenceDate;
+    } else {
+      shell.departureDateInput.removeAttribute('min');
+      shell.departureDateInput.removeAttribute('max');
+      shell.departureDateInput.value = '';
+    }
   }
 }
 
