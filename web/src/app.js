@@ -5837,7 +5837,9 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           shell.routingDisclaimerTransit && !shell.routingDisclaimerTransit.hidden
             ? (shell.routingDisclaimerTransit.textContent ?? '')
             : '';
-        const copyrightNotice = `${shell.routingDisclaimer?.textContent ?? ''} ${transitDisclaimerText}`
+        const osmDisclaimerText =
+          shell.routingDisclaimerOsm?.textContent ?? shell.routingDisclaimer?.textContent ?? '';
+        const copyrightNotice = `${osmDisclaimerText} ${transitDisclaimerText}`
           .replace(/\s+/g, ' ')
           .trim();
 

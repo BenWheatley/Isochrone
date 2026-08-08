@@ -41,6 +41,7 @@ export function initializeAppShell(doc, options = {}) {
   const routingStatus = resolvedDocument.getElementById('routing-status');
   const renderBackendBadge = resolvedDocument.getElementById('render-backend-badge');
   const routingDisclaimer = resolvedDocument.getElementById('routing-disclaimer');
+  const routingDisclaimerOsm = resolvedDocument.getElementById('routing-disclaimer-osm');
   const routingDisclaimerTransit = resolvedDocument.getElementById('routing-disclaimer-transit');
   const themeSelect = resolvedDocument.getElementById('theme-select');
   const invertPointerButtonsInput = resolvedDocument.getElementById('invert-pointer-buttons');
@@ -94,8 +95,11 @@ export function initializeAppShell(doc, options = {}) {
   if (!routingDisclaimer || routingDisclaimer.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="routing-disclaimer">');
   }
-  if (!routingDisclaimerTransit || routingDisclaimerTransit.tagName !== 'DIV') {
-    throw new Error('index.html is missing <div id="routing-disclaimer-transit">');
+  if (!routingDisclaimerOsm || routingDisclaimerOsm.tagName !== 'SPAN') {
+    throw new Error('index.html is missing <span id="routing-disclaimer-osm">');
+  }
+  if (!routingDisclaimerTransit || routingDisclaimerTransit.tagName !== 'SPAN') {
+    throw new Error('index.html is missing <span id="routing-disclaimer-transit">');
   }
   if (!themeSelect || themeSelect.tagName !== 'SELECT') {
     throw new Error('index.html is missing <select id="theme-select">');
@@ -186,6 +190,7 @@ export function initializeAppShell(doc, options = {}) {
     routingStatus,
     renderBackendBadge,
     routingDisclaimer,
+    routingDisclaimerOsm,
     routingDisclaimerTransit,
     themeSelect,
     invertPointerButtonsInput,
