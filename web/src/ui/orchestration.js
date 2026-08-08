@@ -502,6 +502,21 @@ export function getAllowedModeMaskFromShell(shell) {
     }
   }
 
+  // Public transit is unusable without walking to/from a stop - CSA's own
+  // walk-attach-cost model assumes exactly that for the "last mile" at
+  // both ends, regardless of which other modes are selected. Without this,
+  // checking only "Public transit" (nothing else) left allowedModeMask at
+  // 0 and silently fell back to Car, and checking e.g. only "Ferry" with
+  // transit produced a near-empty pass-1 field (ferry edges only, no way
+  // to actually reach a ferry terminal or transit stop on foot). Folding
+  // in EDGE_MODE_WALK_BIT whenever transit is checked makes "transit only"
+  // produce a real (if island-y) walk+transit isochrone instead.
+  const transitChecked =
+    shell.transitEnabledInput?.checked === true && shell.transitEnabledRow?.hidden !== true;
+  if (transitChecked) {
+    allowedModeMask |= EDGE_MODE_WALK_BIT;
+  }
+
   if (allowedModeMask === 0) {
     setSelectedModeValues(routingModeCheckboxes, ['car']);
     return EDGE_MODE_CAR_BIT;

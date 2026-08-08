@@ -17,6 +17,7 @@ import {
   BIKE_CRUISE_SPEED_KPH,
   DEFAULT_WALK_SPEED_KPH,
   EDGE_MODE_CAR_BIT,
+  EDGE_MODE_WALK_BIT,
   EDGE_MODE_WATER_BIT,
 } from '../src/config/constants.js';
 
@@ -151,24 +152,43 @@ test('getAllowedModeMaskFromShell combines walk and water bits when both selecte
   assert.notEqual(mask, EDGE_MODE_WATER_BIT);
 });
 
-test('getAllowedModeMaskFromShell ignores the transit checkbox entirely (it is not an edge-mode bit)', () => {
+test('getAllowedModeMaskFromShell folds walk into the mask whenever transit is checked (it is not an edge-mode bit itself, but needs last-mile walking)', () => {
   const modeCheckboxes = createModeCheckboxes(['car']);
   const transitEnabledInput = createModeCheckbox('transit', true);
   modeCheckboxes.push(transitEnabledInput);
   const shell = { modeCheckboxes, transitEnabledInput };
 
-  assert.equal(getAllowedModeMaskFromShell(shell), EDGE_MODE_CAR_BIT);
+  assert.equal(getAllowedModeMaskFromShell(shell), EDGE_MODE_CAR_BIT | EDGE_MODE_WALK_BIT);
 });
 
-test('getAllowedModeMaskFromShell falls back to car without touching the transit checkbox when nothing else is selected', () => {
+test('getAllowedModeMaskFromShell produces a walk+transit mask (not a fallback to car) when only transit is checked', () => {
   const modeCheckboxes = createModeCheckboxes([]);
   const transitEnabledInput = createModeCheckbox('transit', true);
   modeCheckboxes.push(transitEnabledInput);
   const shell = { modeCheckboxes, transitEnabledInput };
 
+  assert.equal(getAllowedModeMaskFromShell(shell), EDGE_MODE_WALK_BIT);
+  assert.equal(modeCheckboxes.find((checkbox) => checkbox.value === 'car').checked, false);
+  assert.equal(transitEnabledInput.checked, true);
+});
+
+test('getAllowedModeMaskFromShell falls back to car when neither a mode nor transit is selected', () => {
+  const modeCheckboxes = createModeCheckboxes([]);
+  const transitEnabledInput = createModeCheckbox('transit', false);
+  modeCheckboxes.push(transitEnabledInput);
+  const shell = { modeCheckboxes, transitEnabledInput };
+
   assert.equal(getAllowedModeMaskFromShell(shell), EDGE_MODE_CAR_BIT);
   assert.equal(modeCheckboxes.find((checkbox) => checkbox.value === 'car').checked, true);
-  assert.equal(transitEnabledInput.checked, true);
+});
+
+test('getAllowedModeMaskFromShell ignores a checked-but-hidden transit checkbox (no transit data for the region)', () => {
+  const modeCheckboxes = createModeCheckboxes(['car']);
+  const transitEnabledInput = createModeCheckbox('transit', true);
+  modeCheckboxes.push(transitEnabledInput);
+  const shell = { modeCheckboxes, transitEnabledInput, transitEnabledRow: { hidden: true } };
+
+  assert.equal(getAllowedModeMaskFromShell(shell), EDGE_MODE_CAR_BIT);
 });
 
 test('getSpeedOptionsFromShell converts km/h inputs to the expected units, defaulting when missing/invalid', () => {
