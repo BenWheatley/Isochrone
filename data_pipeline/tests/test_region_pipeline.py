@@ -432,6 +432,44 @@ def test_build_location_manifest_strips_pipeline_only_fields() -> None:
     }
 
 
+def test_build_location_manifest_includes_transit_reference_date_when_configured() -> None:
+    manifest = build_location_manifest(
+        [
+            RegionSpec(
+                id="berlin",
+                name="Berlin",
+                graph_file_name="graph-walk.bin.gz",
+                boundary_file_name="berlin-district-boundaries-canvas.json",
+                location_relation='rel(62422)["name"="Berlin"]',
+                subdivision_admin_level="9",
+                subdivision_discovery_modes=("area", "subarea"),
+                epsg=25833,
+                graph_binary_file_name="graph-walk.bin",
+                graph_summary_file_name="graph-binary-summary.json",
+                boundary_resolution=25.0,
+                boundary_units="meters",
+                transit_feed=TransitFeedSpec(
+                    base_url="https://vbb-gtfs.jannisr.de/latest",
+                    licence="CC BY 4.0 — VBB",
+                    reference_date="2026-08-12",
+                ),
+            )
+        ]
+    )
+
+    assert manifest == {
+        "locations": [
+            {
+                "id": "berlin",
+                "name": "Berlin",
+                "graphFileName": "graph-walk.bin.gz",
+                "boundaryFileName": "berlin-district-boundaries-canvas.json",
+                "transitReferenceDate": "2026-08-12",
+            }
+        ]
+    }
+
+
 def test_run_build_pipeline_writes_outputs_and_returns_manifest(
     tmp_path: Path,
 ) -> None:

@@ -215,6 +215,8 @@ def _build_manifest_location_entry(spec: RegionSpec) -> dict[str, Any]:
     }
     if spec.localized_names:
         entry["localizedNames"] = dict(spec.localized_names)
+    if spec.transit_feed is not None:
+        entry["transitReferenceDate"] = spec.transit_feed.reference_date
     return entry
 
 
