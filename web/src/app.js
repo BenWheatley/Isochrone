@@ -710,12 +710,14 @@ export async function runWalkingIsochroneFromSourceNode(
       && nStops > 0
       && options.transitEnabled
       && Number.isFinite(options.departureSecondsOfDay)
+      && Number.isInteger(options.departureWeekdayIndex)
     ) {
       const csaResult = runConnectionScanFromWalkingReachableStops(
         mapData.graph,
         finalDistSeconds,
         {
           departureSecondsOfDay: options.departureSecondsOfDay,
+          departureWeekdayIndex: options.departureWeekdayIndex,
           timeLimitSeconds,
         },
       );
@@ -1392,15 +1394,18 @@ export function rerenderIsochroneFromSnapshotWithStatus(shell, mapData, options 
 
 /**
  * Connection Scan Algorithm pass: given a completed walking search's
- * distSeconds and a departure time-of-day, finds the earliest transit
- * arrival at every stop reachable from the walking-reachable set, and
- * returns seed arrays for a second multi-source Dijkstra pass (see
- * runWalkingIsochroneFromSourceNode). Stops are pre-filtered to a single
- * reference service day at build time (data_pipeline/gtfs_transit.py), so
- * this scan doesn't need to consult service_day_mask — every connection in
- * the table is already valid for that day. Connections are stored sorted
- * by departure time (a build-time invariant), so the scan can break out
- * early once departures exceed the time budget.
+ * distSeconds and a departure date/time, finds the earliest transit arrival
+ * at every stop reachable from the walking-reachable set, and returns seed
+ * arrays for a second multi-source Dijkstra pass (see
+ * runWalkingIsochroneFromSourceNode). The build-time pipeline
+ * (data_pipeline/gtfs_transit.py) now includes every weekday-recurring
+ * service across the feed's whole calendar window, not just one reference
+ * day, so this scan filters each connection against
+ * graph.tedgeServiceDayMask using the departure date's ISO weekday bit
+ * (0=Monday..6=Sunday) before accepting it. Connections are stored sorted
+ * by time-of-day departure regardless of which weekday(s) they run on, so
+ * the scan can still break out early once departures exceed the time
+ * budget.
  */
 export function runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, options = {}) {
   validateGraphForRouting(graph);
@@ -1418,6 +1423,15 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
   if (!Number.isFinite(departureSecondsOfDay) || departureSecondsOfDay < 0) {
     throw new Error('options.departureSecondsOfDay must be a non-negative finite number');
   }
+  const departureWeekdayIndex = options.departureWeekdayIndex;
+  if (
+    !Number.isInteger(departureWeekdayIndex)
+    || departureWeekdayIndex < 0
+    || departureWeekdayIndex > 6
+  ) {
+    throw new Error('options.departureWeekdayIndex must be an integer between 0 and 6');
+  }
+  const departureWeekdayBit = 1 << departureWeekdayIndex;
   const timeLimitSeconds =
     Number.isFinite(options.timeLimitSeconds) && options.timeLimitSeconds > 0
       ? options.timeLimitSeconds
@@ -1449,6 +1463,9 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
     const departureSeconds = graph.tedgeDepartureSeconds[tedgeIndex];
     if (departureSeconds > budgetEndSeconds) {
       break;
+    }
+    if (!(graph.tedgeServiceDayMask[tedgeIndex] & departureWeekdayBit)) {
+      continue;
     }
     const fromStopIndex = graph.tedgeFromStop[tedgeIndex];
     if (departureSeconds < earliestArrivalSeconds[fromStopIndex]) {
@@ -2076,7 +2093,7 @@ export async function initializeMapData(shell, options = {}) {
     const boundaryLoad = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
     const graph = await loadGraphBinary(shell, graphOptions);
     updateTransitControlAvailability(shell, graph.header.nStops > 0, {
-      transitReferenceDate: options.transitReferenceDate,
+      transitDateRange: options.transitDateRange,
     });
     const edgeCostPrecomputeKernel = await edgeCostPrecomputeKernelPromise;
     const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
@@ -5778,7 +5795,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           locationName: nextLocation.name,
           boundaries: { url: boundaryUrl },
           graph: { url: graphUrl },
-          transitReferenceDate: nextLocation.transitReferenceDate,
+          transitDateRange: nextLocation.transitDateRange,
         });
         initializedMapData = mapData;
         currentLocationId = nextLocation.id;

@@ -494,6 +494,45 @@ export function getColourCycleMinutesFromShell(shell) {
   return clampedCycleMinutes;
 }
 
+/**
+ * Converts an ISO YYYY-MM-DD date string to an ISO weekday index
+ * (0=Monday..6=Sunday, matching data_pipeline/gtfs_transit.py's
+ * _WEEKDAY_COLUMNS convention and the graph binary's tedgeServiceDayMask
+ * bit order). Parsed as UTC so the result doesn't shift with the browser's
+ * local timezone around midnight.
+ */
+export function isoWeekdayIndexForDateString(dateString) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateString ?? '');
+  if (!match) {
+    return Number.NaN;
+  }
+  const [, year, month, day] = match;
+  const utcDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (Number.isNaN(utcDate.getTime())) {
+    return Number.NaN;
+  }
+  const sundayZeroIndex = utcDate.getUTCDay();
+  return (sundayZeroIndex + 6) % 7;
+}
+
+function todayIsoDateString() {
+  const now = new Date();
+  const year = String(now.getFullYear()).padStart(4, '0');
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function clampIsoDateToRange(dateString, minDateString, maxDateString) {
+  if (dateString < minDateString) {
+    return minDateString;
+  }
+  if (dateString > maxDateString) {
+    return maxDateString;
+  }
+  return dateString;
+}
+
 export function getTransitOptionsFromShell(shell) {
   if (!shell || typeof shell !== 'object') {
     throw new Error('shell is required');
@@ -513,7 +552,9 @@ export function getTransitOptionsFromShell(shell) {
     }
   }
 
-  return { transitEnabled, departureSecondsOfDay };
+  const departureWeekdayIndex = isoWeekdayIndexForDateString(shell.departureDateInput?.value);
+
+  return { transitEnabled, departureSecondsOfDay, departureWeekdayIndex };
 }
 
 /**
@@ -528,11 +569,15 @@ export function getTransitOptionsFromShell(shell) {
  * hidden, so toggling `hidden` here is enough to keep exports correct too,
  * no separate wiring needed there.
  *
- * options.transitReferenceDate (an ISO YYYY-MM-DD string) locks the
- * departure-date input to the single day the region's GTFS build actually
- * covers today (no multi-day calendar ingestion yet) - both min and max are
- * set to that date so the picker is honest about the available range
- * rather than implying a full calendar is meaningful.
+ * options.transitDateRange (an object with ISO YYYY-MM-DD `min`/`max`
+ * strings) constrains the departure-date input to the actual calendar
+ * window the region's GTFS build covers — every weekday-recurring service
+ * across that whole window is included (single-date calendar_dates.txt
+ * exceptions like holidays are not modeled; see
+ * data_pipeline/gtfs_transit.py's resolve_recurring_service_ids_and_date_range).
+ * The input defaults to today's date clamped into that range so a query
+ * defaults to "now" whenever that's actually a valid date. options.todayIsoDate
+ * overrides "today" for deterministic tests.
  */
 export function updateTransitControlAvailability(shell, hasTransitData, options = {}) {
   if (!shell || typeof shell !== 'object') {
@@ -555,14 +600,23 @@ export function updateTransitControlAvailability(shell, hasTransitData, options 
     shell.departureTimeRow.hidden = !hasTransitData;
   }
   if (shell.departureDateInput) {
-    const transitReferenceDate =
-      hasTransitData && typeof options.transitReferenceDate === 'string'
-        ? options.transitReferenceDate
+    const transitDateRange =
+      hasTransitData
+      && options.transitDateRange
+      && typeof options.transitDateRange.min === 'string'
+      && typeof options.transitDateRange.max === 'string'
+        ? options.transitDateRange
         : null;
-    if (transitReferenceDate) {
-      shell.departureDateInput.min = transitReferenceDate;
-      shell.departureDateInput.max = transitReferenceDate;
-      shell.departureDateInput.value = transitReferenceDate;
+    if (transitDateRange) {
+      const todayIsoDate =
+        typeof options.todayIsoDate === 'string' ? options.todayIsoDate : todayIsoDateString();
+      shell.departureDateInput.min = transitDateRange.min;
+      shell.departureDateInput.max = transitDateRange.max;
+      shell.departureDateInput.value = clampIsoDateToRange(
+        todayIsoDate,
+        transitDateRange.min,
+        transitDateRange.max,
+      );
     } else {
       shell.departureDateInput.removeAttribute('min');
       shell.departureDateInput.removeAttribute('max');

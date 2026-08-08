@@ -326,7 +326,7 @@ function createFixtureBinaryBuffer() {
 // throughout these fixtures), plus 2 stops sitting exactly on node 0 and
 // node 2 (zero walk-attach cost) connected by a single fast transit edge —
 // a "subway" that bypasses the 144s walk between them.
-function createFixtureBinaryBufferWithTransit() {
+function createFixtureBinaryBufferWithTransit(serviceDayMask = 0b1111111) {
   const headerSize = 64;
   const nodeRecordSize = 16;
   const edgeRecordSize = 12;
@@ -402,7 +402,7 @@ function createFixtureBinaryBufferWithTransit() {
   view.setUint32(tedgeTableOffset + 8, 1000, true); // departure_seconds_from_midnight
   view.setUint16(tedgeTableOffset + 12, 10, true); // travel_seconds
   view.setUint16(tedgeTableOffset + 14, 0, true); // route_id
-  view.setUint32(tedgeTableOffset + 16, 0, true); // service_day_mask
+  view.setUint32(tedgeTableOffset + 16, serviceDayMask, true); // service_day_mask
 
   return buffer;
 }
@@ -456,6 +456,7 @@ test('runConnectionScanFromWalkingReachableStops seeds a stop reached faster by 
 
   const result = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
     departureSecondsOfDay: 990,
+    departureWeekdayIndex: 2,
     timeLimitSeconds: 200,
   });
 
@@ -475,11 +476,35 @@ test('runConnectionScanFromWalkingReachableStops finds no improvement when the c
   // nothing to catch.
   const result = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
     departureSecondsOfDay: 1500,
+    departureWeekdayIndex: 2,
     timeLimitSeconds: 200,
   });
 
   assert.equal(result.seedNodeIndices.length, 0);
   assert.equal(result.seedStartDistSeconds.length, 0);
+});
+
+test('runConnectionScanFromWalkingReachableStops skips a connection whose service_day_mask excludes the departure weekday', () => {
+  // Mask 0b0011111 = Monday..Friday only (bit 0 = Monday, matching
+  // data_pipeline/gtfs_transit.py's _WEEKDAY_COLUMNS order). Querying for
+  // Sunday (index 6) must find the connection timing-eligible but
+  // day-ineligible, same as if it didn't exist.
+  const graph = parseGraphBinary(createFixtureBinaryBufferWithTransit(0b0011111));
+  const walkDistSeconds = new Float32Array([0, 72, 144]);
+
+  const sundayResult = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
+    departureSecondsOfDay: 990,
+    departureWeekdayIndex: 6,
+    timeLimitSeconds: 200,
+  });
+  assert.equal(sundayResult.seedNodeIndices.length, 0);
+
+  const wednesdayResult = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
+    departureSecondsOfDay: 990,
+    departureWeekdayIndex: 2,
+    timeLimitSeconds: 200,
+  });
+  assert.equal(wednesdayResult.seedNodeIndices.length, 1);
 });
 
 test('runConnectionScanFromWalkingReachableStops returns empty seeds for a graph with no stops', () => {
@@ -488,6 +513,7 @@ test('runConnectionScanFromWalkingReachableStops returns empty seeds for a graph
 
   const result = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
     departureSecondsOfDay: 0,
+    departureWeekdayIndex: 2,
     timeLimitSeconds: 200,
   });
 
@@ -525,6 +551,7 @@ test('runWalkingIsochroneFromSourceNode repaints the canvas with transit-augment
     allowedModeMask: EDGE_MODE_WALK_BIT,
     transitEnabled: true,
     departureSecondsOfDay: 990,
+    departureWeekdayIndex: 2,
     colourCycleMinutes: 60,
   });
 
@@ -566,6 +593,7 @@ test('runWalkingIsochroneFromSourceNode does not repaint when transit finds no i
     allowedModeMask: EDGE_MODE_WALK_BIT,
     transitEnabled: true,
     departureSecondsOfDay: 1500,
+    departureWeekdayIndex: 2,
     colourCycleMinutes: 60,
   });
 

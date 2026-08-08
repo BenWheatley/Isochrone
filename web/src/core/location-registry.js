@@ -22,17 +22,24 @@ function normalizeLocaleKey(locale) {
   return locale.trim().replace('_', '-').toLowerCase();
 }
 
-const TRANSIT_REFERENCE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-function normalizeTransitReferenceDate(value, fieldName) {
+function normalizeIsoDateRange(value, fieldName) {
   if (value === undefined) {
     return undefined;
   }
-  const normalized = normalizeNonEmptyString(value, fieldName);
-  if (!TRANSIT_REFERENCE_DATE_PATTERN.test(normalized)) {
-    throw new Error(`${fieldName} must be an ISO date (YYYY-MM-DD)`);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an object when provided`);
   }
-  return normalized;
+  const min = normalizeNonEmptyString(value.min, `${fieldName}.min`);
+  const max = normalizeNonEmptyString(value.max, `${fieldName}.max`);
+  if (!ISO_DATE_PATTERN.test(min) || !ISO_DATE_PATTERN.test(max)) {
+    throw new Error(`${fieldName}.min and ${fieldName}.max must be ISO dates (YYYY-MM-DD)`);
+  }
+  if (min > max) {
+    throw new Error(`${fieldName}.min must not be after ${fieldName}.max`);
+  }
+  return { min, max };
 }
 
 function normalizeLocalizedNames(value, fieldName) {
@@ -100,9 +107,9 @@ export function parseLocationRegistry(payload) {
       entry?.boundaryFileName,
       `locations[${index}].boundaryFileName`,
     );
-    const transitReferenceDate = normalizeTransitReferenceDate(
-      entry?.transitReferenceDate,
-      `locations[${index}].transitReferenceDate`,
+    const transitDateRange = normalizeIsoDateRange(
+      entry?.transitDateRange,
+      `locations[${index}].transitDateRange`,
     );
     if (seenLocationIds.has(id)) {
       throw new Error(`duplicate location id: ${id}`);
@@ -112,7 +119,7 @@ export function parseLocationRegistry(payload) {
     return {
       ...base,
       ...(localizedNames === undefined ? null : { localizedNames }),
-      ...(transitReferenceDate === undefined ? null : { transitReferenceDate }),
+      ...(transitDateRange === undefined ? null : { transitDateRange }),
     };
   });
 

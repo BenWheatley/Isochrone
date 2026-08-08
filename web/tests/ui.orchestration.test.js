@@ -153,6 +153,7 @@ test('getAllowedModeMaskFromShell combines walk and water bits when both selecte
 test('getTransitOptionsFromShell parses HH:MM departure time into seconds', () => {
   const shell = {
     departureTimeInput: createInput('08:30'),
+    departureDateInput: createInput('2026-08-12'),
     transitEnabledInput: createCheckbox(true),
     transitEnabledRow: { hidden: false },
   };
@@ -165,6 +166,7 @@ test('getTransitOptionsFromShell parses HH:MM departure time into seconds', () =
 test('getTransitOptionsFromShell reports transitEnabled=false when the control row is hidden', () => {
   const shell = {
     departureTimeInput: createInput('08:30'),
+    departureDateInput: createInput('2026-08-12'),
     transitEnabledInput: createCheckbox(true),
     transitEnabledRow: { hidden: true },
   };
@@ -176,6 +178,7 @@ test('getTransitOptionsFromShell reports transitEnabled=false when the control r
 test('getTransitOptionsFromShell reports transitEnabled=false when the checkbox is unchecked', () => {
   const shell = {
     departureTimeInput: createInput('08:30'),
+    departureDateInput: createInput('2026-08-12'),
     transitEnabledInput: createCheckbox(false),
     transitEnabledRow: { hidden: false },
   };
@@ -187,12 +190,38 @@ test('getTransitOptionsFromShell reports transitEnabled=false when the checkbox 
 test('getTransitOptionsFromShell returns NaN departureSecondsOfDay for a malformed time value', () => {
   const shell = {
     departureTimeInput: createInput(''),
+    departureDateInput: createInput('2026-08-12'),
     transitEnabledInput: createCheckbox(true),
     transitEnabledRow: { hidden: false },
   };
 
   const options = getTransitOptionsFromShell(shell);
   assert.ok(Number.isNaN(options.departureSecondsOfDay));
+});
+
+test('getTransitOptionsFromShell computes an ISO weekday index (Monday=0) from the departure date', () => {
+  const shell = {
+    departureTimeInput: createInput('08:30'),
+    // 2026-08-12 is a Wednesday.
+    departureDateInput: createInput('2026-08-12'),
+    transitEnabledInput: createCheckbox(true),
+    transitEnabledRow: { hidden: false },
+  };
+
+  const options = getTransitOptionsFromShell(shell);
+  assert.equal(options.departureWeekdayIndex, 2);
+});
+
+test('getTransitOptionsFromShell returns NaN departureWeekdayIndex for a malformed date value', () => {
+  const shell = {
+    departureTimeInput: createInput('08:30'),
+    departureDateInput: createInput(''),
+    transitEnabledInput: createCheckbox(true),
+    transitEnabledRow: { hidden: false },
+  };
+
+  const options = getTransitOptionsFromShell(shell);
+  assert.ok(Number.isNaN(options.departureWeekdayIndex));
 });
 
 function createDateInput() {
@@ -210,7 +239,7 @@ function createDateInput() {
   };
 }
 
-test('updateTransitControlAvailability shows the row and attribution and preserves checked state when transit data exists', () => {
+test('updateTransitControlAvailability shows the row and attribution, and clamps the default date into the transit date range', () => {
   const shell = {
     transitEnabledRow: { hidden: true },
     transitEnabledInput: createCheckbox(true),
@@ -220,16 +249,37 @@ test('updateTransitControlAvailability shows the row and attribution and preserv
     departureDateInput: createDateInput(),
   };
 
-  updateTransitControlAvailability(shell, true, { transitReferenceDate: '2026-08-12' });
+  updateTransitControlAvailability(shell, true, {
+    transitDateRange: { min: '2026-01-01', max: '2026-12-31' },
+    todayIsoDate: '2026-08-08',
+  });
 
   assert.equal(shell.transitEnabledRow.hidden, false);
   assert.equal(shell.transitEnabledInput.checked, true);
   assert.equal(shell.routingDisclaimerTransit.hidden, false);
   assert.equal(shell.departureDateRow.hidden, false);
   assert.equal(shell.departureTimeRow.hidden, false);
-  assert.equal(shell.departureDateInput.min, '2026-08-12');
-  assert.equal(shell.departureDateInput.max, '2026-08-12');
-  assert.equal(shell.departureDateInput.value, '2026-08-12');
+  assert.equal(shell.departureDateInput.min, '2026-01-01');
+  assert.equal(shell.departureDateInput.max, '2026-12-31');
+  assert.equal(shell.departureDateInput.value, '2026-08-08');
+});
+
+test('updateTransitControlAvailability clamps "today" to the range bounds when today falls outside it', () => {
+  const shell = {
+    transitEnabledRow: { hidden: true },
+    transitEnabledInput: createCheckbox(true),
+    routingDisclaimerTransit: { hidden: true },
+    departureDateRow: { hidden: true },
+    departureTimeRow: { hidden: true },
+    departureDateInput: createDateInput(),
+  };
+
+  updateTransitControlAvailability(shell, true, {
+    transitDateRange: { min: '2026-09-01', max: '2026-12-31' },
+    todayIsoDate: '2026-08-08',
+  });
+
+  assert.equal(shell.departureDateInput.value, '2026-09-01');
 });
 
 test('updateTransitControlAvailability hides the row, attribution, and resets the checkbox when transit data is absent', () => {
