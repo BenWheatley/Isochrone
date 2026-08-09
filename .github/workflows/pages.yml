@@ -33,9 +33,13 @@ jobs:
       - name: Prepare static site artifact
         run: |
           set -euxo pipefail
-          mkdir -p site/src site/wasm site/data_pipeline/output
+          mkdir -p site/src site/wasm site/fonts site/locales site/data_pipeline/output
           cp web/index.html site/index.html
           cp -R web/src/. site/src/
+          cp -R web/locales/. site/locales/
+          # Whole dir: the Apache-2.0 licence text ships alongside the font,
+          # since serving the site redistributes it (see THIRD_PARTY_NOTICES.md).
+          cp -R web/fonts/. site/fonts/
           cp web/wasm/routing-kernel.wasm site/wasm/
           cp data_pipeline/output/berlin-district-boundaries-canvas.json site/data_pipeline/output/
           cp data_pipeline/output/graph-walk.bin.gz site/data_pipeline/output/

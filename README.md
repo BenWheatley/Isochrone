@@ -202,6 +202,12 @@ make wasm-build
 - `web/`: Browser app source (vanilla JS modules, no bundler)
 - `docs/`: Design and process documentation
 - `PLAN.md`: Delivery plan and architecture roadmap
+- `THIRD_PARTY_NOTICES.md`: Licences for redistributed assets and data
+
+## Third-party licences
+Map data © OpenStreetMap contributors (ODbL); Berlin transit data © VBB
+(CC BY 4.0); transport-mode icons from Google's Material Symbols (Apache-2.0,
+subset and self-hosted). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Agentic coding baseline
 This repo is configured for autonomous-agent workflows with:

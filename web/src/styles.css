@@ -1,3 +1,31 @@
+/* Material Symbols (Apache-2.0, © Google) - self-hosted and subset to only
+   the five transport glyphs this app uses, so there's no runtime dependency
+   on Google Fonts (and no third-party request from users' browsers). See
+   THIRD_PARTY_NOTICES.md. font-display:block avoids briefly painting the raw
+   ligature text ("directions_walk") before the font arrives. */
+@font-face {
+  font-family: 'Material Symbols Outlined';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url(../fonts/material-symbols-subset.woff2) format('woff2');
+}
+
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+}
+
 :root {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   /* "light dark" is the auto/unset default - the browser (and the
@@ -438,8 +466,7 @@ body {
 }
 
 .mode-icon {
-  width: 1.4rem;
-  height: 1.4rem;
+  font-size: 1.4rem;
   pointer-events: none;
 }
 
