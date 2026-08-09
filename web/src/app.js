@@ -19,6 +19,7 @@ import {
   STOP_RECORD_SIZE,
   SUPPORTED_GRAPH_VERSIONS,
   TEDGE_RECORD_SIZE,
+  TRANSIT_ONLY_ALLOWED_MODE_MASK,
   WALKING_SPEED_M_S,
 } from './config/constants.js';
 import {
@@ -725,6 +726,7 @@ export async function runWalkingIsochroneFromSourceNode(
       && Number.isFinite(options.departureSecondsOfDay)
       && Number.isInteger(options.departureWeekdayIndex)
     ) {
+      const isTransitOnlyRouting = allowedModeMask === TRANSIT_ONLY_ALLOWED_MODE_MASK;
       const csaResult = runConnectionScanFromWalkingReachableStops(
         mapData.graph,
         finalDistSeconds,
@@ -733,6 +735,11 @@ export async function runWalkingIsochroneFromSourceNode(
           departureWeekdayIndex: options.departureWeekdayIndex,
           timeLimitSeconds,
           walkingSpeedMps,
+          // Pass 1 cannot move at all under the transit-only sentinel mask, so
+          // give the CSA scan the origin's own coordinates to attach directly
+          // to nearby stops (see runConnectionScanFromWalkingReachableStops).
+          originXM: isTransitOnlyRouting ? mapData.graph.nodeI32[sourceNodeIndex * 4] : undefined,
+          originYM: isTransitOnlyRouting ? mapData.graph.nodeI32[sourceNodeIndex * 4 + 1] : undefined,
         },
       );
       if (csaResult.seedNodeIndices.length > 0) {
@@ -799,6 +806,20 @@ export async function runWalkingIsochroneFromSourceNode(
         colourCycleMinutes: options.colourCycleMinutes,
         colourTheme: options.colourTheme,
       });
+      // The status text above was already set by
+      // runSearchTimeSlicedWithRendering from the walk-only pass-1 result
+      // (including a possible "no reachable network" verdict) before this
+      // function's CSA/pass-2 step ever ran - correct it now that
+      // finalDistSeconds reflects the transit-augmented reality.
+      if (shell.routingStatus) {
+        const transitReachedCount = countFiniteTravelTimes(finalDistSeconds);
+        setRoutingStatus(
+          shell,
+          transitReachedCount > 1
+            ? formatRoutingStatusDone(null, { messages: getShellLocaleMessages(shell) })
+            : formatRoutingStatusNoReachable(null, { messages: getShellLocaleMessages(shell) }),
+        );
+      }
     }
   }
   return runSummary;
@@ -1262,8 +1283,16 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   const supportsGpuIndexedEdgeInterpolation =
     typeof renderer.drawTravelTimeEdgesFromNodeTimes === 'function';
   const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
+  // Under the transit-only sentinel mask no real edge ever matches, so the
+  // edge-interpolated renderers below would draw zero edges (and, since
+  // they early-return before clearing when there's nothing to draw, would
+  // leave a stale previous frame on screen instead of showing an empty
+  // canvas). The grid/point renderer further down paints reachable nodes as
+  // individual pixels regardless of edge connectivity and always clears
+  // first, so route the transit-only case straight there.
+  const isTransitOnlyAllowedModeMask = allowedModeMask === TRANSIT_ONLY_ALLOWED_MODE_MASK;
 
-  if (supportsGpuEdgeInterpolation) {
+  if (supportsGpuEdgeInterpolation && !isTransitOnlyAllowedModeMask) {
     const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
       snapshot.edgeTraversalCostSeconds,
       mapData.graph.header.nEdges,
@@ -1458,6 +1487,17 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
       ? options.walkingSpeedMps
       : WALKING_SPEED_M_S;
 
+  // When routing with strictly no real travel mode (Public transit alone -
+  // see TRANSIT_ONLY_ALLOWED_MODE_MASK in constants.js), pass 1 cannot move
+  // at all, so walkDistSeconds is only finite at the origin node itself and
+  // the loop below would never find a boardable stop. originXM/originYM let
+  // the caller supply the origin's own raw coordinates so it can attach
+  // directly to nearby stops with the same small, fixed geometric connector
+  // already used for each stop's own node attachment - not a general walking
+  // search, just "you walked from where you clicked to the platform".
+  const hasOriginDirectAttach =
+    Number.isFinite(options.originXM) && Number.isFinite(options.originYM);
+
   const earliestArrivalSeconds = new Float64Array(nStops).fill(Number.POSITIVE_INFINITY);
   const walkAttachCostSeconds = new Float64Array(nStops);
   const improvedByTransit = new Uint8Array(nStops);
@@ -1469,12 +1509,22 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
     const attachCostSeconds = Math.sqrt(dx * dx + dy * dy) / walkingSpeedMps;
     walkAttachCostSeconds[stopIndex] = attachCostSeconds;
 
+    let bestArrivalSeconds = Number.POSITIVE_INFINITY;
     const walkElapsedSeconds = walkDistSeconds[nodeIndex];
     if (Number.isFinite(walkElapsedSeconds)) {
-      const arrivalSeconds = departureSecondsOfDay + walkElapsedSeconds + attachCostSeconds;
-      if (arrivalSeconds <= budgetEndSeconds) {
-        earliestArrivalSeconds[stopIndex] = arrivalSeconds;
+      bestArrivalSeconds = departureSecondsOfDay + walkElapsedSeconds + attachCostSeconds;
+    }
+    if (hasOriginDirectAttach) {
+      const originDx = graph.stopX[stopIndex] - options.originXM;
+      const originDy = graph.stopY[stopIndex] - options.originYM;
+      const directWalkSeconds = Math.sqrt(originDx * originDx + originDy * originDy) / walkingSpeedMps;
+      const directArrivalSeconds = departureSecondsOfDay + directWalkSeconds;
+      if (directArrivalSeconds < bestArrivalSeconds) {
+        bestArrivalSeconds = directArrivalSeconds;
       }
+    }
+    if (bestArrivalSeconds <= budgetEndSeconds) {
+      earliestArrivalSeconds[stopIndex] = bestArrivalSeconds;
     }
   }
 
@@ -4963,7 +5013,15 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
 
   const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
   updateRenderBackendBadge(shell, renderer);
-  const supportsGpuEdgeInterpolation = typeof renderer.drawTravelTimeEdges === 'function';
+  const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;
+  // See the matching comment in rerenderIsochroneFromSnapshot: the
+  // transit-only sentinel mask never matches a real edge, so the
+  // edge-interpolated renderers would draw nothing (and, worse, skip
+  // clearing the canvas first) - route straight to the point-capable grid
+  // renderer instead.
+  const supportsGpuEdgeInterpolation =
+    typeof renderer.drawTravelTimeEdges === 'function'
+    && allowedModeMask !== TRANSIT_ONLY_ALLOWED_MODE_MASK;
   const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
   if (supportsGpuTravelTimeRendering && !mapData.travelTimeGrid) {
     throw new Error('mapData.travelTimeGrid is required for GPU travel-time rendering');
@@ -4975,7 +5033,6 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
     options.colourTheme ?? resolveIsochroneTheme(),
     'dark',
   );
-  const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;
   const edgeTraversalCostSeconds = searchState.edgeTraversalCostSeconds;
   const nowImpl = options.nowImpl ?? defaultNowMs;
   const statusUpdateIntervalMs = options.statusUpdateIntervalMs ?? 120;

@@ -19,6 +19,16 @@ export const EDGE_MODE_WALK_BIT = 1;
 export const EDGE_MODE_BIKE_BIT = 1 << 1;
 export const EDGE_MODE_CAR_BIT = 1 << 2;
 export const EDGE_MODE_WATER_BIT = 1 << 3;
+// A query-time sentinel passed as allowedModeMask when the user has
+// selected Public transit but no real road/ferry mode. It deliberately
+// matches no bit any real graph edge ever carries (edge_mode_mask is only
+// ever built from the four bits above, max value 0b1111), so every
+// road/ferry edge costs Infinity and pass 1 can't spread past the origin
+// node at all - CSA then reaches only stops within walk-attach range of
+// that single node, and transit connections carry the isochrone from
+// there. This makes "Public transit" alone route strictly via transit,
+// with no implicit walking/biking/driving through the road network.
+export const TRANSIT_ONLY_ALLOWED_MODE_MASK = 1 << 4;
 export const WALKING_SPEED_M_S = 1.39;
 export const BIKE_CRUISE_SPEED_KPH = 20;
 // UI default for the walk-speed input, derived from WALKING_SPEED_M_S (so the

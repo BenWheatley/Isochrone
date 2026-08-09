@@ -513,6 +513,41 @@ test('runConnectionScanFromWalkingReachableStops skips a connection whose servic
   assert.equal(wednesdayResult.seedNodeIndices.length, 1);
 });
 
+test('runConnectionScanFromWalkingReachableStops attaches directly from origin coordinates when pass 1 could not move (transit-only routing)', () => {
+  const graph = parseGraphBinary(createFixtureBinaryBufferWithTransit());
+  // Simulates the TRANSIT_ONLY_ALLOWED_MODE_MASK sentinel: pass 1 cannot
+  // traverse any real edge, so only the origin node (node 1, elapsed 0) has
+  // a finite walkDistSeconds - neither stop's nearest node (0 or 2) is
+  // reachable through the walking graph at all.
+  const walkDistSeconds = new Float32Array([Infinity, 0, Infinity]);
+
+  const noOriginResult = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
+    departureSecondsOfDay: 900,
+    departureWeekdayIndex: 2,
+    timeLimitSeconds: 300,
+  });
+  assert.equal(noOriginResult.seedNodeIndices.length, 0);
+
+  // Origin at (10,0): 10m from stop 0 (~7.2s direct walk at
+  // WALKING_SPEED_M_S) but 190m from stop 1 (~136.7s) - close enough to
+  // board stop 0 directly (arrival ~907.2s, beating the connection's t=1000
+  // departure) while a direct walk to stop 1 (~1036.7s) is slower than
+  // riding the transit connection there (arriving t=1010), so the transit
+  // route must win over the direct beeline to prove the connection was
+  // actually scanned, not just a straight-line walk to stop 1.
+  const result = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
+    departureSecondsOfDay: 900,
+    departureWeekdayIndex: 2,
+    timeLimitSeconds: 300,
+    originXM: 10,
+    originYM: 0,
+  });
+
+  assert.equal(result.seedNodeIndices.length, 1);
+  assert.equal(result.seedNodeIndices[0], 2);
+  assert.equal(result.seedStartDistSeconds[0], 110);
+});
+
 test('runConnectionScanFromWalkingReachableStops returns empty seeds for a graph with no stops', () => {
   const graph = parseGraphBinary(createFixtureBinaryBuffer());
   const walkDistSeconds = new Float32Array([0, 72]);

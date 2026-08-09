@@ -6,6 +6,7 @@ import {
   EDGE_MODE_CAR_BIT,
   EDGE_MODE_WALK_BIT,
   EDGE_MODE_WATER_BIT,
+  TRANSIT_ONLY_ALLOWED_MODE_MASK,
 } from '../config/constants.js';
 import {
   parseBikeSpeedKphFromLocationSearch,
@@ -502,22 +503,23 @@ export function getAllowedModeMaskFromShell(shell) {
     }
   }
 
-  // Public transit is unusable without walking to/from a stop - CSA's own
-  // walk-attach-cost model assumes exactly that for the "last mile" at
-  // both ends, regardless of which other modes are selected. Without this,
-  // checking only "Public transit" (nothing else) left allowedModeMask at
-  // 0 and silently fell back to Car, and checking e.g. only "Ferry" with
-  // transit produced a near-empty pass-1 field (ferry edges only, no way
-  // to actually reach a ferry terminal or transit stop on foot). Folding
-  // in EDGE_MODE_WALK_BIT whenever transit is checked makes "transit only"
-  // produce a real (if island-y) walk+transit isochrone instead.
-  const transitChecked =
-    shell.transitEnabledInput?.checked === true && shell.transitEnabledRow?.hidden !== true;
-  if (transitChecked) {
-    allowedModeMask |= EDGE_MODE_WALK_BIT;
-  }
-
   if (allowedModeMask === 0) {
+    // "Just public transit" means literally that - route strictly via
+    // transit connections between stop-attachment nodes, with zero implicit
+    // walking/biking/driving through the road network. TRANSIT_ONLY_
+    // ALLOWED_MODE_MASK deliberately matches no bit any real graph edge
+    // ever carries, so pass 1 can't spread past the clicked origin node at
+    // all; CSA then reaches only stops within walk-attach range of that one
+    // node (the fixed node<->stop geometry snap, not a travel mode), and
+    // transit connections carry the isochrone from there - producing a
+    // real, expectedly island-y result instead of silently falling back to
+    // Car. When transit isn't checked either, there's truly nothing to
+    // route with, so fall back to Car as before.
+    const transitChecked =
+      shell.transitEnabledInput?.checked === true && shell.transitEnabledRow?.hidden !== true;
+    if (transitChecked) {
+      return TRANSIT_ONLY_ALLOWED_MODE_MASK;
+    }
     setSelectedModeValues(routingModeCheckboxes, ['car']);
     return EDGE_MODE_CAR_BIT;
   }

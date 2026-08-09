@@ -17,8 +17,8 @@ import {
   BIKE_CRUISE_SPEED_KPH,
   DEFAULT_WALK_SPEED_KPH,
   EDGE_MODE_CAR_BIT,
-  EDGE_MODE_WALK_BIT,
   EDGE_MODE_WATER_BIT,
+  TRANSIT_ONLY_ALLOWED_MODE_MASK,
 } from '../src/config/constants.js';
 
 function createEventTarget() {
@@ -152,22 +152,22 @@ test('getAllowedModeMaskFromShell combines walk and water bits when both selecte
   assert.notEqual(mask, EDGE_MODE_WATER_BIT);
 });
 
-test('getAllowedModeMaskFromShell folds walk into the mask whenever transit is checked (it is not an edge-mode bit itself, but needs last-mile walking)', () => {
+test('getAllowedModeMaskFromShell leaves a real mode untouched when transit is also checked (transit adds no edge-mode bit of its own)', () => {
   const modeCheckboxes = createModeCheckboxes(['car']);
   const transitEnabledInput = createModeCheckbox('transit', true);
   modeCheckboxes.push(transitEnabledInput);
   const shell = { modeCheckboxes, transitEnabledInput };
 
-  assert.equal(getAllowedModeMaskFromShell(shell), EDGE_MODE_CAR_BIT | EDGE_MODE_WALK_BIT);
+  assert.equal(getAllowedModeMaskFromShell(shell), EDGE_MODE_CAR_BIT);
 });
 
-test('getAllowedModeMaskFromShell produces a walk+transit mask (not a fallback to car) when only transit is checked', () => {
+test('getAllowedModeMaskFromShell produces the transit-only sentinel (not a fallback to car, not a walk mask) when only transit is checked', () => {
   const modeCheckboxes = createModeCheckboxes([]);
   const transitEnabledInput = createModeCheckbox('transit', true);
   modeCheckboxes.push(transitEnabledInput);
   const shell = { modeCheckboxes, transitEnabledInput };
 
-  assert.equal(getAllowedModeMaskFromShell(shell), EDGE_MODE_WALK_BIT);
+  assert.equal(getAllowedModeMaskFromShell(shell), TRANSIT_ONLY_ALLOWED_MODE_MASK);
   assert.equal(modeCheckboxes.find((checkbox) => checkbox.value === 'car').checked, false);
   assert.equal(transitEnabledInput.checked, true);
 });
