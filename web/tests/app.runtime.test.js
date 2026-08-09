@@ -328,35 +328,31 @@ function createFixtureBinaryBuffer() {
   return buffer;
 }
 
-// 3 nodes in a line (0,0) -> (100,0) -> (200,0), 2 walk/car edges costing
-// 72s each (matching WALKING_SPEED_M_S's 100m/1.39 ~ 72s convention used
-// throughout these fixtures), plus 2 stops sitting exactly on node 0 and
-// node 2 (zero walk-attach cost) connected by a single fast transit edge —
-// a "subway" that bypasses the 144s walk between them.
-function createFixtureBinaryBufferWithTransit(serviceDayMask = 0b1111111) {
+// Builds a transit-capable graph binary from a compact description, so the
+// several transit tests below don't each repeat ~60 lines of DataView offset
+// arithmetic. Nodes are laid out in a line 100m apart along y=0, joined by
+// walk/car edges costing 72s each (100m / WALKING_SPEED_M_S).
+function createTransitGraphBuffer({ nodeCount = 3, stops, tedges }) {
   const headerSize = 64;
   const nodeRecordSize = 16;
   const edgeRecordSize = 12;
   const stopRecordSize = 24;
   const tedgeRecordSize = 20;
-  const nNodes = 3;
-  const nEdges = 2;
-  const nStops = 2;
-  const nTedges = 1;
+  const nEdges = nodeCount - 1;
   const nodeTableOffset = headerSize;
-  const edgeTableOffset = nodeTableOffset + nNodes * nodeRecordSize;
+  const edgeTableOffset = nodeTableOffset + nodeCount * nodeRecordSize;
   const stopTableOffset = edgeTableOffset + nEdges * edgeRecordSize;
-  const tedgeTableOffset = stopTableOffset + nStops * stopRecordSize;
-  const buffer = new ArrayBuffer(tedgeTableOffset + nTedges * tedgeRecordSize);
+  const tedgeTableOffset = stopTableOffset + stops.length * stopRecordSize;
+  const buffer = new ArrayBuffer(tedgeTableOffset + tedges.length * tedgeRecordSize);
   const view = new DataView(buffer);
 
   view.setUint32(0, GRAPH_MAGIC, true);
   view.setUint8(4, 2);
   view.setUint8(5, 1); // flags: has_transit
-  view.setUint32(8, nNodes, true);
+  view.setUint32(8, nodeCount, true);
   view.setUint32(12, nEdges, true);
-  view.setUint32(16, nStops, true);
-  view.setUint32(20, nTedges, true);
+  view.setUint32(16, stops.length, true);
+  view.setUint32(20, tedges.length, true);
   view.setFloat64(24, 392000, true);
   view.setFloat64(32, 5820000, true);
   view.setUint16(40, 25833, true);
@@ -367,51 +363,60 @@ function createFixtureBinaryBufferWithTransit(serviceDayMask = 0b1111111) {
   view.setUint32(56, edgeTableOffset, true);
   view.setUint32(60, stopTableOffset, true);
 
-  const nodeI32 = new Int32Array(buffer, nodeTableOffset, nNodes * 4);
-  const nodeU32 = new Uint32Array(buffer, nodeTableOffset, nNodes * 4);
-  const nodeU16 = new Uint16Array(buffer, nodeTableOffset, nNodes * 8);
-  nodeI32[0] = 0;
-  nodeI32[1] = 0;
-  nodeU32[2] = 0;
-  nodeU16[6] = 1;
-  nodeI32[4] = 100;
-  nodeI32[5] = 0;
-  nodeU32[6] = 1;
-  nodeU16[14] = 1;
-  nodeI32[8] = 200;
-  nodeI32[9] = 0;
-  nodeU32[10] = 2;
-  nodeU16[22] = 0;
+  const nodeI32 = new Int32Array(buffer, nodeTableOffset, nodeCount * 4);
+  const nodeU32 = new Uint32Array(buffer, nodeTableOffset, nodeCount * 4);
+  const nodeU16 = new Uint16Array(buffer, nodeTableOffset, nodeCount * 8);
+  for (let nodeIndex = 0; nodeIndex < nodeCount; nodeIndex += 1) {
+    nodeI32[nodeIndex * 4] = nodeIndex * 100; // x_m
+    nodeI32[nodeIndex * 4 + 1] = 0; // y_m
+    nodeU32[nodeIndex * 4 + 2] = nodeIndex; // first_edge_index
+    nodeU16[nodeIndex * 8 + 6] = nodeIndex < nEdges ? 1 : 0; // outgoing_edge_count
+  }
 
   const edgeU32 = new Uint32Array(buffer, edgeTableOffset, nEdges * 3);
   const edgeU16 = new Uint16Array(buffer, edgeTableOffset, nEdges * 6);
   const modeMask = EDGE_MODE_WALK_BIT | EDGE_MODE_CAR_BIT;
-  const roadClassId = 11;
-  const maxspeedKph = 50;
-  edgeU32[0] = 1;
-  edgeU16[2] = 72;
-  edgeU32[2] = modeMask | (roadClassId << 8) | (maxspeedKph << 16);
-  edgeU32[3] = 2;
-  edgeU16[8] = 72;
-  edgeU32[5] = modeMask | (roadClassId << 8) | (maxspeedKph << 16);
+  for (let edgeIndex = 0; edgeIndex < nEdges; edgeIndex += 1) {
+    edgeU32[edgeIndex * 3] = edgeIndex + 1; // target_node_index
+    edgeU16[edgeIndex * 6 + 2] = 72; // length_m
+    edgeU32[edgeIndex * 3 + 2] = modeMask | (11 << 8) | (50 << 16);
+  }
 
-  view.setInt32(stopTableOffset, 0, true); // stop 0 x_m
-  view.setInt32(stopTableOffset + 4, 0, true); // stop 0 y_m
-  view.setUint32(stopTableOffset + 8, 0, true); // stop 0 nearest_node_index
-  view.setUint8(stopTableOffset + 18, 2); // stop 0 transport_type (subway)
-  view.setInt32(stopTableOffset + stopRecordSize, 200, true); // stop 1 x_m
-  view.setInt32(stopTableOffset + stopRecordSize + 4, 0, true); // stop 1 y_m
-  view.setUint32(stopTableOffset + stopRecordSize + 8, 2, true); // stop 1 nearest_node_index
-  view.setUint8(stopTableOffset + stopRecordSize + 18, 2);
+  stops.forEach((stop, stopIndex) => {
+    const base = stopTableOffset + stopIndex * stopRecordSize;
+    view.setInt32(base, stop.xM, true);
+    view.setInt32(base + 4, stop.yM ?? 0, true);
+    view.setUint32(base + 8, stop.nearestNodeIndex, true);
+    view.setUint8(base + 18, stop.transportType ?? 2);
+  });
 
-  view.setUint32(tedgeTableOffset, 0, true); // from_stop_index
-  view.setUint32(tedgeTableOffset + 4, 1, true); // to_stop_index
-  view.setUint32(tedgeTableOffset + 8, 1000, true); // departure_seconds_from_midnight
-  view.setUint16(tedgeTableOffset + 12, 10, true); // travel_seconds
-  view.setUint16(tedgeTableOffset + 14, 0, true); // route_id
-  view.setUint32(tedgeTableOffset + 16, serviceDayMask, true); // service_day_mask
+  tedges.forEach((tedge, tedgeIndex) => {
+    const base = tedgeTableOffset + tedgeIndex * tedgeRecordSize;
+    view.setUint32(base, tedge.fromStop, true);
+    view.setUint32(base + 4, tedge.toStop, true);
+    view.setUint32(base + 8, tedge.departureSeconds, true);
+    view.setUint16(base + 12, tedge.travelSeconds, true);
+    view.setUint16(base + 14, tedge.routeId ?? 0, true);
+    view.setUint32(base + 16, tedge.serviceDayMask ?? 0b1111111, true);
+  });
 
   return buffer;
+}
+
+// 3 nodes in a line (0,0) -> (100,0) -> (200,0), plus 2 stops sitting exactly
+// on node 0 and node 2 (zero walk-attach cost) connected by a single fast
+// transit edge - a "subway" that bypasses the 144s walk between them.
+function createFixtureBinaryBufferWithTransit(serviceDayMask = 0b1111111) {
+  return createTransitGraphBuffer({
+    nodeCount: 3,
+    stops: [
+      { xM: 0, nearestNodeIndex: 0 },
+      { xM: 200, nearestNodeIndex: 2 },
+    ],
+    tedges: [
+      { fromStop: 0, toStop: 1, departureSeconds: 1000, travelSeconds: 10, serviceDayMask },
+    ],
+  });
 }
 
 test('MinHeap keeps ascending pop order', () => {
@@ -472,115 +477,46 @@ test('runConnectionScanFromWalkingReachableStops seeds a stop reached faster by 
   // Board at stop 0 (t=990, zero walk-attach), ride to stop 1 arriving
   // t=1010, walk off (zero attach) -> 20s elapsed, versus 144s on foot.
   assert.equal(result.seedStartDistSeconds[0], 20);
-  assert.equal(result.usedTedgeIndices.length, 1);
-  assert.equal(result.usedTedgeIndices[0], 0);
+  assert.equal(result.renderableTedgeIndices.length, 1);
+  assert.equal(result.renderableTedgeIndices[0], 0);
 });
 
-test('runConnectionScanFromWalkingReachableStops includes every boardable connection, not just the one that wins the earliest-arrival race', () => {
-  // Same 2-stop/1-connection layout as createFixtureBinaryBufferWithTransit,
-  // but with a second, slower connection departing after the first that is
-  // still boardable (stop 0 is reachable in time) even though it doesn't
-  // improve stop 1's earliest arrival - rendering should still draw it, so
-  // routes with multiple candidate departures show up as more than a bare
-  // shortest-path tree.
-  const headerSize = 64;
-  const nodeRecordSize = 16;
-  const edgeRecordSize = 12;
-  const stopRecordSize = 24;
-  const tedgeRecordSize = 20;
-  const nNodes = 3;
-  const nEdges = 2;
-  const nStops = 2;
-  const nTedges = 2;
-  const nodeTableOffset = headerSize;
-  const edgeTableOffset = nodeTableOffset + nNodes * nodeRecordSize;
-  const stopTableOffset = edgeTableOffset + nEdges * edgeRecordSize;
-  const tedgeTableOffset = stopTableOffset + nStops * stopRecordSize;
-  const buffer = new ArrayBuffer(tedgeTableOffset + nTedges * tedgeRecordSize);
-  const view = new DataView(buffer);
-
-  view.setUint32(0, GRAPH_MAGIC, true);
-  view.setUint8(4, 2);
-  view.setUint8(5, 1);
-  view.setUint32(8, nNodes, true);
-  view.setUint32(12, nEdges, true);
-  view.setUint32(16, nStops, true);
-  view.setUint32(20, nTedges, true);
-  view.setFloat64(24, 392000, true);
-  view.setFloat64(32, 5820000, true);
-  view.setUint16(40, 25833, true);
-  view.setUint16(42, 512, true);
-  view.setUint16(44, 512, true);
-  view.setFloat32(48, 10, true);
-  view.setUint32(52, nodeTableOffset, true);
-  view.setUint32(56, edgeTableOffset, true);
-  view.setUint32(60, stopTableOffset, true);
-
-  const nodeI32 = new Int32Array(buffer, nodeTableOffset, nNodes * 4);
-  const nodeU32 = new Uint32Array(buffer, nodeTableOffset, nNodes * 4);
-  const nodeU16 = new Uint16Array(buffer, nodeTableOffset, nNodes * 8);
-  nodeI32[0] = 0;
-  nodeI32[1] = 0;
-  nodeU32[2] = 0;
-  nodeU16[6] = 1;
-  nodeI32[4] = 100;
-  nodeI32[5] = 0;
-  nodeU32[6] = 1;
-  nodeU16[14] = 1;
-  nodeI32[8] = 200;
-  nodeI32[9] = 0;
-  nodeU32[10] = 2;
-  nodeU16[22] = 0;
-
-  const edgeU32 = new Uint32Array(buffer, edgeTableOffset, nEdges * 3);
-  const edgeU16 = new Uint16Array(buffer, edgeTableOffset, nEdges * 6);
-  const modeMask = EDGE_MODE_WALK_BIT | EDGE_MODE_CAR_BIT;
-  edgeU32[0] = 1;
-  edgeU16[2] = 72;
-  edgeU32[2] = modeMask | (11 << 8) | (50 << 16);
-  edgeU32[3] = 2;
-  edgeU16[8] = 72;
-  edgeU32[5] = modeMask | (11 << 8) | (50 << 16);
-
-  view.setInt32(stopTableOffset, 0, true);
-  view.setInt32(stopTableOffset + 4, 0, true);
-  view.setUint32(stopTableOffset + 8, 0, true);
-  view.setUint8(stopTableOffset + 18, 2);
-  view.setInt32(stopTableOffset + stopRecordSize, 200, true);
-  view.setInt32(stopTableOffset + stopRecordSize + 4, 0, true);
-  view.setUint32(stopTableOffset + stopRecordSize + 8, 2, true);
-  view.setUint8(stopTableOffset + stopRecordSize + 18, 2);
-
-  // Winning connection: departs 1000, arrives 1010.
-  view.setUint32(tedgeTableOffset, 0, true);
-  view.setUint32(tedgeTableOffset + 4, 1, true);
-  view.setUint32(tedgeTableOffset + 8, 1000, true);
-  view.setUint16(tedgeTableOffset + 12, 10, true);
-  view.setUint16(tedgeTableOffset + 14, 0, true);
-  view.setUint32(tedgeTableOffset + 16, 0b1111111, true);
-  // Slower alternative: departs 1005 (still boardable), arrives 1055 -
-  // never improves stop 1, but should still be reported as boardable.
-  view.setUint32(tedgeTableOffset + tedgeRecordSize, 0, true);
-  view.setUint32(tedgeTableOffset + tedgeRecordSize + 4, 1, true);
-  view.setUint32(tedgeTableOffset + tedgeRecordSize + 8, 1005, true);
-  view.setUint16(tedgeTableOffset + tedgeRecordSize + 12, 50, true);
-  view.setUint16(tedgeTableOffset + tedgeRecordSize + 14, 1, true);
-  view.setUint32(tedgeTableOffset + tedgeRecordSize + 16, 0b1111111, true);
-
-  const graph = parseGraphBinary(buffer);
-  const walkDistSeconds = new Float32Array([0, 72, 144]);
+test('runConnectionScanFromWalkingReachableStops keeps every hop of a multi-stop route, and dedupes repeated trips of the same hop', () => {
+  // One line running stop0 -> stop1 -> stop2, plus a second, later trip over
+  // the identical stop0 -> stop1 hop. Every consecutive hop must come back
+  // (this is the A->B, B->C connectivity that renders as a continuous line),
+  // while the duplicate hop must collapse to a single drawn segment.
+  const graph = parseGraphBinary(createTransitGraphBuffer({
+    nodeCount: 3,
+    stops: [
+      { xM: 0, nearestNodeIndex: 0 },
+      { xM: 100, nearestNodeIndex: 1 },
+      { xM: 200, nearestNodeIndex: 2 },
+    ],
+    tedges: [
+      { fromStop: 0, toStop: 1, departureSeconds: 1000, travelSeconds: 10 },
+      { fromStop: 1, toStop: 2, departureSeconds: 1030, travelSeconds: 10 },
+      // Same stop pair as the first hop, a later trip of the same line.
+      { fromStop: 0, toStop: 1, departureSeconds: 1200, travelSeconds: 10 },
+    ],
+  }));
+  // Only the origin node is reachable on foot (transit-only routing).
+  const walkDistSeconds = new Float32Array([0, Infinity, Infinity]);
 
   const result = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
     departureSecondsOfDay: 990,
     departureWeekdayIndex: 2,
-    timeLimitSeconds: 200,
+    timeLimitSeconds: 600,
   });
 
-  assert.equal(result.usedTedgeIndices.length, 2);
-  assert.deepEqual(Array.from(result.usedTedgeIndices).sort(), [0, 1]);
-  // The seed is still driven by the winning (earliest) arrival only.
-  assert.equal(result.seedNodeIndices.length, 1);
-  assert.equal(result.seedStartDistSeconds[0], 20);
+  // Two distinct hops drawn (0->1 and 1->2), the repeat of 0->1 deduped away.
+  assert.deepEqual(Array.from(result.renderableTedgeIndices), [0, 1]);
+
+  // Riding hop 1 must make stop 2 reachable, i.e. the chain is followed
+  // through rather than stopping at the first hop.
+  assert.equal(result.stopElapsedSeconds[0], 0); // boarded at the origin
+  assert.equal(result.stopElapsedSeconds[1], 1010 - 990);
+  assert.equal(result.stopElapsedSeconds[2], 1040 - 990);
 });
 
 test('runConnectionScanFromWalkingReachableStops finds no improvement when the connection departs too early', () => {
@@ -672,28 +608,42 @@ test('runConnectionScanFromWalkingReachableStops returns empty seeds for a graph
   assert.equal(result.seedStartDistSeconds.length, 0);
 });
 
-test('buildTransitConnectionEdgeVertexData packs one 12-float edge per used transit connection', () => {
+test('buildTransitConnectionEdgeVertexData emits (x, y, seconds) endpoints coloured by each stop arrival time', () => {
   const graph = parseGraphBinary(createFixtureBinaryBufferWithTransit());
   const nodePixels = precomputeNodePixelCoordinates(graph);
   // Fixture's single tedge connects stop 0 (nearest node 0) to stop 1
-  // (nearest node 2), travel_seconds=10 (see createFixtureBinaryBufferWithTransit).
-  const usedTedgeIndices = Uint32Array.from([0]);
+  // (nearest node 2), see createFixtureBinaryBufferWithTransit.
+  const renderableTedgeIndices = Uint32Array.from([0]);
+  const stopElapsedSeconds = Float64Array.from([30, 80]);
 
-  const packed = buildTransitConnectionEdgeVertexData(graph, nodePixels, usedTedgeIndices);
+  const packed = buildTransitConnectionEdgeVertexData(
+    graph,
+    nodePixels,
+    renderableTedgeIndices,
+    stopElapsedSeconds,
+  );
 
-  assert.equal(packed.length, 12);
+  assert.equal(packed.length, 6);
   assert.equal(packed[0], nodePixels.nodePixelX[0]);
   assert.equal(packed[1], nodePixels.nodePixelY[0]);
-  assert.equal(packed[2], 0); // fromNodeIndex
-  assert.equal(packed[3], 2); // toNodeIndex
-  assert.equal(packed[4], 10); // travelSeconds
-  assert.equal(packed[5], 0); // start-vertex flag
-  assert.equal(packed[6], nodePixels.nodePixelX[2]);
-  assert.equal(packed[7], nodePixels.nodePixelY[2]);
-  assert.equal(packed[8], 0);
-  assert.equal(packed[9], 2);
-  assert.equal(packed[10], 10);
-  assert.equal(packed[11], 1); // end-vertex flag
+  assert.equal(packed[2], 30); // arrival at the boarding stop
+  assert.equal(packed[3], nodePixels.nodePixelX[2]);
+  assert.equal(packed[4], nodePixels.nodePixelY[2]);
+  assert.equal(packed[5], 80); // arrival at the alighting stop
+});
+
+test('buildTransitConnectionEdgeVertexData drops connections whose endpoints are unreachable', () => {
+  const graph = parseGraphBinary(createFixtureBinaryBufferWithTransit());
+  const nodePixels = precomputeNodePixelCoordinates(graph);
+
+  const packed = buildTransitConnectionEdgeVertexData(
+    graph,
+    nodePixels,
+    Uint32Array.from([0]),
+    Float64Array.from([30, Number.POSITIVE_INFINITY]),
+  );
+
+  assert.equal(packed.length, 0);
 });
 
 test('runWalkingIsochroneFromSourceNode repaints the canvas with transit-augmented distances', async () => {

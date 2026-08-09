@@ -717,7 +717,7 @@ export async function runWalkingIsochroneFromSourceNode(
     let finalDistSeconds = searchState.distSeconds;
     let finalEdgeVertexData = runSummary.edgeVertexData ?? null;
     let transitAugmented = false;
-    let transitEdgeNodeIndexedVertexData = null;
+    let transitEdgeVertexData = null;
 
     const nStops = mapData.graph.header.nStops;
     if (
@@ -743,6 +743,15 @@ export async function runWalkingIsochroneFromSourceNode(
           originYM: isTransitOnlyRouting ? mapData.graph.nodeI32[sourceNodeIndex * 4 + 1] : undefined,
         },
       );
+      if (csaResult.renderableTedgeIndices.length > 0) {
+        transitEdgeVertexData = buildTransitConnectionEdgeVertexData(
+          mapData.graph,
+          mapData.nodePixels,
+          csaResult.renderableTedgeIndices,
+          csaResult.stopElapsedSeconds,
+        );
+        transitAugmented = transitEdgeVertexData.length > 0;
+      }
       if (csaResult.seedNodeIndices.length > 0) {
         const seedNodeIndices = new Uint32Array(csaResult.seedNodeIndices.length + 1);
         const seedStartDistSeconds = new Float32Array(csaResult.seedStartDistSeconds.length + 1);
@@ -779,11 +788,6 @@ export async function runWalkingIsochroneFromSourceNode(
         // needed here beyond clearing the stale cache).
         finalEdgeVertexData = null;
         transitAugmented = true;
-        transitEdgeNodeIndexedVertexData = buildTransitConnectionEdgeVertexData(
-          mapData.graph,
-          mapData.nodePixels,
-          csaResult.usedTedgeIndices,
-        );
       }
     }
 
@@ -797,7 +801,7 @@ export async function runWalkingIsochroneFromSourceNode(
       colourCycleMinutes: options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
       edgeVertexData: finalEdgeVertexData,
       edgeVertexDataModeMask: finalEdgeVertexData instanceof Float32Array ? allowedModeMask : null,
-      transitEdgeNodeIndexedVertexData,
+      transitEdgeVertexData,
     };
 
     // runSearchTimeSlicedWithRendering already painted the canvas from the
@@ -1291,15 +1295,24 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
     typeof renderer.drawTravelTimeEdgesFromNodeTimes === 'function';
   const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
   // Under the transit-only sentinel mask no real road/ferry edge ever
-  // matches allowedModeMask, so there is nothing for
-  // getOrBuildStaticEdgeNodeIndexedVertexDataForModeFromMapData to find.
-  // The isochrone is instead carried by the actual transit connections used
-  // to reach each stop (built alongside the CSA scan into
-  // snapshot.transitEdgeNodeIndexedVertexData) - same renderer, same
-  // packed vertex format, just a different edge source, so transit draws
-  // as connected lines exactly like every other mode instead of isolated
-  // points.
+  // matches allowedModeMask, so the isochrone is carried entirely by the
+  // transit connections the CSA scan found. Those come with their own
+  // per-endpoint times and must go through the plain edge renderer, not the
+  // node-indexed one - see buildTransitConnectionEdgeVertexData for why.
   const isTransitOnlyAllowedModeMask = allowedModeMask === TRANSIT_ONLY_ALLOWED_MODE_MASK;
+
+  if (supportsGpuEdgeInterpolation && isTransitOnlyAllowedModeMask) {
+    renderer.drawTravelTimeEdges(snapshot.transitEdgeVertexData ?? new Float32Array(0), {
+      cycleMinutes: colourCycleMinutes,
+      colourTheme,
+      append: false,
+      graphWidthPx: mapData.graph.header.gridWidthPx,
+      graphHeightPx: mapData.graph.header.gridHeightPx,
+      viewport,
+      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+    });
+    return true;
+  }
 
   if (supportsGpuEdgeInterpolation) {
     const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
@@ -1314,9 +1327,8 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
       },
     );
     if (supportsGpuIndexedEdgeInterpolation) {
-      const edgeNodeIndexedVertexData = isTransitOnlyAllowedModeMask
-        ? (snapshot.transitEdgeNodeIndexedVertexData ?? new Float32Array(0))
-        : getOrBuildStaticEdgeNodeIndexedVertexDataForModeFromMapData(
+      const edgeNodeIndexedVertexData =
+        getOrBuildStaticEdgeNodeIndexedVertexDataForModeFromMapData(
           mapData,
           allowedModeMask,
           edgeTraversalCostSeconds,
@@ -1543,14 +1555,15 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
     }
   }
 
-  // Every connection whose boarding stop is reachable in time is a
-  // candidate for rendering (not just the one that happens to win each
-  // stop's earliest-arrival race) - this mirrors how road/ferry edges are
-  // rendered (the whole graph, not a shortest-path tree), so real transit
-  // routes show up as continuous connected lines instead of a sparse,
-  // disconnected-looking spanning tree.
-  const boardableTedgeIndices = new Uint32Array(graph.header.nTedges);
-  let boardableTedgeCount = 0;
+  // Every connection whose boarding stop is reachable in time is renderable,
+  // not just the one that happens to win each stop's earliest-arrival race -
+  // so a route's consecutive hops (A->B, B->C, C->D) all appear, instead of
+  // the sparse, visually disconnected spanning tree the winners alone form.
+  // Deduplicated by stop pair: several trips of the same line share one
+  // A->B geometry and would otherwise be drawn on top of each other.
+  const renderableTedgeIndices = new Uint32Array(graph.header.nTedges);
+  const seenStopPairs = new Set();
+  let renderableTedgeCount = 0;
 
   const nTedges = graph.header.nTedges;
   for (let tedgeIndex = 0; tedgeIndex < nTedges; tedgeIndex += 1) {
@@ -1570,11 +1583,27 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
     if (candidateArrivalSeconds > budgetEndSeconds) {
       continue;
     }
-    boardableTedgeIndices[boardableTedgeCount] = tedgeIndex;
-    boardableTedgeCount += 1;
+    const stopPairKey = fromStopIndex * nStops + toStopIndex;
+    if (!seenStopPairs.has(stopPairKey)) {
+      seenStopPairs.add(stopPairKey);
+      renderableTedgeIndices[renderableTedgeCount] = tedgeIndex;
+      renderableTedgeCount += 1;
+    }
     if (candidateArrivalSeconds < earliestArrivalSeconds[toStopIndex]) {
       earliestArrivalSeconds[toStopIndex] = candidateArrivalSeconds;
       improvedByTransit[toStopIndex] = 1;
+    }
+  }
+
+  // Elapsed time at the stop itself (no platform->node attach walk, unlike
+  // the pass-2 seeds below): this is what rendering colours each end of a
+  // connection by, and it is defined for every reachable stop rather than
+  // only the transit-improved ones.
+  const stopElapsedSeconds = new Float64Array(nStops).fill(Number.POSITIVE_INFINITY);
+  for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
+    const arrivalSeconds = earliestArrivalSeconds[stopIndex];
+    if (Number.isFinite(arrivalSeconds)) {
+      stopElapsedSeconds[stopIndex] = Math.max(0, arrivalSeconds - departureSecondsOfDay);
     }
   }
 
@@ -1596,59 +1625,70 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
   return {
     seedNodeIndices: Uint32Array.from(seedNodeIndicesList),
     seedStartDistSeconds: Float32Array.from(seedStartDistSecondsList),
-    usedTedgeIndices: boardableTedgeIndices.subarray(0, boardableTedgeCount),
+    stopElapsedSeconds,
+    renderableTedgeIndices: renderableTedgeIndices.subarray(0, renderableTedgeCount),
   };
 }
 
 /**
- * Builds the packed node-indexed edge vertex buffer (the same 12-float
- * layout WebGlIsochroneRenderer.drawTravelTimeEdgesFromNodeTimes expects
- * from buildStaticEdgeNodeIndexedVertexData) directly from the transit
- * connections the CSA scan actually used to reach each stop, using each
- * connection's stop-attachment node for both endpoint position and the
- * distSeconds texture lookup. This lets a transit-only isochrone render as
- * connected lines the same way every road/ferry mode does, rather than as
- * isolated per-stop points - there is no walkable road edge to reuse here,
- * so the transit connections themselves stand in as the graph edges.
+ * Builds edge vertex data for transit connections in the plain
+ * (x, y, seconds) x 2 layout that drawTravelTimeEdges and the SVG exporter
+ * both consume, colouring each end by the CSA's earliest arrival at that
+ * stop.
+ *
+ * Deliberately NOT the node-indexed layout used for road/ferry edges. That
+ * path looks each endpoint's time up from a per-node texture and keeps an
+ * edge only when `startSeconds + edgeCost <= targetSeconds + slack` - a
+ * shortest-path-tree test that is right for roads and wrong for transit
+ * three times over: per-node times can't represent stops that share an
+ * attachment node; a connection's in-vehicle time excludes the wait for the
+ * vehicle, so the inequality rejects every non-optimal connection; and
+ * under the transit-only mask most stop nodes have no finite time at all.
+ * Together those silently dropped most connections, which is what made
+ * consecutive hops of one route (A->B->C->D) render as disconnected
+ * fragments. Explicit per-endpoint times avoid all three.
  */
-export function buildTransitConnectionEdgeVertexData(graph, nodePixels, usedTedgeIndices) {
+export function buildTransitConnectionEdgeVertexData(
+  graph,
+  nodePixels,
+  renderableTedgeIndices,
+  stopElapsedSeconds,
+) {
   validateGraphForRouting(graph);
   validateNodePixels(nodePixels);
-  if (!(usedTedgeIndices instanceof Uint32Array)) {
-    throw new Error('usedTedgeIndices must be a Uint32Array');
+  if (!(renderableTedgeIndices instanceof Uint32Array)) {
+    throw new Error('renderableTedgeIndices must be a Uint32Array');
+  }
+  if (!ArrayBuffer.isView(stopElapsedSeconds)) {
+    throw new Error('stopElapsedSeconds must be a typed array');
   }
 
-  const edgeCount = usedTedgeIndices.length;
-  const packedVertexData = new Float32Array(edgeCount * 12);
-  for (let edgeIndex = 0; edgeIndex < edgeCount; edgeIndex += 1) {
-    const tedgeIndex = usedTedgeIndices[edgeIndex];
+  const candidateCount = renderableTedgeIndices.length;
+  const packedVertexData = new Float32Array(candidateCount * 6);
+  let writeEdgeIndex = 0;
+  for (let candidateIndex = 0; candidateIndex < candidateCount; candidateIndex += 1) {
+    const tedgeIndex = renderableTedgeIndices[candidateIndex];
     const fromStopIndex = graph.tedgeFromStop[tedgeIndex];
     const toStopIndex = graph.tedgeToStop[tedgeIndex];
+    const fromSeconds = stopElapsedSeconds[fromStopIndex];
+    const toSeconds = stopElapsedSeconds[toStopIndex];
+    if (!Number.isFinite(fromSeconds) || !Number.isFinite(toSeconds)) {
+      continue;
+    }
+
     const fromNodeIndex = graph.stopNearestNodeIndex[fromStopIndex];
     const toNodeIndex = graph.stopNearestNodeIndex[toStopIndex];
-    const x0 = nodePixels.nodePixelX[fromNodeIndex];
-    const y0 = nodePixels.nodePixelY[fromNodeIndex];
-    const x1 = nodePixels.nodePixelX[toNodeIndex];
-    const y1 = nodePixels.nodePixelY[toNodeIndex];
-    const travelSeconds = graph.tedgeTravelSeconds[tedgeIndex];
-
-    const base = edgeIndex * 12;
-    packedVertexData[base] = x0;
-    packedVertexData[base + 1] = y0;
-    packedVertexData[base + 2] = fromNodeIndex;
-    packedVertexData[base + 3] = toNodeIndex;
-    packedVertexData[base + 4] = travelSeconds;
-    packedVertexData[base + 5] = 0;
-
-    packedVertexData[base + 6] = x1;
-    packedVertexData[base + 7] = y1;
-    packedVertexData[base + 8] = fromNodeIndex;
-    packedVertexData[base + 9] = toNodeIndex;
-    packedVertexData[base + 10] = travelSeconds;
-    packedVertexData[base + 11] = 1;
+    const base = writeEdgeIndex * 6;
+    packedVertexData[base] = nodePixels.nodePixelX[fromNodeIndex];
+    packedVertexData[base + 1] = nodePixels.nodePixelY[fromNodeIndex];
+    packedVertexData[base + 2] = fromSeconds;
+    packedVertexData[base + 3] = nodePixels.nodePixelX[toNodeIndex];
+    packedVertexData[base + 4] = nodePixels.nodePixelY[toNodeIndex];
+    packedVertexData[base + 5] = toSeconds;
+    writeEdgeIndex += 1;
   }
 
-  return packedVertexData;
+  return packedVertexData.subarray(0, writeEdgeIndex * 6);
 }
 
 export function bindModeSelectControl(shell, options = {}) {
@@ -6127,9 +6167,15 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         let cycleMinutes = getColourCycleMinutesFromShell(shell);
         const routingSnapshot = initializedMapData?.lastRoutingSnapshot ?? null;
         if (initializedMapData && routingSnapshot) {
-          edgeVertexData = getOrBuildSnapshotEdgeVertexData(initializedMapData, routingSnapshot, {
-            allowedModeMask: routingSnapshot.allowedModeMask,
-          });
+          // Transit-only isochrones have no road edges to export; their lines
+          // are the transit connections, already in this same (x, y, seconds)
+          // layout.
+          edgeVertexData =
+            routingSnapshot.allowedModeMask === TRANSIT_ONLY_ALLOWED_MODE_MASK
+              ? (routingSnapshot.transitEdgeVertexData ?? new Float32Array(0))
+              : getOrBuildSnapshotEdgeVertexData(initializedMapData, routingSnapshot, {
+                allowedModeMask: routingSnapshot.allowedModeMask,
+              });
           cycleMinutes = routingSnapshot.colourCycleMinutes;
         }
 
