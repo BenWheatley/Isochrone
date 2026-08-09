@@ -67,12 +67,20 @@ function createInput(initialValue = '75') {
   };
 }
 
-function createThemeSelect(initialValue = 'light') {
+function createThemeRadio(value, checked) {
   const eventTarget = createEventTarget();
   return {
     ...eventTarget,
-    value: initialValue,
+    value,
+    checked,
   };
+}
+
+function createThemeRadios(initialValue = 'light') {
+  return [
+    createThemeRadio('light', initialValue === 'light'),
+    createThemeRadio('dark', initialValue === 'dark'),
+  ];
 }
 
 function createLocationSelect(initialValue = '') {
@@ -533,8 +541,9 @@ test('bindLocationSelectControl notifies when the selected location changes', ()
 });
 
 test('bindThemeControl restores persisted theme and persists changes', () => {
-  const themeSelect = createThemeSelect('light');
-  const shell = { themeSelect };
+  const themeRadios = createThemeRadios('light');
+  const [lightRadio, darkRadio] = themeRadios;
+  const shell = { themeRadios };
   const rootElement = { dataset: {} };
   const themeChangeEvents = [];
   let storedValue = 'dark';
@@ -556,25 +565,29 @@ test('bindThemeControl restores persisted theme and persists changes', () => {
       themeChangeEvents.push(themeValue);
     },
   });
-  assert.equal(themeSelect.value, 'dark');
+  assert.equal(darkRadio.checked, true);
+  assert.equal(lightRadio.checked, false);
   assert.equal(rootElement.dataset.theme, 'dark');
   assert.deepEqual(themeChangeEvents, []);
 
-  themeSelect.value = 'light';
-  themeSelect.emit('change');
+  lightRadio.checked = true;
+  darkRadio.checked = false;
+  lightRadio.emit('change', { target: lightRadio });
   assert.equal(rootElement.dataset.theme, 'light');
   assert.equal(storedValue, 'light');
   assert.deepEqual(themeChangeEvents, ['light']);
 
   binding.dispose();
-  themeSelect.value = 'dark';
-  themeSelect.emit('change');
+  darkRadio.checked = true;
+  lightRadio.checked = false;
+  darkRadio.emit('change', { target: darkRadio });
   assert.equal(rootElement.dataset.theme, 'light');
 });
 
 test('bindThemeControl setTheme supports non-persistent temporary overrides', () => {
-  const themeSelect = createThemeSelect('dark');
-  const shell = { themeSelect };
+  const themeRadios = createThemeRadios('dark');
+  const [lightRadio] = themeRadios;
+  const shell = { themeRadios };
   const rootElement = { dataset: {} };
   const persistedWrites = [];
   const storage = {
@@ -597,7 +610,7 @@ test('bindThemeControl setTheme supports non-persistent temporary overrides', ()
 
   binding.setTheme('light', { persist: false, notify: true });
   assert.equal(rootElement.dataset.theme, 'light');
-  assert.equal(themeSelect.value, 'light');
+  assert.equal(lightRadio.checked, true);
   assert.deepEqual(changeEvents, ['light']);
   assert.deepEqual(persistedWrites, []);
 

@@ -31,16 +31,19 @@
             <span data-i18n="body.options">Options</span>
           </summary>
           <div class="controls-menu-panel">
-            <div class="control-row">
-              <label for="theme-select" data-i18n="body.options.theme">Theme</label>
-              <select id="theme-select" name="theme-select">
-                <option value="light" selected data-i18n="body.options.theme.light">Light</option>
-                <option value="dark" data-i18n="body.options.theme.dark">Dark</option>
-              </select>
+            <div class="control-row control-row-radio-group" id="theme-radio-group">
+              <label class="radio-option">
+                <input type="radio" name="theme" value="light" checked />
+                <span data-i18n="body.options.theme.light">Light mode</span>
+              </label>
+              <label class="radio-option">
+                <input type="radio" name="theme" value="dark" />
+                <span data-i18n="body.options.theme.dark">Dark mode</span>
+              </label>
             </div>
             <div class="control-row">
               <label for="colour-cycle-minutes" data-i18n="body.options.colourCycle">
-                Colour cycle (min)
+                Colour repeating period (minutes)
               </label>
               <input
                 id="colour-cycle-minutes"
@@ -52,7 +55,7 @@
               />
             </div>
             <fieldset class="control-row mode-checkbox-group control-group-start" id="mode-checkbox-group">
-              <legend data-i18n="body.options.mode">Transport modes</legend>
+              <legend class="control-title" data-i18n="body.options.mode">Transport modes</legend>
               <label class="mode-checkbox-option">
                 <input class="mode-checkbox" type="checkbox" name="mode" value="walk" />
                 <span data-i18n="body.options.mode.walk">Walk</span>
@@ -75,14 +78,22 @@
               </label>
             </fieldset>
             <details class="control-subsection" id="speed-settings">
-              <summary data-i18n="body.options.speedSettings">Speed settings</summary>
-              <div class="control-row">
-                <label for="walk-speed-kph" data-i18n="body.options.walkSpeed">Walk speed (km/h)</label>
-                <input id="walk-speed-kph" name="walk-speed-kph" type="number" min="1" step="0.1" value="5" />
+              <summary class="control-title">
+                <span data-i18n="body.options.speedSettings">Speed settings</span>
+              </summary>
+              <div class="control-row control-row-with-unit">
+                <label for="walk-speed-kph" data-i18n="body.options.walkSpeed">Walking speed</label>
+                <span class="control-row-value">
+                  <input id="walk-speed-kph" name="walk-speed-kph" type="number" min="1" step="0.1" value="5" />
+                  <span class="control-unit">km/h</span>
+                </span>
               </div>
-              <div class="control-row">
-                <label for="bike-speed-kph" data-i18n="body.options.bikeSpeed">Bike speed (km/h)</label>
-                <input id="bike-speed-kph" name="bike-speed-kph" type="number" min="1" step="0.5" value="20" />
+              <div class="control-row control-row-with-unit">
+                <label for="bike-speed-kph" data-i18n="body.options.bikeSpeed">Cycling speed</label>
+                <span class="control-row-value">
+                  <input id="bike-speed-kph" name="bike-speed-kph" type="number" min="1" step="0.5" value="20" />
+                  <span class="control-unit">km/h</span>
+                </span>
               </div>
             </details>
             <div class="control-row" id="departure-datetime-row" hidden>
@@ -93,7 +104,7 @@
             </div>
             <div class="control-row control-row-checkbox control-group-start">
               <label for="invert-pointer-buttons" data-i18n="body.options.invertPointerButtons">
-                Swap left/right mouse button actions
+                Left mouse button to move start/right mouse button to move map
               </label>
               <input
                 id="invert-pointer-buttons"

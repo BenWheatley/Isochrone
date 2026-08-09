@@ -94,7 +94,7 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
         "location-select",
         "controls-menu",
         "controls-menu-summary",
-        "theme-select",
+        "theme-radio-group",
         "invert-pointer-buttons",
         "mode-checkbox-group",
         "colour-cycle-minutes",
@@ -128,7 +128,7 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
 
     assert parsed.elements_by_id["location-select"].tag == "select"
     assert parsed.elements_by_id["location-select"].attrs["name"] == "location-select"
-    assert parsed.elements_by_id["theme-select"].tag == "select"
+    assert parsed.elements_by_id["theme-radio-group"].tag == "div"
     assert parsed.elements_by_id["mode-checkbox-group"].tag == "fieldset"
     assert parsed.elements_by_id["invert-pointer-buttons"].tag == "input"
     assert parsed.elements_by_id["invert-pointer-buttons"].attrs["type"] == "checkbox"

@@ -191,9 +191,19 @@ body {
   gap: 0.5rem;
 }
 
+/* Shared vertical rhythm: the gap between a row's title/label and its
+   control, reused everywhere a title sits above or beside content (row
+   labels, the Transport modes legend, the Speed settings summary) so
+   spacing reads as one consistent system instead of several ad hoc values. */
+.controls-menu-panel {
+  --title-content-gap: 0.5rem;
+}
+
 .control-row {
   display: grid;
-  gap: 0.32rem;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 /* Marks the first control of a new logical group (display / routing /
@@ -204,6 +214,14 @@ body {
   margin-top: 0.15rem;
   padding-top: 0.65rem;
   border-top: 1px solid var(--chrome-border);
+}
+
+/* Section/row titles get real title styling (weight + colour) so they read
+   as headings rather than plain body text. */
+.control-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--chrome-text);
 }
 
 /* Native number-input spin buttons go unused on a settings panel like this
@@ -218,17 +236,8 @@ body {
   margin: 0;
 }
 
-.control-row-checkbox {
-  grid-template-columns: 1fr auto;
-  align-items: center;
-}
-
 .control-row-checkbox[hidden] {
   display: none;
-}
-
-.control-row-checkbox label {
-  margin-right: 0.5rem;
 }
 
 .control-row label {
@@ -248,36 +257,73 @@ body {
   font-size: 0.84rem;
 }
 
+/* Checkboxes/radios keep their native intrinsic size - the shared min-width
+   above is meant for text/number/select controls, and applying it to a
+   checkbox left a large empty hit-box with the label crowded to the left
+   and dead space to its right. */
+.controls-menu-panel input[type='checkbox'],
+.controls-menu-panel input[type='radio'] {
+  min-width: 0;
+  width: auto;
+  cursor: pointer;
+}
+
 #colour-cycle-minutes {
   min-width: 5rem;
 }
 
-#theme-select {
-  padding: 0.2rem 0.25rem;
-  font-size: 0.85rem;
-  cursor: pointer;
-  min-width: 6.75rem;
-  padding: 0.3rem 0.4rem;
-}
-
 .controls-menu-panel button:hover:enabled,
-#theme-select:hover,
 #controls-menu-summary:hover {
   background: var(--control-hover-bg);
+}
+
+/* Theme radios render as two plain options on one row, no separate title -
+   the option labels ("Light mode" / "Dark mode") are self-explanatory. */
+.control-row-radio-group {
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  color: var(--control-text);
+  cursor: pointer;
+}
+
+/* A row whose value column pairs an input with a fixed unit suffix
+   (e.g. "5" + "km/h") - the two sit together as one grid cell so the row
+   itself stays a simple two-column label/value layout like every other
+   control-row. */
+.control-row-with-unit .control-row-value {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.control-row-with-unit input {
+  min-width: 4rem;
+}
+
+.control-unit {
+  font-size: 0.82rem;
+  color: var(--chrome-label);
+  white-space: nowrap;
 }
 
 .mode-checkbox-group {
   border: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  gap: 0.3rem;
+  display: flex;
+  flex-direction: column;
 }
 
 .mode-checkbox-group > legend {
   padding: 0;
-  font-size: 0.9rem;
-  color: var(--chrome-label);
+  margin-bottom: var(--title-content-gap);
 }
 
 .mode-checkbox-option {
@@ -288,6 +334,11 @@ body {
   color: var(--control-text);
   cursor: pointer;
   min-width: 0;
+  margin-top: 0.3rem;
+}
+
+.mode-checkbox-option:first-of-type {
+  margin-top: 0;
 }
 
 .mode-checkbox-option[hidden] {
@@ -313,24 +364,52 @@ body {
 .control-subsection {
   border: 1px solid var(--chrome-border);
   border-radius: 0.4rem;
-  padding: 0.4rem 0.55rem;
-  display: grid;
-  gap: 0.5rem;
+  padding: 0.5rem 0.65rem;
 }
 
+/* A fully custom disclosure marker replaces the native one, which some
+   browsers render at inconsistent width between the open/closed states
+   and which otherwise looks visually out of place next to the rest of
+   the panel's iconography. */
 .control-subsection > summary {
-  font-size: 0.84rem;
-  color: var(--chrome-label);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  list-style: none;
   cursor: pointer;
   user-select: none;
 }
 
+.control-subsection > summary::-webkit-details-marker {
+  display: none;
+}
+
+.control-subsection > summary::after {
+  content: '';
+  flex: 0 0 auto;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-right: 2px solid var(--chrome-label);
+  border-bottom: 2px solid var(--chrome-label);
+  transform: rotate(-45deg);
+  transition: transform 120ms ease;
+}
+
+.control-subsection[open] > summary::after {
+  transform: rotate(45deg);
+}
+
 .control-subsection[open] > summary {
-  margin-bottom: 0.1rem;
+  margin-bottom: var(--title-content-gap);
 }
 
 .control-subsection .control-row {
   margin-top: 0.4rem;
+}
+
+.control-subsection .control-row:first-of-type {
+  margin-top: 0;
 }
 
 .controls-menu-panel button:disabled {
@@ -594,7 +673,6 @@ body {
     display: none !important;
   }
 
-  #theme-select,
   #colour-cycle-minutes,
   #walk-speed-kph,
   #bike-speed-kph,
@@ -607,18 +685,11 @@ body {
   }
 
   .mode-checkbox-option,
-  .mode-checkbox-group > legend {
+  .mode-checkbox-group > legend,
+  .radio-option,
+  .control-title,
+  .control-unit {
     color: #16344a !important;
-  }
-
-  #theme-select option {
-    color: #16344a !important;
-    background: #ffffff !important;
-  }
-
-  #theme-select option:checked {
-    color: #16344a !important;
-    background: #ffffff !important;
   }
 
   #distance-scale {

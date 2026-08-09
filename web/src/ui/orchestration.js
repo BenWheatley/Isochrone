@@ -52,7 +52,7 @@ export function initializeAppShell(doc, options = {}) {
   const routingDisclaimer = resolvedDocument.getElementById('routing-disclaimer');
   const routingDisclaimerOsm = resolvedDocument.getElementById('routing-disclaimer-osm');
   const routingDisclaimerTransit = resolvedDocument.getElementById('routing-disclaimer-transit');
-  const themeSelect = resolvedDocument.getElementById('theme-select');
+  const themeRadios = Array.from(resolvedDocument.querySelectorAll('input[name="theme"]'));
   const invertPointerButtonsInput = resolvedDocument.getElementById('invert-pointer-buttons');
   const modeCheckboxGroup = resolvedDocument.getElementById('mode-checkbox-group');
   const modeCheckboxes = Array.from(resolvedDocument.querySelectorAll('.mode-checkbox'));
@@ -114,8 +114,8 @@ export function initializeAppShell(doc, options = {}) {
   if (!routingDisclaimerTransit || routingDisclaimerTransit.tagName !== 'SPAN') {
     throw new Error('index.html is missing <span id="routing-disclaimer-transit">');
   }
-  if (!themeSelect || themeSelect.tagName !== 'SELECT') {
-    throw new Error('index.html is missing <select id="theme-select">');
+  if (themeRadios.length !== 2 || themeRadios.some((radio) => radio.tagName !== 'INPUT')) {
+    throw new Error('index.html is missing two <input type="radio" name="theme"> elements');
   }
   if (!invertPointerButtonsInput || invertPointerButtonsInput.tagName !== 'INPUT') {
     throw new Error('index.html is missing <input id="invert-pointer-buttons">');
@@ -228,7 +228,7 @@ export function initializeAppShell(doc, options = {}) {
     routingDisclaimer,
     routingDisclaimerOsm,
     routingDisclaimerTransit,
-    themeSelect,
+    themeRadios,
     invertPointerButtonsInput,
     modeCheckboxGroup,
     modeCheckboxes,
@@ -407,9 +407,14 @@ export function bindHeaderMenuControl(shell, options = {}) {
   };
 }
 
+function getCheckedThemeRadioValue(themeRadios) {
+  const checkedRadio = themeRadios.find((radio) => radio.checked);
+  return checkedRadio?.value ?? themeRadios[0]?.value;
+}
+
 export function bindThemeControl(shell, options = {}) {
-  if (!shell || typeof shell !== 'object' || !shell.themeSelect) {
-    throw new Error('shell.themeSelect is required');
+  if (!shell || typeof shell !== 'object' || !Array.isArray(shell.themeRadios) || shell.themeRadios.length === 0) {
+    throw new Error('shell.themeRadios is required');
   }
 
   const rootElement = options.rootElement ?? globalThis.document?.documentElement ?? null;
@@ -427,8 +432,13 @@ export function bindThemeControl(shell, options = {}) {
   }
 
   const setTheme = (themeValue, persist = true) => {
-    const normalizedTheme = normalizeThemeValue(themeValue, normalizeThemeValue(shell.themeSelect.value));
-    shell.themeSelect.value = normalizedTheme;
+    const normalizedTheme = normalizeThemeValue(
+      themeValue,
+      normalizeThemeValue(getCheckedThemeRadioValue(shell.themeRadios)),
+    );
+    for (const radio of shell.themeRadios) {
+      radio.checked = radio.value === normalizedTheme;
+    }
     rootElement.dataset.theme = normalizedTheme;
     if (persist) {
       safeStorageSet(storage, storageKey, normalizedTheme);
@@ -449,14 +459,18 @@ export function bindThemeControl(shell, options = {}) {
   const persistedTheme = safeStorageGet(storage, storageKey);
   setTheme(persistedTheme, false);
 
-  const handleThemeChange = () => {
-    applyTheme(shell.themeSelect.value, { persist: true, notify: true });
+  const handleThemeChange = (event) => {
+    applyTheme(event.target.value, { persist: true, notify: true });
   };
-  shell.themeSelect.addEventListener('change', handleThemeChange);
+  for (const radio of shell.themeRadios) {
+    radio.addEventListener('change', handleThemeChange);
+  }
 
   return {
     dispose() {
-      shell.themeSelect.removeEventListener('change', handleThemeChange);
+      for (const radio of shell.themeRadios) {
+        radio.removeEventListener('change', handleThemeChange);
+      }
     },
     setTheme(themeValue, applyOptions = {}) {
       return applyTheme(themeValue, applyOptions);
