@@ -80,6 +80,7 @@ function createThemeRadios(initialValue = 'light') {
   return [
     createThemeRadio('light', initialValue === 'light'),
     createThemeRadio('dark', initialValue === 'dark'),
+    createThemeRadio('auto', initialValue === 'auto'),
   ];
 }
 
@@ -615,6 +616,67 @@ test('bindThemeControl setTheme supports non-persistent temporary overrides', ()
   assert.deepEqual(persistedWrites, []);
 
   binding.dispose();
+});
+
+test('bindThemeControl defaults to "auto" when nothing is persisted, matching the radios\' own checked default', () => {
+  const themeRadios = createThemeRadios('auto');
+  const shell = { themeRadios };
+  const rootElement = { dataset: {} };
+  const storage = {
+    getItem() {
+      return null;
+    },
+    setItem() {},
+  };
+
+  const binding = bindThemeControl(shell, { rootElement, storage });
+  assert.equal(rootElement.dataset.theme, 'auto');
+
+  binding.dispose();
+});
+
+test('bindThemeControl re-notifies on OS colour-scheme changes while "auto" is selected, but not otherwise', () => {
+  const themeRadios = createThemeRadios('auto');
+  const shell = { themeRadios };
+  const rootElement = { dataset: {} };
+  const storage = { getItem: () => null, setItem() {} };
+  const changeEvents = [];
+  const mediaListeners = new Set();
+  const matchMedia = {
+    matches: true,
+    addEventListener(type, listener) {
+      assert.equal(type, 'change');
+      mediaListeners.add(listener);
+    },
+    removeEventListener(type, listener) {
+      mediaListeners.delete(listener);
+    },
+  };
+
+  const binding = bindThemeControl(shell, {
+    rootElement,
+    storage,
+    matchMedia,
+    onThemeChange(themeValue) {
+      changeEvents.push(themeValue);
+    },
+  });
+
+  for (const listener of mediaListeners) {
+    listener();
+  }
+  assert.deepEqual(changeEvents, ['auto']);
+  assert.equal(rootElement.dataset.theme, 'auto');
+
+  binding.setTheme('dark', { persist: false, notify: false });
+  changeEvents.length = 0;
+  for (const listener of mediaListeners) {
+    listener();
+  }
+  assert.deepEqual(changeEvents, []);
+
+  binding.dispose();
+  assert.equal(mediaListeners.size, 0);
 });
 
 test('bindPointerButtonInversionControl restores persisted checkbox state and persists changes', () => {

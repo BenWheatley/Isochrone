@@ -1,6 +1,9 @@
 :root {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  color-scheme: light;
+  /* "light dark" is the auto/unset default - the browser (and the
+     @media query below, for our own variables) follows prefers-color-scheme
+     until data-theme pins an explicit choice. */
+  color-scheme: light dark;
   color: #122230;
   background: #eef2f5;
   --page-bg: #eef2f5;
@@ -33,6 +36,12 @@
   --map-scale-line-bg: #21435d;
   --map-scale-line-alt: #eef5fb;
   --map-scale-line-border: #21435d;
+  --mode-icon-selected-bg: #cfe9f7;
+  --mode-icon-selected-text: #0b4f73;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
 }
 
 :root[data-theme='dark'] {
@@ -67,6 +76,49 @@
   --map-scale-line-bg: #f6fbff;
   --map-scale-line-alt: #31577a;
   --map-scale-line-border: #c1d6e9;
+  --mode-icon-selected-bg: #2c4a63;
+  --mode-icon-selected-text: #8ecbf2;
+}
+
+/* Auto theme: when the user hasn't pinned light or dark explicitly (the
+   default), follow the OS/browser preference - same variable values as
+   the explicit dark block above, just gated by the media query instead
+   of data-theme. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']):not([data-theme='dark']) {
+    --page-bg: #0b1118;
+    --chrome-bg: #141d27;
+    --chrome-border: #304455;
+    --chrome-text: #d8e8f4;
+    --chrome-label: #b3cadb;
+    --control-bg: #1c2a37;
+    --control-hover-bg: #274055;
+    --control-border: #49657a;
+    --control-text: #d8e7f3;
+    --control-button-bg: #1e3040;
+    --status-text: #c9dceb;
+    --disclaimer-text: #a2b8c8;
+    --disclaimer-link: #8ac9f7;
+    --badge-text: #8fc0e3;
+    --badge-border: #456174;
+    --badge-bg: #1f3242;
+    --badge-webgl-text: #87d9ab;
+    --badge-webgl-border: #356f50;
+    --badge-webgl-bg: #17372a;
+    --badge-cpu-text: #f2c885;
+    --badge-cpu-border: #846937;
+    --badge-cpu-bg: #392c18;
+    --map-bg: #111820;
+    --map-overlay-bg: rgba(4, 12, 18, 0.88);
+    --map-overlay-border: rgba(130, 170, 210, 0.55);
+    --map-overlay-text: #dceaf8;
+    --map-overlay-note: #c0d4e8;
+    --map-scale-line-bg: #f6fbff;
+    --map-scale-line-alt: #31577a;
+    --map-scale-line-border: #c1d6e9;
+    --mode-icon-selected-bg: #2c4a63;
+    --mode-icon-selected-text: #8ecbf2;
+  }
 }
 
 * {
@@ -289,9 +341,9 @@ body {
 /* Theme radios render as two plain options on one row, no separate title -
    the option labels ("Light mode" / "Dark mode") are self-explanatory. */
 .control-row-radio-group {
-  grid-template-columns: auto auto;
+  grid-template-columns: auto auto auto;
   justify-content: start;
-  gap: 1.75rem;
+  gap: 1.25rem;
 }
 
 .radio-option {
@@ -304,17 +356,18 @@ body {
   white-space: nowrap;
 }
 
-/* A row whose value column pairs an input with a fixed unit suffix
-   (e.g. "5" + "km/h") - the two sit together as one grid cell so the row
-   itself stays a simple two-column label/value layout like every other
-   control-row. */
-.control-row-with-unit .control-row-value {
+/* Walking/cycling speed share one row (label, input, label, input) with a
+   single trailing unit instead of repeating "km/h" on each - there's
+   enough width for both once the panel sizes to its content. */
+.control-row-speeds {
+  grid-template-columns: none;
+  justify-content: flex-start;
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.5rem;
 }
 
-.control-row-with-unit input {
+.control-row-speeds input {
   width: 3rem;
 }
 
@@ -324,7 +377,7 @@ body {
   white-space: nowrap;
 }
 
-.mode-checkbox-group {
+.mode-icon-group {
   border: none;
   margin: 0;
   padding: 0;
@@ -333,34 +386,75 @@ body {
   align-items: flex-start;
 }
 
-.mode-checkbox-group > legend {
+.mode-icon-group > legend {
   padding: 0;
   margin-bottom: var(--title-content-gap);
 }
 
-.mode-checkbox-option {
+/* A single horizontal strip of icon buttons (Google Maps' mode picker
+   style) rather than a stacked checkbox list - the panel is wide enough
+   now that "Transport modes" fits on one row. */
+.mode-icon-row {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.mode-icon-option {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 0.45rem;
-  font-size: 0.88rem;
+  justify-content: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 999px;
   color: var(--control-text);
   cursor: pointer;
-  min-width: 0;
-  margin-top: 0.3rem;
 }
 
-.mode-checkbox-option:first-of-type {
-  margin-top: 0;
+.mode-icon-option:hover {
+  background: var(--control-hover-bg);
 }
 
-.mode-checkbox-option[hidden] {
+.mode-icon-option:has(input:checked) {
+  background: var(--mode-icon-selected-bg);
+  color: var(--mode-icon-selected-text);
+}
+
+.mode-icon-option:has(input:focus-visible) {
+  outline: 2px solid var(--control-border);
+  outline-offset: 2px;
+}
+
+.mode-icon-option[hidden] {
   display: none;
 }
 
-.mode-checkbox-option input {
-  min-width: 0;
-  width: auto;
-  cursor: pointer;
+.mode-icon-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+
+.mode-icon {
+  width: 1.4rem;
+  height: 1.4rem;
+  pointer-events: none;
+}
+
+/* Visually hidden but still available to assistive tech - the icons alone
+   aren't enough of a label on their own. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .controls-menu-panel button {
@@ -696,8 +790,8 @@ body {
     -webkit-text-fill-color: #16344a;
   }
 
-  .mode-checkbox-option,
-  .mode-checkbox-group > legend,
+  .mode-icon-option,
+  .mode-icon-group > legend,
   .radio-option,
   .control-title,
   .control-unit {

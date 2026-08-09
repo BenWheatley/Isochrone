@@ -26,7 +26,7 @@ import {
 } from './localization.js';
 
 const CANONICAL_MODE_VALUES = ['walk', 'bike', 'car', 'water', 'transit'];
-const CANONICAL_THEME_VALUES = ['light', 'dark'];
+const CANONICAL_THEME_VALUES = ['light', 'dark', 'auto'];
 const THEME_STORAGE_KEY = 'isochrone-theme';
 const POINTER_BUTTON_INVERSION_STORAGE_KEY = 'isochrone-invert-pointer-buttons';
 
@@ -114,8 +114,8 @@ export function initializeAppShell(doc, options = {}) {
   if (!routingDisclaimerTransit || routingDisclaimerTransit.tagName !== 'SPAN') {
     throw new Error('index.html is missing <span id="routing-disclaimer-transit">');
   }
-  if (themeRadios.length !== 2 || themeRadios.some((radio) => radio.tagName !== 'INPUT')) {
-    throw new Error('index.html is missing two <input type="radio" name="theme"> elements');
+  if (themeRadios.length !== 3 || themeRadios.some((radio) => radio.tagName !== 'INPUT')) {
+    throw new Error('index.html is missing three <input type="radio" name="theme"> elements');
   }
   if (!invertPointerButtonsInput || invertPointerButtonsInput.tagName !== 'INPUT') {
     throw new Error('index.html is missing <input id="invert-pointer-buttons">');
@@ -466,11 +466,27 @@ export function bindThemeControl(shell, options = {}) {
     radio.addEventListener('change', handleThemeChange);
   }
 
+  // While "Auto" is selected, the CSS variables already follow OS changes
+  // on their own via @media (prefers-color-scheme), but JS-rendered
+  // surfaces (the WebGL canvas, the legend) only know to recompute when
+  // notified - re-applying "auto" on every OS preference flip keeps them
+  // in sync without the radio selection itself changing.
+  const darkSchemeMediaQuery = options.matchMedia
+    ?? globalThis.matchMedia?.('(prefers-color-scheme: dark)')
+    ?? null;
+  const handleColorSchemeChange = () => {
+    if (rootElement.dataset.theme === 'auto') {
+      applyTheme('auto', { persist: false, notify: true });
+    }
+  };
+  darkSchemeMediaQuery?.addEventListener?.('change', handleColorSchemeChange);
+
   return {
     dispose() {
       for (const radio of shell.themeRadios) {
         radio.removeEventListener('change', handleThemeChange);
       }
+      darkSchemeMediaQuery?.removeEventListener?.('change', handleColorSchemeChange);
     },
     setTheme(themeValue, applyOptions = {}) {
       return applyTheme(themeValue, applyOptions);

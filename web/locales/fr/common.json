@@ -4,6 +4,7 @@
   "body.location.aria": "Lieu",
   "body.options": "Options",
   "body.options.open": "Ouvrir le menu des options",
+  "body.options.theme.auto": "Automatique",
   "body.options.theme.light": "Mode clair",
   "body.options.theme.dark": "Mode sombre",
   "body.options.invertPointerButtons": "Inverser les boutons principal/secondaire de la souris",

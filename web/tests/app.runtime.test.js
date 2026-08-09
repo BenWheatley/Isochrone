@@ -476,6 +476,113 @@ test('runConnectionScanFromWalkingReachableStops seeds a stop reached faster by 
   assert.equal(result.usedTedgeIndices[0], 0);
 });
 
+test('runConnectionScanFromWalkingReachableStops includes every boardable connection, not just the one that wins the earliest-arrival race', () => {
+  // Same 2-stop/1-connection layout as createFixtureBinaryBufferWithTransit,
+  // but with a second, slower connection departing after the first that is
+  // still boardable (stop 0 is reachable in time) even though it doesn't
+  // improve stop 1's earliest arrival - rendering should still draw it, so
+  // routes with multiple candidate departures show up as more than a bare
+  // shortest-path tree.
+  const headerSize = 64;
+  const nodeRecordSize = 16;
+  const edgeRecordSize = 12;
+  const stopRecordSize = 24;
+  const tedgeRecordSize = 20;
+  const nNodes = 3;
+  const nEdges = 2;
+  const nStops = 2;
+  const nTedges = 2;
+  const nodeTableOffset = headerSize;
+  const edgeTableOffset = nodeTableOffset + nNodes * nodeRecordSize;
+  const stopTableOffset = edgeTableOffset + nEdges * edgeRecordSize;
+  const tedgeTableOffset = stopTableOffset + nStops * stopRecordSize;
+  const buffer = new ArrayBuffer(tedgeTableOffset + nTedges * tedgeRecordSize);
+  const view = new DataView(buffer);
+
+  view.setUint32(0, GRAPH_MAGIC, true);
+  view.setUint8(4, 2);
+  view.setUint8(5, 1);
+  view.setUint32(8, nNodes, true);
+  view.setUint32(12, nEdges, true);
+  view.setUint32(16, nStops, true);
+  view.setUint32(20, nTedges, true);
+  view.setFloat64(24, 392000, true);
+  view.setFloat64(32, 5820000, true);
+  view.setUint16(40, 25833, true);
+  view.setUint16(42, 512, true);
+  view.setUint16(44, 512, true);
+  view.setFloat32(48, 10, true);
+  view.setUint32(52, nodeTableOffset, true);
+  view.setUint32(56, edgeTableOffset, true);
+  view.setUint32(60, stopTableOffset, true);
+
+  const nodeI32 = new Int32Array(buffer, nodeTableOffset, nNodes * 4);
+  const nodeU32 = new Uint32Array(buffer, nodeTableOffset, nNodes * 4);
+  const nodeU16 = new Uint16Array(buffer, nodeTableOffset, nNodes * 8);
+  nodeI32[0] = 0;
+  nodeI32[1] = 0;
+  nodeU32[2] = 0;
+  nodeU16[6] = 1;
+  nodeI32[4] = 100;
+  nodeI32[5] = 0;
+  nodeU32[6] = 1;
+  nodeU16[14] = 1;
+  nodeI32[8] = 200;
+  nodeI32[9] = 0;
+  nodeU32[10] = 2;
+  nodeU16[22] = 0;
+
+  const edgeU32 = new Uint32Array(buffer, edgeTableOffset, nEdges * 3);
+  const edgeU16 = new Uint16Array(buffer, edgeTableOffset, nEdges * 6);
+  const modeMask = EDGE_MODE_WALK_BIT | EDGE_MODE_CAR_BIT;
+  edgeU32[0] = 1;
+  edgeU16[2] = 72;
+  edgeU32[2] = modeMask | (11 << 8) | (50 << 16);
+  edgeU32[3] = 2;
+  edgeU16[8] = 72;
+  edgeU32[5] = modeMask | (11 << 8) | (50 << 16);
+
+  view.setInt32(stopTableOffset, 0, true);
+  view.setInt32(stopTableOffset + 4, 0, true);
+  view.setUint32(stopTableOffset + 8, 0, true);
+  view.setUint8(stopTableOffset + 18, 2);
+  view.setInt32(stopTableOffset + stopRecordSize, 200, true);
+  view.setInt32(stopTableOffset + stopRecordSize + 4, 0, true);
+  view.setUint32(stopTableOffset + stopRecordSize + 8, 2, true);
+  view.setUint8(stopTableOffset + stopRecordSize + 18, 2);
+
+  // Winning connection: departs 1000, arrives 1010.
+  view.setUint32(tedgeTableOffset, 0, true);
+  view.setUint32(tedgeTableOffset + 4, 1, true);
+  view.setUint32(tedgeTableOffset + 8, 1000, true);
+  view.setUint16(tedgeTableOffset + 12, 10, true);
+  view.setUint16(tedgeTableOffset + 14, 0, true);
+  view.setUint32(tedgeTableOffset + 16, 0b1111111, true);
+  // Slower alternative: departs 1005 (still boardable), arrives 1055 -
+  // never improves stop 1, but should still be reported as boardable.
+  view.setUint32(tedgeTableOffset + tedgeRecordSize, 0, true);
+  view.setUint32(tedgeTableOffset + tedgeRecordSize + 4, 1, true);
+  view.setUint32(tedgeTableOffset + tedgeRecordSize + 8, 1005, true);
+  view.setUint16(tedgeTableOffset + tedgeRecordSize + 12, 50, true);
+  view.setUint16(tedgeTableOffset + tedgeRecordSize + 14, 1, true);
+  view.setUint32(tedgeTableOffset + tedgeRecordSize + 16, 0b1111111, true);
+
+  const graph = parseGraphBinary(buffer);
+  const walkDistSeconds = new Float32Array([0, 72, 144]);
+
+  const result = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
+    departureSecondsOfDay: 990,
+    departureWeekdayIndex: 2,
+    timeLimitSeconds: 200,
+  });
+
+  assert.equal(result.usedTedgeIndices.length, 2);
+  assert.deepEqual(Array.from(result.usedTedgeIndices).sort(), [0, 1]);
+  // The seed is still driven by the winning (earliest) arrival only.
+  assert.equal(result.seedNodeIndices.length, 1);
+  assert.equal(result.seedStartDistSeconds[0], 20);
+});
+
 test('runConnectionScanFromWalkingReachableStops finds no improvement when the connection departs too early', () => {
   const graph = parseGraphBinary(createFixtureBinaryBufferWithTransit());
   const walkDistSeconds = new Float32Array([0, 72, 144]);

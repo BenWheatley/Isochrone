@@ -4,6 +4,7 @@
   "body.location.aria": "Location",
   "body.options": "Options",
   "body.options.open": "Open options menu",
+  "body.options.theme.auto": "Auto",
   "body.options.theme.light": "Light mode",
   "body.options.theme.dark": "Dark mode",
   "body.options.invertPointerButtons": "Left mouse button to move start/right mouse button to move map",

@@ -1460,7 +1460,12 @@ export function rerenderIsochroneFromSnapshotWithStatus(shell, mapData, options 
  * (0=Monday..6=Sunday) before accepting it. Connections are stored sorted
  * by time-of-day departure regardless of which weekday(s) they run on, so
  * the scan can still break out early once departures exceed the time
- * budget.
+ * budget. Besides the seed arrays, the returned usedTedgeIndices lists
+ * every connection whose boarding stop was reachable in time - not just
+ * the one that won each stop's earliest-arrival race - so rendering can
+ * draw the whole boardable transit network (see
+ * buildTransitConnectionEdgeVertexData) rather than a sparse spanning
+ * tree.
  */
 export function runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, options = {}) {
   validateGraphForRouting(graph);
@@ -1511,12 +1516,6 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
   const earliestArrivalSeconds = new Float64Array(nStops).fill(Number.POSITIVE_INFINITY);
   const walkAttachCostSeconds = new Float64Array(nStops);
   const improvedByTransit = new Uint8Array(nStops);
-  // Which connection produced each stop's earliest transit arrival -
-  // rendering draws exactly these "winning" connections as lines from the
-  // stop that was boarded to the stop that was reached, the transit
-  // equivalent of a shortest-path tree, instead of scattering reachable
-  // stops as disconnected points.
-  const improvingTedgeIndex = new Int32Array(nStops).fill(-1);
 
   for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
     const nodeIndex = graph.stopNearestNodeIndex[stopIndex];
@@ -1544,6 +1543,15 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
     }
   }
 
+  // Every connection whose boarding stop is reachable in time is a
+  // candidate for rendering (not just the one that happens to win each
+  // stop's earliest-arrival race) - this mirrors how road/ferry edges are
+  // rendered (the whole graph, not a shortest-path tree), so real transit
+  // routes show up as continuous connected lines instead of a sparse,
+  // disconnected-looking spanning tree.
+  const boardableTedgeIndices = new Uint32Array(graph.header.nTedges);
+  let boardableTedgeCount = 0;
+
   const nTedges = graph.header.nTedges;
   for (let tedgeIndex = 0; tedgeIndex < nTedges; tedgeIndex += 1) {
     const departureSeconds = graph.tedgeDepartureSeconds[tedgeIndex];
@@ -1559,16 +1567,19 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
     }
     const toStopIndex = graph.tedgeToStop[tedgeIndex];
     const candidateArrivalSeconds = departureSeconds + graph.tedgeTravelSeconds[tedgeIndex];
+    if (candidateArrivalSeconds > budgetEndSeconds) {
+      continue;
+    }
+    boardableTedgeIndices[boardableTedgeCount] = tedgeIndex;
+    boardableTedgeCount += 1;
     if (candidateArrivalSeconds < earliestArrivalSeconds[toStopIndex]) {
       earliestArrivalSeconds[toStopIndex] = candidateArrivalSeconds;
       improvedByTransit[toStopIndex] = 1;
-      improvingTedgeIndex[toStopIndex] = tedgeIndex;
     }
   }
 
   const seedNodeIndicesList = [];
   const seedStartDistSecondsList = [];
-  const usedTedgeIndicesList = [];
   for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
     if (!improvedByTransit[stopIndex]) {
       continue;
@@ -1580,13 +1591,12 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
     }
     seedNodeIndicesList.push(graph.stopNearestNodeIndex[stopIndex]);
     seedStartDistSecondsList.push(elapsedSeconds);
-    usedTedgeIndicesList.push(improvingTedgeIndex[stopIndex]);
   }
 
   return {
     seedNodeIndices: Uint32Array.from(seedNodeIndicesList),
     seedStartDistSeconds: Float32Array.from(seedStartDistSecondsList),
-    usedTedgeIndices: Uint32Array.from(usedTedgeIndicesList),
+    usedTedgeIndices: boardableTedgeIndices.subarray(0, boardableTedgeCount),
   };
 }
 
@@ -2342,7 +2352,14 @@ export function layoutMapViewportToContainGraph(shell, graphHeader) {
 
 function resolveIsochroneTheme(rootElement = globalThis.document?.documentElement ?? null) {
   const datasetTheme = rootElement?.dataset?.theme ?? null;
-  return normalizeIsochroneTheme(datasetTheme, 'dark');
+  if (datasetTheme === 'light' || datasetTheme === 'dark') {
+    return datasetTheme;
+  }
+  // 'auto' (or no explicit choice yet) follows the OS/browser preference,
+  // same signal the CSS @media (prefers-color-scheme: dark) block reacts
+  // to, so canvas colours and page chrome always agree.
+  const prefersDark = globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true;
+  return prefersDark ? 'dark' : 'light';
 }
 
 function getIsochroneThemeVariant(theme) {
@@ -6004,23 +6021,29 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
       },
     });
     const themeBinding = bindThemeControl(shell, {
-      onThemeChange(themeValue) {
+      // themeValue may be the raw radio selection ('auto' included, not
+      // just 'light'/'dark') - resolveIsochroneTheme() re-reads
+      // rootElement.dataset.theme (which bindThemeControl already updated)
+      // and turns 'auto'/unset into the actual OS-preference-driven colour
+      // so canvas/legend rendering always gets a concrete theme.
+      onThemeChange() {
+        const resolvedTheme = resolveIsochroneTheme();
         if (initializedMapData?.boundaryPayload && initializedMapData?.graph?.header) {
           drawBoundaryBasemapAlignedToGraphGrid(
             shell.boundaryCanvas,
             initializedMapData.boundaryPayload,
             initializedMapData.graph.header,
             {
-              colourTheme: themeValue,
+              colourTheme: resolvedTheme,
               viewport: initializedMapData.viewport,
               fitBoundingBoxPx: initializedMapData.boundaryFitBoundingBoxPx,
             },
           );
         }
         const cycleMinutes = getColourCycleMinutesFromShell(shell);
-        renderIsochroneLegendIfNeeded(shell, cycleMinutes, { theme: themeValue });
+        renderIsochroneLegendIfNeeded(shell, cycleMinutes, { theme: resolvedTheme });
         const rerendered = rerenderIsochroneFromSnapshotWithStatus(shell, initializedMapData, {
-          colourTheme: themeValue,
+          colourTheme: resolvedTheme,
           colourCycleMinutes: cycleMinutes,
           viewport: initializedMapData?.viewport,
         });

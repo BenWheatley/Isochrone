@@ -4,6 +4,7 @@
   "body.location.aria": "Ort",
   "body.options": "Optionen",
   "body.options.open": "Optionsmenü öffnen",
+  "body.options.theme.auto": "Automatisch",
   "body.options.theme.light": "Heller Modus",
   "body.options.theme.dark": "Dunkler Modus",
   "body.options.invertPointerButtons": "Primäre/sekundäre Maustasten tauschen",
