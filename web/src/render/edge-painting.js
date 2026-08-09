@@ -28,6 +28,40 @@ import {
 // travel-time seconds grid (GPU colours from seconds), or a vertex buffer
 // (GPU draws the edges directly).
 
+// Defaults and guards shared by every batch/all-reachable entry point below.
+// Callers validate their own sink (pixel grid, travel-time grid) and the
+// settled batch first, so validation order is unchanged; only this option
+// policy is centralised, so a default can't drift between the six variants.
+function normalizeEdgeInterpolationOptions(graph, allowedModeMask, options, {
+  validateStepStride = true,
+} = {}) {
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+
+  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
+  const stepStride = options.stepStride ?? 1;
+  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
+    options.edgeTraversalCostSeconds,
+    graph.header.nEdges,
+  );
+  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
+    throw new Error('edgeSlackSeconds must be a non-negative finite number');
+  }
+  if (validateStepStride && (!Number.isInteger(stepStride) || stepStride <= 0)) {
+    throw new Error('stepStride must be a positive integer');
+  }
+
+  return {
+    alpha: options.alpha ?? 255,
+    colourCycleMinutes: options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
+    colourTheme: normalizeIsochroneTheme(options.colourTheme, 'dark'),
+    edgeSlackSeconds,
+    stepStride,
+    edgeTraversalCostSeconds,
+  };
+}
+
 export function rasterizeLinePixels(x0, y0, x1, y1, visitPixel) {
   if (!Number.isFinite(x0) || !Number.isFinite(y0) || !Number.isFinite(x1) || !Number.isFinite(y1)) {
     throw new Error('line endpoints must be finite numbers');
@@ -456,25 +490,14 @@ export function paintSettledBatchEdgeInterpolationsToGrid(
   validateNodePixels(nodePixels);
   validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
   validateSettledBatch(settledBatch);
-  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
-    throw new Error('allowedModeMask must be a positive 8-bit integer');
-  }
-
-  const alpha = options.alpha ?? 255;
-  const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
-  const colourTheme = normalizeIsochroneTheme(options.colourTheme, 'dark');
-  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
-  const stepStride = options.stepStride ?? 1;
-  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
-    options.edgeTraversalCostSeconds,
-    graph.header.nEdges,
-  );
-  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
-    throw new Error('edgeSlackSeconds must be a non-negative finite number');
-  }
-  if (!Number.isInteger(stepStride) || stepStride <= 0) {
-    throw new Error('stepStride must be a positive integer');
-  }
+  const {
+    alpha,
+    colourCycleMinutes,
+    colourTheme,
+    edgeSlackSeconds,
+    stepStride,
+    edgeTraversalCostSeconds,
+  } = normalizeEdgeInterpolationOptions(graph, allowedModeMask, options);
 
   let paintedCount = 0;
 
@@ -512,22 +535,11 @@ export function paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
   validateNodePixels(nodePixels);
   validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
   validateSettledBatch(settledBatch);
-  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
-    throw new Error('allowedModeMask must be a positive 8-bit integer');
-  }
-
-  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
-  const stepStride = options.stepStride ?? 1;
-  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
-    options.edgeTraversalCostSeconds,
-    graph.header.nEdges,
-  );
-  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
-    throw new Error('edgeSlackSeconds must be a non-negative finite number');
-  }
-  if (!Number.isInteger(stepStride) || stepStride <= 0) {
-    throw new Error('stepStride must be a positive integer');
-  }
+  const {
+    edgeSlackSeconds,
+    stepStride,
+    edgeTraversalCostSeconds,
+  } = normalizeEdgeInterpolationOptions(graph, allowedModeMask, options);
 
   let paintedCount = 0;
   for (const sourceNodeIndex of settledBatch) {
@@ -558,25 +570,14 @@ export function paintAllReachableEdgeInterpolationsToGrid(
   validateGraphForRouting(graph);
   validateNodePixels(nodePixels);
   validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
-    throw new Error('allowedModeMask must be a positive 8-bit integer');
-  }
-
-  const alpha = options.alpha ?? 255;
-  const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
-  const colourTheme = normalizeIsochroneTheme(options.colourTheme, 'dark');
-  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
-  const stepStride = options.stepStride ?? 1;
-  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
-    options.edgeTraversalCostSeconds,
-    graph.header.nEdges,
-  );
-  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
-    throw new Error('edgeSlackSeconds must be a non-negative finite number');
-  }
-  if (!Number.isInteger(stepStride) || stepStride <= 0) {
-    throw new Error('stepStride must be a positive integer');
-  }
+  const {
+    alpha,
+    colourCycleMinutes,
+    colourTheme,
+    edgeSlackSeconds,
+    stepStride,
+    edgeTraversalCostSeconds,
+  } = normalizeEdgeInterpolationOptions(graph, allowedModeMask, options);
 
   let paintedCount = 0;
   for (let sourceNodeIndex = 0; sourceNodeIndex < graph.header.nNodes; sourceNodeIndex += 1) {
@@ -611,22 +612,11 @@ export function paintAllReachableEdgeInterpolationsToTravelTimeGrid(
   validateGraphForRouting(graph);
   validateNodePixels(nodePixels);
   validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
-    throw new Error('allowedModeMask must be a positive 8-bit integer');
-  }
-
-  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
-  const stepStride = options.stepStride ?? 1;
-  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
-    options.edgeTraversalCostSeconds,
-    graph.header.nEdges,
-  );
-  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
-    throw new Error('edgeSlackSeconds must be a non-negative finite number');
-  }
-  if (!Number.isInteger(stepStride) || stepStride <= 0) {
-    throw new Error('stepStride must be a positive integer');
-  }
+  const {
+    edgeSlackSeconds,
+    stepStride,
+    edgeTraversalCostSeconds,
+  } = normalizeEdgeInterpolationOptions(graph, allowedModeMask, options);
 
   let paintedCount = 0;
   for (let sourceNodeIndex = 0; sourceNodeIndex < graph.header.nNodes; sourceNodeIndex += 1) {
@@ -749,18 +739,12 @@ export function collectSettledBatchTravelTimeEdgeVertices(
   validateNodePixels(nodePixels);
   validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
   validateSettledBatch(settledBatch);
-  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
-    throw new Error('allowedModeMask must be a positive 8-bit integer');
-  }
-
-  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
-  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
-    options.edgeTraversalCostSeconds,
-    graph.header.nEdges,
-  );
-  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
-    throw new Error('edgeSlackSeconds must be a non-negative finite number');
-  }
+  const {
+    edgeSlackSeconds,
+    edgeTraversalCostSeconds,
+  } = normalizeEdgeInterpolationOptions(graph, allowedModeMask, options, {
+    validateStepStride: false,
+  });
 
   const builder = resetEdgeVertexBufferBuilder(options.builder ?? createEdgeVertexBufferBuilder());
   for (const sourceNodeIndex of settledBatch) {
@@ -789,18 +773,12 @@ export function collectAllReachableTravelTimeEdgeVertices(
   validateGraphForRouting(graph);
   validateNodePixels(nodePixels);
   validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
-    throw new Error('allowedModeMask must be a positive 8-bit integer');
-  }
-
-  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
-  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
-    options.edgeTraversalCostSeconds,
-    graph.header.nEdges,
-  );
-  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
-    throw new Error('edgeSlackSeconds must be a non-negative finite number');
-  }
+  const {
+    edgeSlackSeconds,
+    edgeTraversalCostSeconds,
+  } = normalizeEdgeInterpolationOptions(graph, allowedModeMask, options, {
+    validateStepStride: false,
+  });
 
   const builder = resetEdgeVertexBufferBuilder(options.builder ?? createEdgeVertexBufferBuilder());
   for (let sourceNodeIndex = 0; sourceNodeIndex < graph.header.nNodes; sourceNodeIndex += 1) {
