@@ -2,7 +2,7 @@
 
 Berlin isochrone web application with a Python preprocessing pipeline and a browser-based renderer.
 
-[Live App](https://benwheatley.github.io/Isochrone/)
+[Live App](https://benwheatley.github.io/Isochrone/web/)
 
 ## Quick start
 
