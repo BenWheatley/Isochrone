@@ -123,6 +123,12 @@ import {
   maybeDecompressGzipBuffer,
   parseGraphBinary,
 } from './core/graph-binary.js';
+import {
+  clampInt,
+} from './core/math.js';
+import {
+  resolveIsochroneTheme,
+} from './ui/theme.js';
 export {
   fetchBinaryWithProgress,
   maybeDecompressGzipBuffer,
@@ -1961,17 +1967,6 @@ export function layoutMapViewportToContainGraph(shell, graphHeader) {
   };
 }
 
-function resolveIsochroneTheme(rootElement = globalThis.document?.documentElement ?? null) {
-  const datasetTheme = rootElement?.dataset?.theme ?? null;
-  if (datasetTheme === 'light' || datasetTheme === 'dark') {
-    return datasetTheme;
-  }
-  // 'auto' (or no explicit choice yet) follows the OS/browser preference,
-  // same signal the CSS @media (prefers-color-scheme: dark) block reacts
-  // to, so canvas colours and page chrome always agree.
-  const prefersDark = globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true;
-  return prefersDark ? 'dark' : 'light';
-}
 
 
 function formatDistanceLabel(distanceMetres) {
@@ -4290,15 +4285,6 @@ function buildRoutingProfileSummary(profile, metadata = {}) {
 }
 
 
-function clampInt(value, minValue, maxValue) {
-  if (value < minValue) {
-    return minValue;
-  }
-  if (value > maxValue) {
-    return maxValue;
-  }
-  return value;
-}
 
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', async () => {

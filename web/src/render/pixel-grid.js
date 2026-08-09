@@ -4,15 +4,6 @@
 // Kept together with their validators and the canvas-sizing helper because
 // they are the shared vocabulary every render path speaks.
 
-export function clampInt(value, minValue, maxValue) {
-  if (value < minValue) {
-    return minValue;
-  }
-  if (value > maxValue) {
-    return maxValue;
-  }
-  return value;
-}
 
 export function syncCanvasToDisplaySize(canvas) {
   if (!canvas || typeof canvas.getBoundingClientRect !== 'function') {

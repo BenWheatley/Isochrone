@@ -5,8 +5,8 @@ import {
 } from '../config/constants.js';
 import { normalizeIsochroneTheme } from './colour.js';
 import { resolveViewportFrame } from '../core/viewport.js';
+import { clampInt } from '../core/math.js';
 import {
-  clampInt,
   syncCanvasToDisplaySize,
   validatePixelGrid,
   validateTravelTimeGrid,
