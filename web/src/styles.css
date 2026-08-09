@@ -181,7 +181,11 @@ body {
   top: calc(100% + 0.45rem);
   right: 0;
   z-index: 20;
-  width: min(20rem, calc(100vw - 1.5rem));
+  /* Sized by its own content (the widest row/label) rather than a fixed
+     guess, so it's exactly as wide as it needs to be - capped so it never
+     overflows a narrow viewport. */
+  width: max-content;
+  max-width: calc(100vw - 1.5rem);
   padding: 0.6rem;
   border-radius: 0.5rem;
   border: 1px solid var(--chrome-border);
@@ -201,9 +205,14 @@ body {
 
 .control-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto auto;
+  justify-content: space-between;
   align-items: center;
   gap: 0.75rem;
+}
+
+.control-row label {
+  white-space: nowrap;
 }
 
 /* Marks the first control of a new logical group (display / routing /
@@ -248,7 +257,6 @@ body {
 .controls-menu-panel input,
 .controls-menu-panel select,
 .controls-menu-panel button {
-  min-width: 7.5rem;
   border: 1px solid var(--control-border);
   background: var(--control-bg);
   color: var(--control-text);
@@ -257,19 +265,20 @@ body {
   font-size: 0.84rem;
 }
 
-/* Checkboxes/radios keep their native intrinsic size - the shared min-width
-   above is meant for text/number/select controls, and applying it to a
-   checkbox left a large empty hit-box with the label crowded to the left
-   and dead space to its right. */
+/* Checkboxes/radios keep their native intrinsic size - the shared sizing
+   above is meant for text/number controls, and applying it to a checkbox
+   left a large empty hit-box with the label crowded to the left and dead
+   space to its right. */
 .controls-menu-panel input[type='checkbox'],
 .controls-menu-panel input[type='radio'] {
-  min-width: 0;
   width: auto;
   cursor: pointer;
 }
 
+/* Number fields only ever hold a handful of digits - size them to that,
+   not to the same width as e.g. the datetime field. */
 #colour-cycle-minutes {
-  min-width: 5rem;
+  width: 3.5rem;
 }
 
 .controls-menu-panel button:hover:enabled,
@@ -280,8 +289,9 @@ body {
 /* Theme radios render as two plain options on one row, no separate title -
    the option labels ("Light mode" / "Dark mode") are self-explanatory. */
 .control-row-radio-group {
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
+  grid-template-columns: auto auto;
+  justify-content: start;
+  gap: 1.75rem;
 }
 
 .radio-option {
@@ -291,6 +301,7 @@ body {
   font-size: 0.88rem;
   color: var(--control-text);
   cursor: pointer;
+  white-space: nowrap;
 }
 
 /* A row whose value column pairs an input with a fixed unit suffix
@@ -304,7 +315,7 @@ body {
 }
 
 .control-row-with-unit input {
-  min-width: 4rem;
+  width: 3rem;
 }
 
 .control-unit {
@@ -319,6 +330,7 @@ body {
   padding: 0;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
 }
 
 .mode-checkbox-group > legend {

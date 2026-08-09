@@ -25,6 +25,7 @@ import {
   parseNodeIndexFromLocationSearch,
   parseWalkSpeedKphFromLocationSearch,
   runConnectionScanFromWalkingReachableStops,
+  buildTransitConnectionEdgeVertexData,
   runWalkingIsochroneFromSourceNode,
   buildStaticEdgeVertexTemplateForMode,
   updateTravelTimesInStaticEdgeVertexTemplate,
@@ -471,6 +472,8 @@ test('runConnectionScanFromWalkingReachableStops seeds a stop reached faster by 
   // Board at stop 0 (t=990, zero walk-attach), ride to stop 1 arriving
   // t=1010, walk off (zero attach) -> 20s elapsed, versus 144s on foot.
   assert.equal(result.seedStartDistSeconds[0], 20);
+  assert.equal(result.usedTedgeIndices.length, 1);
+  assert.equal(result.usedTedgeIndices[0], 0);
 });
 
 test('runConnectionScanFromWalkingReachableStops finds no improvement when the connection departs too early', () => {
@@ -560,6 +563,30 @@ test('runConnectionScanFromWalkingReachableStops returns empty seeds for a graph
 
   assert.equal(result.seedNodeIndices.length, 0);
   assert.equal(result.seedStartDistSeconds.length, 0);
+});
+
+test('buildTransitConnectionEdgeVertexData packs one 12-float edge per used transit connection', () => {
+  const graph = parseGraphBinary(createFixtureBinaryBufferWithTransit());
+  const nodePixels = precomputeNodePixelCoordinates(graph);
+  // Fixture's single tedge connects stop 0 (nearest node 0) to stop 1
+  // (nearest node 2), travel_seconds=10 (see createFixtureBinaryBufferWithTransit).
+  const usedTedgeIndices = Uint32Array.from([0]);
+
+  const packed = buildTransitConnectionEdgeVertexData(graph, nodePixels, usedTedgeIndices);
+
+  assert.equal(packed.length, 12);
+  assert.equal(packed[0], nodePixels.nodePixelX[0]);
+  assert.equal(packed[1], nodePixels.nodePixelY[0]);
+  assert.equal(packed[2], 0); // fromNodeIndex
+  assert.equal(packed[3], 2); // toNodeIndex
+  assert.equal(packed[4], 10); // travelSeconds
+  assert.equal(packed[5], 0); // start-vertex flag
+  assert.equal(packed[6], nodePixels.nodePixelX[2]);
+  assert.equal(packed[7], nodePixels.nodePixelY[2]);
+  assert.equal(packed[8], 0);
+  assert.equal(packed[9], 2);
+  assert.equal(packed[10], 10);
+  assert.equal(packed[11], 1); // end-vertex flag
 });
 
 test('runWalkingIsochroneFromSourceNode repaints the canvas with transit-augmented distances', async () => {

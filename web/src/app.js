@@ -717,6 +717,7 @@ export async function runWalkingIsochroneFromSourceNode(
     let finalDistSeconds = searchState.distSeconds;
     let finalEdgeVertexData = runSummary.edgeVertexData ?? null;
     let transitAugmented = false;
+    let transitEdgeNodeIndexedVertexData = null;
 
     const nStops = mapData.graph.header.nStops;
     if (
@@ -778,6 +779,11 @@ export async function runWalkingIsochroneFromSourceNode(
         // needed here beyond clearing the stale cache).
         finalEdgeVertexData = null;
         transitAugmented = true;
+        transitEdgeNodeIndexedVertexData = buildTransitConnectionEdgeVertexData(
+          mapData.graph,
+          mapData.nodePixels,
+          csaResult.usedTedgeIndices,
+        );
       }
     }
 
@@ -791,6 +797,7 @@ export async function runWalkingIsochroneFromSourceNode(
       colourCycleMinutes: options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
       edgeVertexData: finalEdgeVertexData,
       edgeVertexDataModeMask: finalEdgeVertexData instanceof Float32Array ? allowedModeMask : null,
+      transitEdgeNodeIndexedVertexData,
     };
 
     // runSearchTimeSlicedWithRendering already painted the canvas from the
@@ -1283,16 +1290,18 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   const supportsGpuIndexedEdgeInterpolation =
     typeof renderer.drawTravelTimeEdgesFromNodeTimes === 'function';
   const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
-  // Under the transit-only sentinel mask no real edge ever matches, so the
-  // edge-interpolated renderers below would draw zero edges (and, since
-  // they early-return before clearing when there's nothing to draw, would
-  // leave a stale previous frame on screen instead of showing an empty
-  // canvas). The grid/point renderer further down paints reachable nodes as
-  // individual pixels regardless of edge connectivity and always clears
-  // first, so route the transit-only case straight there.
+  // Under the transit-only sentinel mask no real road/ferry edge ever
+  // matches allowedModeMask, so there is nothing for
+  // getOrBuildStaticEdgeNodeIndexedVertexDataForModeFromMapData to find.
+  // The isochrone is instead carried by the actual transit connections used
+  // to reach each stop (built alongside the CSA scan into
+  // snapshot.transitEdgeNodeIndexedVertexData) - same renderer, same
+  // packed vertex format, just a different edge source, so transit draws
+  // as connected lines exactly like every other mode instead of isolated
+  // points.
   const isTransitOnlyAllowedModeMask = allowedModeMask === TRANSIT_ONLY_ALLOWED_MODE_MASK;
 
-  if (supportsGpuEdgeInterpolation && !isTransitOnlyAllowedModeMask) {
+  if (supportsGpuEdgeInterpolation) {
     const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
       snapshot.edgeTraversalCostSeconds,
       mapData.graph.header.nEdges,
@@ -1305,8 +1314,9 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
       },
     );
     if (supportsGpuIndexedEdgeInterpolation) {
-      const edgeNodeIndexedVertexData =
-        getOrBuildStaticEdgeNodeIndexedVertexDataForModeFromMapData(
+      const edgeNodeIndexedVertexData = isTransitOnlyAllowedModeMask
+        ? (snapshot.transitEdgeNodeIndexedVertexData ?? new Float32Array(0))
+        : getOrBuildStaticEdgeNodeIndexedVertexDataForModeFromMapData(
           mapData,
           allowedModeMask,
           edgeTraversalCostSeconds,
@@ -1501,6 +1511,12 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
   const earliestArrivalSeconds = new Float64Array(nStops).fill(Number.POSITIVE_INFINITY);
   const walkAttachCostSeconds = new Float64Array(nStops);
   const improvedByTransit = new Uint8Array(nStops);
+  // Which connection produced each stop's earliest transit arrival -
+  // rendering draws exactly these "winning" connections as lines from the
+  // stop that was boarded to the stop that was reached, the transit
+  // equivalent of a shortest-path tree, instead of scattering reachable
+  // stops as disconnected points.
+  const improvingTedgeIndex = new Int32Array(nStops).fill(-1);
 
   for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
     const nodeIndex = graph.stopNearestNodeIndex[stopIndex];
@@ -1546,11 +1562,13 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
     if (candidateArrivalSeconds < earliestArrivalSeconds[toStopIndex]) {
       earliestArrivalSeconds[toStopIndex] = candidateArrivalSeconds;
       improvedByTransit[toStopIndex] = 1;
+      improvingTedgeIndex[toStopIndex] = tedgeIndex;
     }
   }
 
   const seedNodeIndicesList = [];
   const seedStartDistSecondsList = [];
+  const usedTedgeIndicesList = [];
   for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
     if (!improvedByTransit[stopIndex]) {
       continue;
@@ -1562,12 +1580,65 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
     }
     seedNodeIndicesList.push(graph.stopNearestNodeIndex[stopIndex]);
     seedStartDistSecondsList.push(elapsedSeconds);
+    usedTedgeIndicesList.push(improvingTedgeIndex[stopIndex]);
   }
 
   return {
     seedNodeIndices: Uint32Array.from(seedNodeIndicesList),
     seedStartDistSeconds: Float32Array.from(seedStartDistSecondsList),
+    usedTedgeIndices: Uint32Array.from(usedTedgeIndicesList),
   };
+}
+
+/**
+ * Builds the packed node-indexed edge vertex buffer (the same 12-float
+ * layout WebGlIsochroneRenderer.drawTravelTimeEdgesFromNodeTimes expects
+ * from buildStaticEdgeNodeIndexedVertexData) directly from the transit
+ * connections the CSA scan actually used to reach each stop, using each
+ * connection's stop-attachment node for both endpoint position and the
+ * distSeconds texture lookup. This lets a transit-only isochrone render as
+ * connected lines the same way every road/ferry mode does, rather than as
+ * isolated per-stop points - there is no walkable road edge to reuse here,
+ * so the transit connections themselves stand in as the graph edges.
+ */
+export function buildTransitConnectionEdgeVertexData(graph, nodePixels, usedTedgeIndices) {
+  validateGraphForRouting(graph);
+  validateNodePixels(nodePixels);
+  if (!(usedTedgeIndices instanceof Uint32Array)) {
+    throw new Error('usedTedgeIndices must be a Uint32Array');
+  }
+
+  const edgeCount = usedTedgeIndices.length;
+  const packedVertexData = new Float32Array(edgeCount * 12);
+  for (let edgeIndex = 0; edgeIndex < edgeCount; edgeIndex += 1) {
+    const tedgeIndex = usedTedgeIndices[edgeIndex];
+    const fromStopIndex = graph.tedgeFromStop[tedgeIndex];
+    const toStopIndex = graph.tedgeToStop[tedgeIndex];
+    const fromNodeIndex = graph.stopNearestNodeIndex[fromStopIndex];
+    const toNodeIndex = graph.stopNearestNodeIndex[toStopIndex];
+    const x0 = nodePixels.nodePixelX[fromNodeIndex];
+    const y0 = nodePixels.nodePixelY[fromNodeIndex];
+    const x1 = nodePixels.nodePixelX[toNodeIndex];
+    const y1 = nodePixels.nodePixelY[toNodeIndex];
+    const travelSeconds = graph.tedgeTravelSeconds[tedgeIndex];
+
+    const base = edgeIndex * 12;
+    packedVertexData[base] = x0;
+    packedVertexData[base + 1] = y0;
+    packedVertexData[base + 2] = fromNodeIndex;
+    packedVertexData[base + 3] = toNodeIndex;
+    packedVertexData[base + 4] = travelSeconds;
+    packedVertexData[base + 5] = 0;
+
+    packedVertexData[base + 6] = x1;
+    packedVertexData[base + 7] = y1;
+    packedVertexData[base + 8] = fromNodeIndex;
+    packedVertexData[base + 9] = toNodeIndex;
+    packedVertexData[base + 10] = travelSeconds;
+    packedVertexData[base + 11] = 1;
+  }
+
+  return packedVertexData;
 }
 
 export function bindModeSelectControl(shell, options = {}) {
@@ -3688,6 +3759,13 @@ void main(void) {
         if (!append) {
           lastUploadedIndexedEdgeVertexDataRef = null;
           lastUploadedIndexedEdgeVertexDataLength = 0;
+          // Nothing to draw, but the caller still expects a fresh frame -
+          // without this, a route with zero eligible edges left whatever
+          // the previous frame happened to show on screen.
+          syncCanvasToDisplaySize(canvas);
+          gl.viewport(0, 0, canvas.width, canvas.height);
+          gl.clearColor(0, 0, 0, 0);
+          gl.clear(gl.COLOR_BUFFER_BIT);
         }
         return 0;
       }
@@ -5014,14 +5092,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
   updateRenderBackendBadge(shell, renderer);
   const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;
-  // See the matching comment in rerenderIsochroneFromSnapshot: the
-  // transit-only sentinel mask never matches a real edge, so the
-  // edge-interpolated renderers would draw nothing (and, worse, skip
-  // clearing the canvas first) - route straight to the point-capable grid
-  // renderer instead.
-  const supportsGpuEdgeInterpolation =
-    typeof renderer.drawTravelTimeEdges === 'function'
-    && allowedModeMask !== TRANSIT_ONLY_ALLOWED_MODE_MASK;
+  const supportsGpuEdgeInterpolation = typeof renderer.drawTravelTimeEdges === 'function';
   const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
   if (supportsGpuTravelTimeRendering && !mapData.travelTimeGrid) {
     throw new Error('mapData.travelTimeGrid is required for GPU travel-time rendering');
