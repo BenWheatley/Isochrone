@@ -1,5 +1,4 @@
 import {
-  BYTES_PER_MEBIBYTE,
   DEFAULT_BOUNDARY_BASEMAP_URL,
   DEFAULT_GRAPH_BINARY_URL,
   DEFAULT_LOCATION_ID,
@@ -9,18 +8,10 @@ import {
   EDGE_MODE_CAR_BIT,
   EDGE_MODE_WALK_BIT,
   EDGE_MODE_WATER_BIT,
-  EDGE_RECORD_SIZE,
   FINAL_EDGE_INTERPOLATION_STEP_STRIDE,
-  GRAPH_MAGIC,
-  HEADER_SIZE,
   INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE,
   LOADING_FADE_MS,
-  NODE_RECORD_SIZE,
-  STOP_RECORD_SIZE,
-  SUPPORTED_GRAPH_VERSIONS,
-  TEDGE_RECORD_SIZE,
   TRANSIT_ONLY_ALLOWED_MODE_MASK,
-  WALKING_SPEED_M_S,
 } from './config/constants.js';
 import {
   getEdgeTraversalCostSeconds,
@@ -109,6 +100,34 @@ import {
   blitPixelGridToCanvas,
   getOrCreateIsochroneRenderer,
 } from './render/isochrone-renderer.js';
+import {
+  formatMebibytes,
+} from './core/graph-binary.js';
+import {
+  buildTransitConnectionEdgeVertexData,
+  runConnectionScanFromWalkingReachableStops,
+} from './core/transit-csa.js';
+import {
+  validateDistSeconds,
+  validateEdgeTraversalCostSecondsLookup,
+  validateNodePixels,
+  validateSearchState,
+  validateSettledBatch,
+} from './core/routing-validation.js';
+export {
+  buildTransitConnectionEdgeVertexData,
+  runConnectionScanFromWalkingReachableStops,
+} from './core/transit-csa.js';
+import {
+  fetchBinaryWithProgress,
+  maybeDecompressGzipBuffer,
+  parseGraphBinary,
+} from './core/graph-binary.js';
+export {
+  fetchBinaryWithProgress,
+  maybeDecompressGzipBuffer,
+  parseGraphBinary,
+} from './core/graph-binary.js';
 export {
   blitPixelGridToCanvas,
   createIsochroneRenderer,
@@ -1488,156 +1507,6 @@ export function rerenderIsochroneFromSnapshotWithStatus(shell, mapData, options 
  * buildTransitConnectionEdgeVertexData) rather than a sparse spanning
  * tree.
  */
-export function runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, options = {}) {
-  validateGraphForRouting(graph);
-  const nStops = graph.header.nStops;
-  if (!Number.isInteger(nStops) || nStops < 0) {
-    throw new Error('graph.header.nStops must be a non-negative integer');
-  }
-  if (nStops === 0) {
-    return { seedNodeIndices: new Uint32Array(0), seedStartDistSeconds: new Float32Array(0) };
-  }
-  if (!walkDistSeconds || typeof walkDistSeconds.length !== 'number') {
-    throw new Error('walkDistSeconds must be an array-like of per-node elapsed seconds');
-  }
-  const departureSecondsOfDay = options.departureSecondsOfDay;
-  if (!Number.isFinite(departureSecondsOfDay) || departureSecondsOfDay < 0) {
-    throw new Error('options.departureSecondsOfDay must be a non-negative finite number');
-  }
-  const departureWeekdayIndex = options.departureWeekdayIndex;
-  if (
-    !Number.isInteger(departureWeekdayIndex)
-    || departureWeekdayIndex < 0
-    || departureWeekdayIndex > 6
-  ) {
-    throw new Error('options.departureWeekdayIndex must be an integer between 0 and 6');
-  }
-  const departureWeekdayBit = 1 << departureWeekdayIndex;
-  const timeLimitSeconds =
-    Number.isFinite(options.timeLimitSeconds) && options.timeLimitSeconds > 0
-      ? options.timeLimitSeconds
-      : Number.POSITIVE_INFINITY;
-  const budgetEndSeconds = departureSecondsOfDay + timeLimitSeconds;
-  const walkingSpeedMps =
-    Number.isFinite(options.walkingSpeedMps) && options.walkingSpeedMps > 0
-      ? options.walkingSpeedMps
-      : WALKING_SPEED_M_S;
-
-  // When routing with strictly no real travel mode (Public transit alone -
-  // see TRANSIT_ONLY_ALLOWED_MODE_MASK in constants.js), pass 1 cannot move
-  // at all, so walkDistSeconds is only finite at the origin node itself and
-  // the loop below would never find a boardable stop. originXM/originYM let
-  // the caller supply the origin's own raw coordinates so it can attach
-  // directly to nearby stops with the same small, fixed geometric connector
-  // already used for each stop's own node attachment - not a general walking
-  // search, just "you walked from where you clicked to the platform".
-  const hasOriginDirectAttach =
-    Number.isFinite(options.originXM) && Number.isFinite(options.originYM);
-
-  const earliestArrivalSeconds = new Float64Array(nStops).fill(Number.POSITIVE_INFINITY);
-  const walkAttachCostSeconds = new Float64Array(nStops);
-  const improvedByTransit = new Uint8Array(nStops);
-
-  for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
-    const nodeIndex = graph.stopNearestNodeIndex[stopIndex];
-    const dx = graph.stopX[stopIndex] - graph.nodeI32[nodeIndex * 4];
-    const dy = graph.stopY[stopIndex] - graph.nodeI32[nodeIndex * 4 + 1];
-    const attachCostSeconds = Math.sqrt(dx * dx + dy * dy) / walkingSpeedMps;
-    walkAttachCostSeconds[stopIndex] = attachCostSeconds;
-
-    let bestArrivalSeconds = Number.POSITIVE_INFINITY;
-    const walkElapsedSeconds = walkDistSeconds[nodeIndex];
-    if (Number.isFinite(walkElapsedSeconds)) {
-      bestArrivalSeconds = departureSecondsOfDay + walkElapsedSeconds + attachCostSeconds;
-    }
-    if (hasOriginDirectAttach) {
-      const originDx = graph.stopX[stopIndex] - options.originXM;
-      const originDy = graph.stopY[stopIndex] - options.originYM;
-      const directWalkSeconds = Math.sqrt(originDx * originDx + originDy * originDy) / walkingSpeedMps;
-      const directArrivalSeconds = departureSecondsOfDay + directWalkSeconds;
-      if (directArrivalSeconds < bestArrivalSeconds) {
-        bestArrivalSeconds = directArrivalSeconds;
-      }
-    }
-    if (bestArrivalSeconds <= budgetEndSeconds) {
-      earliestArrivalSeconds[stopIndex] = bestArrivalSeconds;
-    }
-  }
-
-  // Every connection whose boarding stop is reachable in time is renderable,
-  // not just the one that happens to win each stop's earliest-arrival race -
-  // so a route's consecutive hops (A->B, B->C, C->D) all appear, instead of
-  // the sparse, visually disconnected spanning tree the winners alone form.
-  // Deduplicated by stop pair: several trips of the same line share one
-  // A->B geometry and would otherwise be drawn on top of each other.
-  const renderableTedgeIndices = new Uint32Array(graph.header.nTedges);
-  const seenStopPairs = new Set();
-  let renderableTedgeCount = 0;
-
-  const nTedges = graph.header.nTedges;
-  for (let tedgeIndex = 0; tedgeIndex < nTedges; tedgeIndex += 1) {
-    const departureSeconds = graph.tedgeDepartureSeconds[tedgeIndex];
-    if (departureSeconds > budgetEndSeconds) {
-      break;
-    }
-    if (!(graph.tedgeServiceDayMask[tedgeIndex] & departureWeekdayBit)) {
-      continue;
-    }
-    const fromStopIndex = graph.tedgeFromStop[tedgeIndex];
-    if (departureSeconds < earliestArrivalSeconds[fromStopIndex]) {
-      continue;
-    }
-    const toStopIndex = graph.tedgeToStop[tedgeIndex];
-    const candidateArrivalSeconds = departureSeconds + graph.tedgeTravelSeconds[tedgeIndex];
-    if (candidateArrivalSeconds > budgetEndSeconds) {
-      continue;
-    }
-    const stopPairKey = fromStopIndex * nStops + toStopIndex;
-    if (!seenStopPairs.has(stopPairKey)) {
-      seenStopPairs.add(stopPairKey);
-      renderableTedgeIndices[renderableTedgeCount] = tedgeIndex;
-      renderableTedgeCount += 1;
-    }
-    if (candidateArrivalSeconds < earliestArrivalSeconds[toStopIndex]) {
-      earliestArrivalSeconds[toStopIndex] = candidateArrivalSeconds;
-      improvedByTransit[toStopIndex] = 1;
-    }
-  }
-
-  // Elapsed time at the stop itself (no platform->node attach walk, unlike
-  // the pass-2 seeds below): this is what rendering colours each end of a
-  // connection by, and it is defined for every reachable stop rather than
-  // only the transit-improved ones.
-  const stopElapsedSeconds = new Float64Array(nStops).fill(Number.POSITIVE_INFINITY);
-  for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
-    const arrivalSeconds = earliestArrivalSeconds[stopIndex];
-    if (Number.isFinite(arrivalSeconds)) {
-      stopElapsedSeconds[stopIndex] = Math.max(0, arrivalSeconds - departureSecondsOfDay);
-    }
-  }
-
-  const seedNodeIndicesList = [];
-  const seedStartDistSecondsList = [];
-  for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
-    if (!improvedByTransit[stopIndex]) {
-      continue;
-    }
-    const elapsedSeconds =
-      earliestArrivalSeconds[stopIndex] - departureSecondsOfDay + walkAttachCostSeconds[stopIndex];
-    if (!Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) {
-      continue;
-    }
-    seedNodeIndicesList.push(graph.stopNearestNodeIndex[stopIndex]);
-    seedStartDistSecondsList.push(elapsedSeconds);
-  }
-
-  return {
-    seedNodeIndices: Uint32Array.from(seedNodeIndicesList),
-    seedStartDistSeconds: Float32Array.from(seedStartDistSecondsList),
-    stopElapsedSeconds,
-    renderableTedgeIndices: renderableTedgeIndices.subarray(0, renderableTedgeCount),
-  };
-}
 
 /**
  * Builds edge vertex data for transit connections in the plain
@@ -1657,48 +1526,6 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
  * consecutive hops of one route (A->B->C->D) render as disconnected
  * fragments. Explicit per-endpoint times avoid all three.
  */
-export function buildTransitConnectionEdgeVertexData(
-  graph,
-  nodePixels,
-  renderableTedgeIndices,
-  stopElapsedSeconds,
-) {
-  validateGraphForRouting(graph);
-  validateNodePixels(nodePixels);
-  if (!(renderableTedgeIndices instanceof Uint32Array)) {
-    throw new Error('renderableTedgeIndices must be a Uint32Array');
-  }
-  if (!ArrayBuffer.isView(stopElapsedSeconds)) {
-    throw new Error('stopElapsedSeconds must be a typed array');
-  }
-
-  const candidateCount = renderableTedgeIndices.length;
-  const packedVertexData = new Float32Array(candidateCount * 6);
-  let writeEdgeIndex = 0;
-  for (let candidateIndex = 0; candidateIndex < candidateCount; candidateIndex += 1) {
-    const tedgeIndex = renderableTedgeIndices[candidateIndex];
-    const fromStopIndex = graph.tedgeFromStop[tedgeIndex];
-    const toStopIndex = graph.tedgeToStop[tedgeIndex];
-    const fromSeconds = stopElapsedSeconds[fromStopIndex];
-    const toSeconds = stopElapsedSeconds[toStopIndex];
-    if (!Number.isFinite(fromSeconds) || !Number.isFinite(toSeconds)) {
-      continue;
-    }
-
-    const fromNodeIndex = graph.stopNearestNodeIndex[fromStopIndex];
-    const toNodeIndex = graph.stopNearestNodeIndex[toStopIndex];
-    const base = writeEdgeIndex * 6;
-    packedVertexData[base] = nodePixels.nodePixelX[fromNodeIndex];
-    packedVertexData[base + 1] = nodePixels.nodePixelY[fromNodeIndex];
-    packedVertexData[base + 2] = fromSeconds;
-    packedVertexData[base + 3] = nodePixels.nodePixelX[toNodeIndex];
-    packedVertexData[base + 4] = nodePixels.nodePixelY[toNodeIndex];
-    packedVertexData[base + 5] = toSeconds;
-    writeEdgeIndex += 1;
-  }
-
-  return packedVertexData.subarray(0, writeEdgeIndex * 6);
-}
 
 export function bindModeSelectControl(shell, options = {}) {
   return bindModeSelectControlInternal(shell, {
@@ -2023,274 +1850,9 @@ export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
   }
 }
 
-export async function fetchBinaryWithProgress(url, options = {}) {
-  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
-  const onProgress = options.onProgress ?? (() => {});
 
-  if (typeof fetchImpl !== 'function') {
-    throw new Error('fetch is not available');
-  }
-  if (typeof onProgress !== 'function') {
-    throw new Error('onProgress must be a function');
-  }
 
-  const response = await fetchImpl(url);
-  if (!response.ok) {
-    throw new Error(`failed to fetch graph binary: HTTP ${response.status}`);
-  }
 
-  const totalBytes = parseContentLength(response.headers?.get('Content-Length'));
-
-  if (!response.body || typeof response.body.getReader !== 'function') {
-    const fallbackBuffer = await response.arrayBuffer();
-    onProgress(fallbackBuffer.byteLength, totalBytes);
-    return fallbackBuffer;
-  }
-
-  const reader = response.body.getReader();
-  const chunks = [];
-  let receivedBytes = 0;
-
-  onProgress(0, totalBytes);
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    if (!value || value.byteLength === 0) {
-      continue;
-    }
-
-    chunks.push(value);
-    receivedBytes += value.byteLength;
-    onProgress(receivedBytes, totalBytes);
-  }
-
-  const merged = new Uint8Array(receivedBytes);
-  let writeOffset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, writeOffset);
-    writeOffset += chunk.byteLength;
-  }
-
-  onProgress(receivedBytes, totalBytes);
-  return merged.buffer;
-}
-
-export async function maybeDecompressGzipBuffer(buffer) {
-  if (!(buffer instanceof ArrayBuffer)) {
-    throw new Error('maybeDecompressGzipBuffer expects an ArrayBuffer');
-  }
-
-  const bytes = new Uint8Array(buffer);
-  const isGzipMagic = bytes.length >= 3 && bytes[0] === 0x1f && bytes[1] === 0x8b && bytes[2] === 0x08;
-  if (!isGzipMagic) {
-    return buffer;
-  }
-
-  if (typeof DecompressionStream !== 'function') {
-    throw new Error(
-      'Browser does not support DecompressionStream for gzip graph payloads. ' +
-        'Use an uncompressed graph binary or a browser with gzip stream support.',
-    );
-  }
-
-  const compressedBlob = new Blob([buffer], { type: 'application/gzip' });
-  const decompressedStream = compressedBlob.stream().pipeThrough(new DecompressionStream('gzip'));
-  return new Response(decompressedStream).arrayBuffer();
-}
-
-export function parseGraphBinary(buffer) {
-  if (!(buffer instanceof ArrayBuffer)) {
-    throw new Error('graph binary parser expects an ArrayBuffer');
-  }
-  if (buffer.byteLength < HEADER_SIZE) {
-    throw new Error(`graph binary is too small for header: ${buffer.byteLength} bytes`);
-  }
-
-  const view = new DataView(buffer);
-  const magic = view.getUint32(0, true);
-  if (magic !== GRAPH_MAGIC) {
-    throw new Error(
-      `Invalid graph magic 0x${magic.toString(16).padStart(8, '0')}; expected 0x${GRAPH_MAGIC.toString(16)}`,
-    );
-  }
-  const version = view.getUint8(4);
-  if (!SUPPORTED_GRAPH_VERSIONS.has(version)) {
-    throw new Error(
-      `unsupported graph binary version ${version}; supported graph binary versions: ${[
-        ...SUPPORTED_GRAPH_VERSIONS,
-      ].join(', ')}`,
-    );
-  }
-
-  const nNodes = view.getUint32(8, true);
-  const nEdges = view.getUint32(12, true);
-  const nStops = view.getUint32(16, true);
-  const nTedges = view.getUint32(20, true);
-  const nodeTableOffset = view.getUint32(52, true);
-  const edgeTableOffset = view.getUint32(56, true);
-  const stopTableOffset = view.getUint32(60, true);
-  // Transit edges follow the stop table immediately; there's no separate
-  // header field for this (the 64-byte header is already full) — mirrors
-  // data_pipeline's binary_reader.py transit_edge_table_offset().
-  const tedgeTableOffset = stopTableOffset + nStops * STOP_RECORD_SIZE;
-
-  const nodeTableEnd = nodeTableOffset + nNodes * NODE_RECORD_SIZE;
-  const edgeTableEnd = edgeTableOffset + nEdges * EDGE_RECORD_SIZE;
-  const stopTableEnd = stopTableOffset + nStops * STOP_RECORD_SIZE;
-  const tedgeTableEnd = tedgeTableOffset + nTedges * TEDGE_RECORD_SIZE;
-
-  if (nodeTableOffset < HEADER_SIZE) {
-    throw new Error('graph binary node table offset points inside header');
-  }
-  if (edgeTableOffset < nodeTableEnd) {
-    throw new Error('graph binary edge table overlaps node table');
-  }
-  if (stopTableOffset < edgeTableEnd) {
-    throw new Error('graph binary stop table overlaps edge table');
-  }
-  if (nodeTableEnd > buffer.byteLength) {
-    throw new Error('graph binary node table exceeds file size');
-  }
-  if (edgeTableEnd > buffer.byteLength) {
-    throw new Error('graph binary edge table exceeds file size');
-  }
-  if (stopTableOffset > buffer.byteLength) {
-    throw new Error('graph binary stop table offset exceeds file size');
-  }
-  if (stopTableEnd > buffer.byteLength) {
-    throw new Error('graph binary stop table exceeds file size');
-  }
-  if (tedgeTableEnd > buffer.byteLength) {
-    throw new Error('graph binary transit edge table exceeds file size');
-  }
-  if (nodeTableOffset % 4 !== 0 || edgeTableOffset % 4 !== 0) {
-    throw new Error('graph binary table offsets must be 4-byte aligned');
-  }
-  if (stopTableOffset % 4 !== 0) {
-    throw new Error('graph binary stop table offset must be 4-byte aligned');
-  }
-
-  const header = {
-    magic,
-    version,
-    flags: view.getUint8(5),
-    nNodes,
-    nEdges,
-    nStops,
-    nTedges,
-    originEasting: view.getFloat64(24, true),
-    originNorthing: view.getFloat64(32, true),
-    epsgCode: view.getUint16(40, true),
-    gridWidthPx: view.getUint16(42, true),
-    gridHeightPx: view.getUint16(44, true),
-    pixelSizeM: view.getFloat32(48, true),
-    nodeTableOffset,
-    edgeTableOffset,
-    stopTableOffset,
-    tedgeTableOffset,
-  };
-
-  const nodeI32 = new Int32Array(buffer, nodeTableOffset, nNodes * 4);
-  const nodeU32 = new Uint32Array(buffer, nodeTableOffset, nNodes * 4);
-  const nodeU16 = new Uint16Array(buffer, nodeTableOffset, nNodes * 8);
-  const edgeU32 = new Uint32Array(buffer, edgeTableOffset, nEdges * 3);
-  const edgeU16 = new Uint16Array(buffer, edgeTableOffset, nEdges * 6);
-  const edgeModeMask = new Uint8Array(nEdges);
-  const edgeRoadClassId = new Uint8Array(nEdges);
-  const edgeMaxspeedKph = new Uint16Array(nEdges);
-
-  for (let edgeIndex = 0; edgeIndex < nEdges; edgeIndex += 1) {
-    const packedMetadata = edgeU32[edgeIndex * 3 + 2];
-    edgeModeMask[edgeIndex] = packedMetadata & 0xff;
-    edgeRoadClassId[edgeIndex] = (packedMetadata >>> 8) & 0xff;
-    edgeMaxspeedKph[edgeIndex] = (packedMetadata >>> 16) & 0xffff;
-  }
-
-  // Stop x_m/y_m (offsets from the same origin as node x_m/y_m) double as
-  // the walk-attachment distance source: JS computes the stop-to-node walk
-  // cost on the fly from these plus the node's own position, rather than
-  // baking a redundant walk_attach_cost_seconds field into the binary.
-  const stopX = new Int32Array(nStops);
-  const stopY = new Int32Array(nStops);
-  const stopNearestNodeIndex = new Uint32Array(nStops);
-  const stopTransportType = new Uint8Array(nStops);
-  for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
-    const recordOffset = stopTableOffset + stopIndex * STOP_RECORD_SIZE;
-    stopX[stopIndex] = view.getInt32(recordOffset, true);
-    stopY[stopIndex] = view.getInt32(recordOffset + 4, true);
-    stopNearestNodeIndex[stopIndex] = view.getUint32(recordOffset + 8, true);
-    stopTransportType[stopIndex] = view.getUint8(recordOffset + 18);
-  }
-
-  const tedgeFromStop = new Uint32Array(nTedges);
-  const tedgeToStop = new Uint32Array(nTedges);
-  const tedgeDepartureSeconds = new Uint32Array(nTedges);
-  const tedgeTravelSeconds = new Uint16Array(nTedges);
-  const tedgeServiceDayMask = new Uint32Array(nTedges);
-  for (let tedgeIndex = 0; tedgeIndex < nTedges; tedgeIndex += 1) {
-    const recordOffset = tedgeTableOffset + tedgeIndex * TEDGE_RECORD_SIZE;
-    tedgeFromStop[tedgeIndex] = view.getUint32(recordOffset, true);
-    tedgeToStop[tedgeIndex] = view.getUint32(recordOffset + 4, true);
-    tedgeDepartureSeconds[tedgeIndex] = view.getUint32(recordOffset + 8, true);
-    tedgeTravelSeconds[tedgeIndex] = view.getUint16(recordOffset + 12, true);
-    tedgeServiceDayMask[tedgeIndex] = view.getUint32(recordOffset + 16, true);
-  }
-
-  return {
-    header,
-    nodeI32,
-    nodeU32,
-    nodeU16,
-    edgeU32,
-    edgeU16,
-    edgeModeMask,
-    edgeRoadClassId,
-    edgeMaxspeedKph,
-    stopX,
-    stopY,
-    stopNearestNodeIndex,
-    stopTransportType,
-    tedgeFromStop,
-    tedgeToStop,
-    tedgeDepartureSeconds,
-    tedgeTravelSeconds,
-    tedgeServiceDayMask,
-  };
-}
-
-export async function loadGraphBinary(shell, options = {}) {
-  const url = options.url ?? DEFAULT_GRAPH_BINARY_URL;
-  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
-
-  showLoadingOverlay(shell, formatInitialGraphLoadingText(shell), 0);
-
-  try {
-    const buffer = await fetchBinaryWithProgress(url, {
-      fetchImpl,
-      onProgress(receivedBytes, totalBytes) {
-        updateGraphLoadingText(shell, receivedBytes, totalBytes);
-      },
-    });
-
-    const binaryBuffer = await maybeDecompressGzipBuffer(buffer);
-    const graph = parseGraphBinary(binaryBuffer);
-    shell.isochroneCanvas.style.pointerEvents = 'auto';
-    shell.isochroneCanvas.dataset.graphLoaded = 'true';
-    return graph;
-  } catch (error) {
-    shell.isochroneCanvas.style.pointerEvents = 'none';
-    shell.isochroneCanvas.dataset.graphLoaded = 'false';
-    showLoadingOverlay(
-      shell,
-      getLocalizedShellText(shell, 'error.graph.load', 'Failed to load graph binary.'),
-      0,
-    );
-    throw error;
-  }
-}
 
 export async function initializeMapData(shell, options = {}) {
   const boundaryOptions = options.boundaries ?? {};
@@ -4613,22 +4175,7 @@ function setLoadingProgressBar(progressBar, progressPercent) {
   progressBar.style.width = `${clamped}%`;
 }
 
-function parseContentLength(value) {
-  if (typeof value !== 'string') {
-    return null;
-  }
 
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return null;
-  }
-  return parsed;
-}
-
-function formatMebibytes(bytes) {
-  const safeBytes = Math.max(0, bytes);
-  return `${(safeBytes / BYTES_PER_MEBIBYTE).toFixed(2)} MB`;
-}
 
 function validatePixelGrid(pixelGrid) {
   if (!pixelGrid || typeof pixelGrid !== 'object') {
@@ -4672,60 +4219,10 @@ function validateTravelTimeGrid(travelTimeGrid) {
   }
 }
 
-function validateEdgeTraversalCostSecondsLookup(edgeTraversalCostSeconds, expectedLength) {
-  if (edgeTraversalCostSeconds === null || edgeTraversalCostSeconds === undefined) {
-    return null;
-  }
-  if (!(edgeTraversalCostSeconds instanceof Float32Array)) {
-    throw new Error('edgeTraversalCostSeconds must be a Float32Array when provided');
-  }
-  if (edgeTraversalCostSeconds.length < expectedLength) {
-    throw new Error('edgeTraversalCostSeconds is too short for edge records');
-  }
-  return edgeTraversalCostSeconds;
-}
 
-function validateNodePixels(nodePixels) {
-  if (!nodePixels || typeof nodePixels !== 'object') {
-    throw new Error('nodePixels must be an object');
-  }
-  if (!(nodePixels.nodePixelX instanceof Uint16Array)) {
-    throw new Error('nodePixels.nodePixelX must be a Uint16Array');
-  }
-  if (!(nodePixels.nodePixelY instanceof Uint16Array)) {
-    throw new Error('nodePixels.nodePixelY must be a Uint16Array');
-  }
-  if (nodePixels.nodePixelX.length !== nodePixels.nodePixelY.length) {
-    throw new Error('node pixel arrays must have equal lengths');
-  }
-}
 
-function validateDistSeconds(distSeconds, expectedLength) {
-  if (!distSeconds || typeof distSeconds.length !== 'number') {
-    throw new Error('distSeconds must be an array-like sequence');
-  }
-  if (distSeconds.length < expectedLength) {
-    throw new Error('distSeconds is shorter than node pixel arrays');
-  }
-}
 
-function validateSettledBatch(settledBatch) {
-  if (!settledBatch || typeof settledBatch[Symbol.iterator] !== 'function') {
-    throw new Error('settledBatch must be iterable');
-  }
-}
 
-function validateSearchState(searchState) {
-  if (!searchState || typeof searchState !== 'object') {
-    throw new Error('searchState must be an object');
-  }
-  if (typeof searchState.expandOne !== 'function') {
-    throw new Error('searchState.expandOne must be a function');
-  }
-  if (typeof searchState.isDone !== 'function' && typeof searchState.done !== 'boolean') {
-    throw new Error('searchState must expose isDone() or done boolean');
-  }
-}
 
 function isDone(searchState) {
   if (typeof searchState.isDone === 'function') {
@@ -5116,4 +4613,35 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
     });
     void loadLocationById(initialLocation?.id ?? DEFAULT_LOCATION_ID);
   });
+}
+
+export async function loadGraphBinary(shell, options = {}) {
+  const url = options.url ?? DEFAULT_GRAPH_BINARY_URL;
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+
+  showLoadingOverlay(shell, formatInitialGraphLoadingText(shell), 0);
+
+  try {
+    const buffer = await fetchBinaryWithProgress(url, {
+      fetchImpl,
+      onProgress(receivedBytes, totalBytes) {
+        updateGraphLoadingText(shell, receivedBytes, totalBytes);
+      },
+    });
+
+    const binaryBuffer = await maybeDecompressGzipBuffer(buffer);
+    const graph = parseGraphBinary(binaryBuffer);
+    shell.isochroneCanvas.style.pointerEvents = 'auto';
+    shell.isochroneCanvas.dataset.graphLoaded = 'true';
+    return graph;
+  } catch (error) {
+    shell.isochroneCanvas.style.pointerEvents = 'none';
+    shell.isochroneCanvas.dataset.graphLoaded = 'false';
+    showLoadingOverlay(
+      shell,
+      getLocalizedShellText(shell, 'error.graph.load', 'Failed to load graph binary.'),
+      0,
+    );
+    throw error;
+  }
 }
