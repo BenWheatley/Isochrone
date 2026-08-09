@@ -10,7 +10,6 @@ import {
   EDGE_MODE_WATER_BIT,
   FINAL_EDGE_INTERPOLATION_STEP_STRIDE,
   INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE,
-  LOADING_FADE_MS,
   TRANSIT_ONLY_ALLOWED_MODE_MASK,
 } from './config/constants.js';
 import {
@@ -65,13 +64,9 @@ import {
   updateTransitControlAvailability,
 } from './ui/orchestration.js';
 import {
-  formatCommonMessage,
-  getCommonMessage,
   loadCommonLocaleBundle,
 } from './ui/localization.js';
 import {
-  formatLegendRange,
-  formatLegendRepeatNote,
 } from './ui/legend-format.js';
 import { bindCanvasClickRouting as bindCanvasClickRoutingInternal } from './interaction/canvas-routing.js';
 import {
@@ -81,7 +76,6 @@ import {
 } from './export/svg.js';
 import {
   DEFAULT_COLOUR_CYCLE_MINUTES,
-  getIsochronePalette,
   normalizeIsochroneTheme,
   timeToColour,
 } from './render/colour.js';
@@ -101,7 +95,6 @@ import {
   getOrCreateIsochroneRenderer,
 } from './render/isochrone-renderer.js';
 import {
-  formatMebibytes,
 } from './core/graph-binary.js';
 import {
   buildTransitConnectionEdgeVertexData,
@@ -129,6 +122,44 @@ import {
 import {
   resolveIsochroneTheme,
 } from './ui/theme.js';
+import {
+  WASM_REQUIRED_MESSAGE,
+  ensureWasmSupportOrShowError,
+  fadeOutLoadingOverlay,
+  formatInitialGraphLoadingText,
+  formatRoutingStatusCalculating,
+  formatRoutingStatusDone,
+  formatRoutingStatusNoReachable,
+  formatRoutingStatusPreview,
+  getLocalizedShellText,
+  getRoutingFailedStatusText,
+  getShellLocaleMessages,
+  setRoutingStatus,
+  showLoadingOverlay,
+  updateGraphLoadingText,
+  updateRenderBackendBadge,
+} from './ui/status.js';
+import {
+  computeExportDistanceScaleBar,
+  renderIsochroneLegendIfNeeded,
+  updateDistanceScaleBar,
+} from './ui/legend-scale.js';
+export {
+  computeExportDistanceScaleBar,
+  renderIsochroneLegend,
+  renderIsochroneLegendIfNeeded,
+  updateDistanceScaleBar,
+} from './ui/legend-scale.js';
+export {
+  WASM_REQUIRED_MESSAGE,
+  ensureWasmSupportOrShowError,
+  formatRenderBackendBadgeText,
+  formatRoutingStatusCalculating,
+  formatRoutingStatusDone,
+  formatRoutingStatusNoReachable,
+  formatRoutingStatusPreview,
+  getRoutingFailedStatusText,
+} from './ui/status.js';
 export {
   fetchBinaryWithProgress,
   maybeDecompressGzipBuffer,
@@ -185,8 +216,6 @@ export {
 } from './export/svg.js';
 export { timeToColour } from './render/colour.js';
 
-export const WASM_REQUIRED_MESSAGE =
-  'Your browser does not support WASM, this app requires WASM for performance reasons';
 const WASM_EDGE_COST_TICK_SCALE = 1_000;
 const EDGE_TRAVERSAL_COST_TICK_CACHE_PROPERTY = '__edgeTraversalCostTicksByModeMask';
 const MODE_SPECIFIC_KERNEL_GRAPH_VIEWS_CACHE_PROPERTY = '__modeSpecificKernelGraphViewsByModeMask';
@@ -1969,214 +1998,17 @@ export function layoutMapViewportToContainGraph(shell, graphHeader) {
 
 
 
-function formatDistanceLabel(distanceMetres) {
-  if (distanceMetres >= 1000) {
-    const km = distanceMetres / 1000;
-    if (km >= 10) {
-      return `${Math.round(km)} km`;
-    }
-    return `${km.toFixed(1)} km`;
-  }
-  return `${Math.round(distanceMetres)} m`;
-}
 
-function pickScaleDistanceMetres(targetDistanceMetres) {
-  const safeTarget = Math.max(1, targetDistanceMetres);
-  const exponent = Math.floor(Math.log10(safeTarget));
-  const base = 10 ** exponent;
-  const multipliers = [1, 2, 5];
 
-  let chosen = base;
-  for (const multiplier of multipliers) {
-    const candidate = multiplier * base;
-    if (candidate <= safeTarget) {
-      chosen = candidate;
-    }
-  }
 
-  if (chosen > safeTarget) {
-    return chosen / 10;
-  }
-  return chosen;
-}
-
-function pickScaleBucketDistanceMetres(totalDistanceMetres) {
-  const safeTotal = Math.max(1, totalDistanceMetres);
-  const targetSegments = 5;
-  const minSegments = 3;
-  const maxSegments = 10;
-  const candidateRoots = [1, 2, 5];
-  const baseExponent = Math.floor(Math.log10(safeTotal / targetSegments));
-  const candidates = [];
-
-  for (let exponentOffset = -1; exponentOffset <= 2; exponentOffset += 1) {
-    const exponent = baseExponent + exponentOffset;
-    const scale = 10 ** exponent;
-    for (const root of candidateRoots) {
-      const candidate = root * scale;
-      if (!(candidate > 0) || candidate > safeTotal) {
-        continue;
-      }
-      const segmentCount = safeTotal / candidate;
-      if (segmentCount < minSegments || segmentCount > maxSegments) {
-        continue;
-      }
-      const integerPenalty = Math.abs(segmentCount - Math.round(segmentCount));
-      const segmentPenalty = Math.abs(segmentCount - targetSegments);
-      const score = integerPenalty * 3 + segmentPenalty;
-      candidates.push({
-        candidate,
-        score,
-      });
-    }
-  }
-
-  if (candidates.length === 0) {
-    return safeTotal / targetSegments;
-  }
-
-  candidates.sort((a, b) => {
-    if (a.score !== b.score) {
-      return a.score - b.score;
-    }
-    return a.candidate - b.candidate;
-  });
-
-  return candidates[0].candidate;
-}
-
-function computeDistanceScaleBarGeometry(metresPerPixel) {
-  const preferredWidthPx = 120;
-  const preferredDistanceMetres = preferredWidthPx * metresPerPixel;
-  const chosenDistanceMetres = pickScaleDistanceMetres(preferredDistanceMetres);
-  const lineWidthPx = Math.max(24, Math.round(chosenDistanceMetres / metresPerPixel));
-  const bucketDistanceMetres = pickScaleBucketDistanceMetres(chosenDistanceMetres);
-  const segmentWidthPx = Math.max(4, Math.round(bucketDistanceMetres / metresPerPixel));
-  return {
-    chosenDistanceMetres,
-    lineWidthPx,
-    bucketDistanceMetres,
-    segmentWidthPx,
-    label: formatDistanceLabel(chosenDistanceMetres),
-  };
-}
 
 // The SVG export renders content in the unzoomed full-region graph pixel grid
 // (1 px = graphHeader.pixelSizeM metres), not the live zoomed screen viewport,
 // so the exported scale bar must be sized from that same fixed scale rather
 // than copied from the on-screen bar's CSS pixel width.
-export function computeExportDistanceScaleBar(graphHeader) {
-  if (!graphHeader || !(graphHeader.pixelSizeM > 0)) {
-    throw new Error('graphHeader.pixelSizeM must be positive');
-  }
-  return computeDistanceScaleBarGeometry(graphHeader.pixelSizeM);
-}
 
-export function renderIsochroneLegend(shell, cycleMinutes, options = {}) {
-  if (!shell || typeof shell !== 'object' || !shell.isochroneLegend) {
-    throw new Error('shell.isochroneLegend is required');
-  }
-  if (!Number.isFinite(cycleMinutes) || cycleMinutes <= 0) {
-    throw new Error('cycleMinutes must be a positive finite number');
-  }
 
-  const boundaries = [0, 1 / 5, 2 / 5, 3 / 5, 4 / 5, 1];
-  const theme = normalizeIsochroneTheme(
-    options.theme ?? resolveIsochroneTheme(options.rootElement),
-    'dark',
-  );
-  const messages = options.messages ?? getShellLocaleMessages(shell);
-  const colours = getIsochronePalette(theme);
 
-  const legendRows = [];
-  for (let index = 0; index < colours.length; index += 1) {
-    const colour = colours[index];
-    const rangeStartMinutes = boundaries[index] * cycleMinutes;
-    const rangeEndMinutes = boundaries[index + 1] * cycleMinutes;
-    const rangeLabel = formatLegendRange(rangeStartMinutes, rangeEndMinutes, { messages });
-    const colourCss = `rgb(${colour[0]}, ${colour[1]}, ${colour[2]})`;
-
-    legendRows.push(
-      `<div class="legend-row"><span class="legend-swatch" aria-hidden="true"><svg class="legend-swatch-svg" viewBox="0 0 16 16" focusable="false" aria-hidden="true"><rect x="1" y="1" width="14" height="14" rx="2" fill="${colourCss}" stroke="${colourCss}" stroke-width="1.5"></rect></svg></span><span>${rangeLabel}</span></div>`,
-    );
-  }
-  legendRows.push(
-    `<div class="legend-note">${formatLegendRepeatNote(cycleMinutes, { messages })}</div>`,
-  );
-
-  shell.isochroneLegend.innerHTML = legendRows.join('');
-}
-
-export function renderIsochroneLegendIfNeeded(shell, cycleMinutes, options = {}) {
-  if (!shell || typeof shell !== 'object' || !shell.isochroneLegend) {
-    throw new Error('shell.isochroneLegend is required');
-  }
-  if (!Number.isFinite(cycleMinutes) || cycleMinutes <= 0) {
-    throw new Error('cycleMinutes must be a positive finite number');
-  }
-  const theme = normalizeIsochroneTheme(
-    options.theme ?? resolveIsochroneTheme(options.rootElement),
-    'dark',
-  );
-  const locale = typeof options.locale === 'string' && options.locale.trim().length > 0
-    ? options.locale.trim()
-    : shell?.locale ?? 'en';
-
-  if (
-    shell.lastRenderedLegendCycleMinutes === cycleMinutes
-    && shell.lastRenderedLegendTheme === theme
-    && shell.lastRenderedLegendLocale === locale
-  ) {
-    return false;
-  }
-
-  renderIsochroneLegend(shell, cycleMinutes, {
-    theme,
-    messages: options.messages ?? getShellLocaleMessages(shell),
-  });
-  shell.lastRenderedLegendCycleMinutes = cycleMinutes;
-  shell.lastRenderedLegendTheme = theme;
-  shell.lastRenderedLegendLocale = locale;
-  return true;
-}
-
-export function updateDistanceScaleBar(shell, graphHeader, options = {}) {
-  if (
-    !shell ||
-    typeof shell !== 'object' ||
-    !shell.distanceScale ||
-    !shell.distanceScaleLine ||
-    !shell.distanceScaleLabel ||
-    !shell.isochroneCanvas
-  ) {
-    throw new Error('distance scale shell elements are required');
-  }
-
-  validateGraphHeaderForBoundaryAlignment(graphHeader);
-  const canvasRect = shell.isochroneCanvas.getBoundingClientRect();
-  if (!(canvasRect.width > 0)) {
-    return;
-  }
-  if (!(canvasRect.height > 0)) {
-    return;
-  }
-  const viewportFrame = resolveViewportFrame(graphHeader, options.viewport, {
-    frameWidthPx: canvasRect.width,
-    frameHeightPx: canvasRect.height,
-    fitBoundingBoxPx: options.fitBoundingBoxPx,
-  });
-
-  const metresPerCssPixel = graphHeader.pixelSizeM / viewportFrame.effectiveScale;
-  const { lineWidthPx, segmentWidthPx, label } = computeDistanceScaleBarGeometry(metresPerCssPixel);
-
-  shell.distanceScaleLine.style.width = `${lineWidthPx}px`;
-  if (typeof shell.distanceScaleLine.style.setProperty === 'function') {
-    shell.distanceScaleLine.style.setProperty('--scale-segment-width-px', `${segmentWidthPx}px`);
-  } else {
-    shell.distanceScaleLine.style['--scale-segment-width-px'] = `${segmentWidthPx}px`;
-  }
-  shell.distanceScaleLabel.textContent = label;
-}
 
 export function precomputeNodePixelCoordinates(graph) {
   validateGraphForNodePixels(graph);
@@ -2497,52 +2329,12 @@ export function paintReachableNodesTravelTimesToGrid(travelTimeGrid, nodePixels,
 
 
 
-function getShellLocaleMessages(shell) {
-  return shell?.localeMessages && typeof shell.localeMessages === 'object' ? shell.localeMessages : null;
-}
 
-function getLocalizedShellText(shell, key, fallbackValue, values = {}) {
-  return formatCommonMessage(getShellLocaleMessages(shell), key, values, fallbackValue);
-}
 
-function getWasmRequiredMessage(shell) {
-  return getCommonMessage(
-    getShellLocaleMessages(shell),
-    'error.wasm.required',
-    WASM_REQUIRED_MESSAGE,
-  );
-}
 
-function formatInitialGraphLoadingText(shell) {
-  return getLocalizedShellText(shell, 'loading.graph.initial', 'Loading graph: 0.00 MB');
-}
 
-export function getRoutingFailedStatusText(shell) {
-  return getLocalizedShellText(shell, 'error.routing.failed', 'Routing failed.');
-}
 
-export function formatRenderBackendBadgeText(rendererMode, options = {}) {
-  const messages = options.messages ?? null;
-  if (rendererMode === 'webgl') {
-    return formatCommonMessage(messages, 'status.renderer.webgl', {}, 'Renderer: WebGL');
-  }
-  return formatCommonMessage(messages, 'status.renderer.cpu', {}, 'Renderer: CPU');
-}
 
-function updateRenderBackendBadge(shell, renderer) {
-  if (!shell || typeof shell !== 'object' || !shell.renderBackendBadge) {
-    return;
-  }
-
-  const rendererMode = renderer?.mode === 'webgl' ? 'webgl' : 'cpu';
-  const nextText = formatRenderBackendBadgeText(rendererMode, {
-    messages: getShellLocaleMessages(shell),
-  });
-  if (shell.renderBackendBadge.textContent !== nextText) {
-    shell.renderBackendBadge.textContent = nextText;
-  }
-  shell.renderBackendBadge.dataset.backend = rendererMode;
-}
 
 
 
@@ -4016,55 +3808,10 @@ export function runGpuCpuParityDiagnostic(renderer, mapData, searchState, option
   };
 }
 
-export function formatRoutingStatusCalculating(settledCount, options = {}) {
-  const safeCount = Math.max(0, Math.floor(settledCount));
-  return formatCommonMessage(
-    options.messages ?? null,
-    'routing.calculating',
-    { settledCount: safeCount },
-    `Calculating... (${safeCount} nodes settled)`,
-  );
-}
 
-function formatRoutingDurationSuffix(durationMs, options = {}) {
-  if (!Number.isFinite(durationMs) || durationMs < 0) {
-    return '';
-  }
-  const roundedDurationMs = Math.max(0, Math.round(durationMs));
-  return formatCommonMessage(
-    options.messages ?? null,
-    'routing.durationSuffix',
-    { durationMs: roundedDurationMs },
-    ` (${roundedDurationMs} ms)`,
-  );
-}
 
-export function formatRoutingStatusDone(durationMs = null, options = {}) {
-  return formatCommonMessage(
-    options.messages ?? null,
-    'routing.done',
-    { durationSuffix: formatRoutingDurationSuffix(durationMs, options) },
-    `Done - full travel-time field ready${formatRoutingDurationSuffix(durationMs, options)}`,
-  );
-}
 
-export function formatRoutingStatusPreview(durationMs = null, options = {}) {
-  return formatCommonMessage(
-    options.messages ?? null,
-    'routing.preview',
-    { durationSuffix: formatRoutingDurationSuffix(durationMs, options) },
-    `Done - preview updated${formatRoutingDurationSuffix(durationMs, options)}`,
-  );
-}
 
-export function formatRoutingStatusNoReachable(durationMs = null, options = {}) {
-  return formatCommonMessage(
-    options.messages ?? null,
-    'routing.none',
-    { durationSuffix: formatRoutingDurationSuffix(durationMs, options) },
-    `Done - no reachable network for selected mode at this start point${formatRoutingDurationSuffix(durationMs, options)}`,
-  );
-}
 
 function getSelectedTransportModeLabels(shell) {
   if (!shell || typeof shell !== 'object' || !Array.isArray(shell.modeCheckboxes)) {
@@ -4096,79 +3843,11 @@ function getSelectedTransportModeLabels(shell) {
   return labels;
 }
 
-function setRoutingStatus(shell, text) {
-  shell.routingStatus.textContent = text;
-}
 
-export function ensureWasmSupportOrShowError(shell, options = {}) {
-  if (!shell || typeof shell !== 'object' || !shell.isochroneCanvas) {
-    throw new Error('shell.isochroneCanvas is required');
-  }
-  const runtimeGlobal = options.runtimeGlobal ?? globalThis;
-  if (hasWebAssemblySupport(runtimeGlobal)) {
-    return true;
-  }
 
-  shell.isochroneCanvas.style.pointerEvents = 'none';
-  shell.isochroneCanvas.dataset.graphLoaded = 'false';
-  const wasmRequiredMessage = getWasmRequiredMessage(shell);
-  showLoadingOverlay(shell, wasmRequiredMessage, 0);
-  setRoutingStatus(shell, wasmRequiredMessage);
-  return false;
-}
 
-function updateGraphLoadingText(shell, receivedBytes, totalBytes) {
-  const receivedText = formatMebibytes(receivedBytes);
-  if (totalBytes === null || totalBytes <= 0) {
-    shell.loadingText.textContent = getLocalizedShellText(
-      shell,
-      'loading.graph.received',
-      `Loading graph: ${receivedText}`,
-      { received: receivedText },
-    );
-    return;
-  }
 
-  const totalText = formatMebibytes(totalBytes);
-  const percent = Math.min(100, Math.round((receivedBytes / totalBytes) * 100));
-  shell.loadingText.textContent = getLocalizedShellText(
-    shell,
-    'loading.graph.progress',
-    `Loading graph: ${receivedText} / ${totalText} (${percent}%)`,
-    { received: receivedText, total: totalText, percent },
-  );
-  setLoadingProgressBar(shell.loadingProgressBar, percent);
-}
 
-function showLoadingOverlay(shell, text, progressPercent) {
-  if (shell.loadingFadeTimeoutId !== null) {
-    clearTimeout(shell.loadingFadeTimeoutId);
-    shell.loadingFadeTimeoutId = null;
-  }
-
-  shell.loadingOverlay.hidden = false;
-  shell.loadingOverlay.classList.remove('is-fading');
-  shell.loadingText.textContent = text;
-  setLoadingProgressBar(shell.loadingProgressBar, progressPercent);
-}
-
-function fadeOutLoadingOverlay(shell) {
-  if (shell.loadingFadeTimeoutId !== null) {
-    clearTimeout(shell.loadingFadeTimeoutId);
-  }
-
-  shell.loadingOverlay.classList.add('is-fading');
-  shell.loadingFadeTimeoutId = setTimeout(() => {
-    shell.loadingOverlay.hidden = true;
-    shell.loadingOverlay.classList.remove('is-fading');
-    shell.loadingFadeTimeoutId = null;
-  }, LOADING_FADE_MS);
-}
-
-function setLoadingProgressBar(progressBar, progressPercent) {
-  const clamped = clampInt(Math.round(progressPercent), 0, 100);
-  progressBar.style.width = `${clamped}%`;
-}
 
 
 
