@@ -295,13 +295,14 @@ body {
   white-space: nowrap;
 }
 
-/* Marks the first control of a new logical group (display / routing /
-   interaction / actions) with a hairline divider instead of a boxed
-   section — keeps related settings visually clustered without adding
-   another layer of chrome on top of the existing bordered subsections. */
-.control-group-start {
-  margin-top: 0.15rem;
-  padding-top: 0.65rem;
+/* Group separator between the panel's logical sections (routing / display /
+   interaction / actions). A real <hr> rather than a border on the next
+   control, so the grouping is visible in the markup and to assistive tech
+   instead of being implied by a class name. */
+.control-divider {
+  width: 100%;
+  margin: 0.25rem 0;
+  border: 0;
   border-top: 1px solid var(--chrome-border);
 }
 
@@ -492,57 +493,6 @@ body {
   padding: 0.34rem 0.6rem;
   font-size: 0.84rem;
   cursor: pointer;
-}
-
-.control-subsection {
-  border: 1px solid var(--chrome-border);
-  border-radius: 0.4rem;
-  padding: 0.5rem 0.65rem;
-}
-
-/* A fully custom disclosure marker replaces the native one, which some
-   browsers render at inconsistent width between the open/closed states
-   and which otherwise looks visually out of place next to the rest of
-   the panel's iconography. */
-.control-subsection > summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  list-style: none;
-  cursor: pointer;
-  user-select: none;
-}
-
-.control-subsection > summary::-webkit-details-marker {
-  display: none;
-}
-
-.control-subsection > summary::after {
-  content: '';
-  flex: 0 0 auto;
-  width: 0.4rem;
-  height: 0.4rem;
-  border-right: 2px solid var(--chrome-label);
-  border-bottom: 2px solid var(--chrome-label);
-  transform: rotate(-45deg);
-  transition: transform 120ms ease;
-}
-
-.control-subsection[open] > summary::after {
-  transform: rotate(45deg);
-}
-
-.control-subsection[open] > summary {
-  margin-bottom: var(--title-content-gap);
-}
-
-.control-subsection .control-row {
-  margin-top: 0.4rem;
-}
-
-.control-subsection .control-row:first-of-type {
-  margin-top: 0;
 }
 
 .controls-menu-panel button:disabled {

@@ -32,34 +32,7 @@
             <span data-i18n="body.options">Options</span>
           </summary>
           <div class="controls-menu-panel">
-            <div class="control-row control-row-radio-group" id="theme-radio-group">
-              <label class="radio-option">
-                <input type="radio" name="theme" value="auto" checked />
-                <span data-i18n="body.options.theme.auto">Auto</span>
-              </label>
-              <label class="radio-option">
-                <input type="radio" name="theme" value="light" />
-                <span data-i18n="body.options.theme.light">Light mode</span>
-              </label>
-              <label class="radio-option">
-                <input type="radio" name="theme" value="dark" />
-                <span data-i18n="body.options.theme.dark">Dark mode</span>
-              </label>
-            </div>
-            <div class="control-row">
-              <label for="colour-cycle-minutes" data-i18n="body.options.colourCycle">
-                Colour repeating period (minutes)
-              </label>
-              <input
-                id="colour-cycle-minutes"
-                name="colour-cycle-minutes"
-                type="number"
-                min="5"
-                step="5"
-                value="75"
-              />
-            </div>
-            <fieldset class="mode-icon-group control-group-start" id="mode-checkbox-group">
+            <fieldset class="mode-icon-group" id="mode-checkbox-group">
               <legend class="control-title" data-i18n="body.options.mode">Transport modes</legend>
               <div class="mode-icon-row">
                 <label class="mode-icon-option">
@@ -89,25 +62,49 @@
                 </label>
               </div>
             </fieldset>
-            <details class="control-subsection" id="speed-settings">
-              <summary class="control-title">
-                <span data-i18n="body.options.speedSettings">Speed settings</span>
-              </summary>
-              <div class="control-row control-row-speeds">
-                <label for="walk-speed-kph" data-i18n="body.options.walkSpeed">Walking speed</label>
-                <input id="walk-speed-kph" name="walk-speed-kph" type="number" min="1" step="0.1" value="5" />
-                <label for="bike-speed-kph" data-i18n="body.options.bikeSpeed">Cycling speed</label>
-                <input id="bike-speed-kph" name="bike-speed-kph" type="number" min="1" step="0.5" value="20" />
-                <span class="control-unit">km/h</span>
-              </div>
-            </details>
             <div class="control-row" id="departure-datetime-row" hidden>
               <label for="departure-datetime" data-i18n="body.options.departureDatetime">
                 Departure date &amp; time
               </label>
               <input id="departure-datetime" name="departure-datetime" type="datetime-local" step="60" />
             </div>
-            <div class="control-row control-row-checkbox control-group-start">
+            <hr class="control-divider" />
+            <div class="control-row control-row-speeds">
+              <label for="walk-speed-kph" data-i18n="body.options.walkSpeed">Walking speed</label>
+              <input id="walk-speed-kph" name="walk-speed-kph" type="number" min="1" step="0.1" value="4" />
+              <label for="bike-speed-kph" data-i18n="body.options.bikeSpeed">Cycling speed</label>
+              <input id="bike-speed-kph" name="bike-speed-kph" type="number" min="1" step="0.5" value="18" />
+              <span class="control-unit">km/h</span>
+            </div>
+            <div class="control-row">
+              <label for="colour-cycle-minutes" data-i18n="body.options.colourCycle">
+                Colour repeating period (minutes)
+              </label>
+              <input
+                id="colour-cycle-minutes"
+                name="colour-cycle-minutes"
+                type="number"
+                min="5"
+                step="5"
+                value="75"
+              />
+            </div>
+            <hr class="control-divider" />
+            <div class="control-row control-row-radio-group" id="theme-radio-group">
+              <label class="radio-option">
+                <input type="radio" name="theme" value="auto" checked />
+                <span data-i18n="body.options.theme.auto">Auto</span>
+              </label>
+              <label class="radio-option">
+                <input type="radio" name="theme" value="light" />
+                <span data-i18n="body.options.theme.light">Light mode</span>
+              </label>
+              <label class="radio-option">
+                <input type="radio" name="theme" value="dark" />
+                <span data-i18n="body.options.theme.dark">Dark mode</span>
+              </label>
+            </div>
+            <div class="control-row control-row-checkbox">
               <label for="invert-pointer-buttons" data-i18n="body.options.invertPointerButtons">
                 Left mouse button to move start/right mouse button to move map
               </label>
@@ -117,7 +114,8 @@
                 type="checkbox"
               />
             </div>
-            <div class="control-row control-group-start">
+            <hr class="control-divider" />
+            <div class="control-row">
               <button id="export-svg-button" type="button" disabled data-i18n="body.options.exportSvg">
                 Export SVG
               </button>

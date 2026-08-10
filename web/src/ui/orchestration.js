@@ -544,17 +544,47 @@ export function getAllowedModeMaskFromShell(shell) {
     // transit connections carry the isochrone from there - producing a
     // real, expectedly island-y result instead of silently falling back to
     // Car. When transit isn't checked either, there's truly nothing to
-    // route with, so fall back to Car as before.
-    const transitChecked =
-      shell.transitEnabledInput?.checked === true && shell.transitEnabledRow?.hidden !== true;
-    if (transitChecked) {
+    // route with, so fall back to Car.
+    //
+    // Deliberately keyed on `checked` alone, not on the row's visibility:
+    // the row starts hidden and is only revealed once the graph reports
+    // transit tables, so consulting `hidden` here made every call made
+    // before the graph finished loading (e.g. from bindModeSelectControl)
+    // conclude "no transit" and fall back to Car. For a region without
+    // transit data updateTransitControlAvailability already unchecks the
+    // box, so `checked` is the authoritative signal at every point in the
+    // lifecycle.
+    if (shell.transitEnabledInput?.checked === true) {
       return TRANSIT_ONLY_ALLOWED_MODE_MASK;
     }
-    setSelectedModeValues(routingModeCheckboxes, ['car']);
     return EDGE_MODE_CAR_BIT;
   }
 
   return allowedModeMask;
+}
+
+/**
+ * Enforces the "at least one mode" rule by re-checking Car when the user has
+ * just cleared the last one. Kept separate from getAllowedModeMaskFromShell
+ * so that reading the mask stays free of side effects: that getter used to
+ * perform this repair itself, which meant merely asking for the current mask
+ * could rewrite the user's selection.
+ */
+export function restoreDefaultModeIfNoneSelected(shell) {
+  if (!shell || typeof shell !== 'object') {
+    throw new Error('shell is required');
+  }
+  if (shell.transitEnabledInput?.checked === true) {
+    return false;
+  }
+
+  const routingModeCheckboxes = getRoutingModeCheckboxesFromShell(shell);
+  if (routingModeCheckboxes.some((checkbox) => checkbox.checked)) {
+    return false;
+  }
+
+  setSelectedModeValues(routingModeCheckboxes, ['car']);
+  return true;
 }
 
 export function getColourCycleMinutesFromShell(shell) {
@@ -817,7 +847,7 @@ export function bindModeSelectControl(shell, dependencies = {}) {
   // checked set to the URL and always redraws (not just repaints), since a
   // mode or transit change can alter which nodes are reachable at all.
   const handleSelectChange = () => {
-    getAllowedModeMaskFromShell(shell);
+    restoreDefaultModeIfNoneSelected(shell);
     persistModeValuesToLocation(getSelectedModeValues(shell.modeCheckboxes));
     maybeRequestIsochroneRedraw();
   };
@@ -852,7 +882,7 @@ export function bindModeSelectControl(shell, dependencies = {}) {
     maybeRequestIsochroneRedraw();
   };
 
-  getAllowedModeMaskFromShell(shell);
+  restoreDefaultModeIfNoneSelected(shell);
   getColourCycleMinutesFromShell(shell);
   getSpeedOptionsFromShell(shell);
   renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));

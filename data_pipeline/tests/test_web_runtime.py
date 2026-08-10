@@ -64,6 +64,14 @@ def parse_exported_string_constants(js_source: str) -> dict[str, str]:
     return {match.group("name"): match.group("value") for match in matches}
 
 
+def parse_exported_numeric_constants(js_source: str) -> dict[str, float]:
+    matches = re.finditer(
+        r"export const (?P<name>[A-Z0-9_]+)\s*=\s*(?P<value>-?\d+(?:\.\d+)?);",
+        js_source,
+    )
+    return {match.group("name"): float(match.group("value")) for match in matches}
+
+
 def parse_markdown_links(markdown_text: str) -> dict[str, str]:
     matches = re.finditer(r"\[(?P<label>[^\]]+)\]\((?P<target>[^)]+)\)", markdown_text)
     return {match.group("label"): match.group("target") for match in matches}
@@ -98,6 +106,8 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
         "invert-pointer-buttons",
         "mode-checkbox-group",
         "colour-cycle-minutes",
+        "walk-speed-kph",
+        "bike-speed-kph",
         "departure-datetime",
         "export-svg-button",
         "isochrone-legend",
@@ -144,6 +154,21 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
     assert departure_datetime_input.tag == "input"
     assert departure_datetime_input.attrs["type"] == "datetime-local"
     assert departure_datetime_input.attrs["step"] == "60"
+
+    # The speed inputs' HTML defaults must agree with the JS constants, or a
+    # fresh page shows one speed while routing uses another.
+    constants_js = (WEB_ROOT / "src" / "config" / "constants.js").read_text(encoding="utf-8")
+    numeric_constants = parse_exported_numeric_constants(constants_js)
+
+    walk_speed_input = parsed.elements_by_id["walk-speed-kph"]
+    assert walk_speed_input.tag == "input"
+    assert walk_speed_input.attrs["type"] == "number"
+    assert float(walk_speed_input.attrs["value"]) == numeric_constants["DEFAULT_WALK_SPEED_KPH"]
+
+    bike_speed_input = parsed.elements_by_id["bike-speed-kph"]
+    assert bike_speed_input.tag == "input"
+    assert bike_speed_input.attrs["type"] == "number"
+    assert float(bike_speed_input.attrs["value"]) == numeric_constants["BIKE_CRUISE_SPEED_KPH"]
 
     export_button = parsed.elements_by_id["export-svg-button"]
     assert export_button.tag == "button"

@@ -29,14 +29,22 @@ export const EDGE_MODE_WATER_BIT = 1 << 3;
 // there. This makes "Public transit" alone route strictly via transit,
 // with no implicit walking/biking/driving through the road network.
 export const TRANSIT_ONLY_ALLOWED_MODE_MASK = 1 << 4;
+// GRAPH ENCODING CONSTANT - not a user preference, and not safe to retune.
+// data_pipeline/src/isochrone_pipeline/adjacency.py divides each edge's real
+// length by this to store walkingCostSeconds, and the runtime multiplies it
+// back out to recover the edge's physical length (see
+// core/routing.js computeEdgeTraversalCostSeconds and the matching
+// edge_cost_seconds in wasm/routing-kernel/src/lib.rs). Bike, car and ferry
+// costs are all derived from that reconstructed length, so changing this
+// without rebuilding every region's graph binary would silently distort
+// every mode's travel times.
 export const WALKING_SPEED_M_S = 1.39;
-export const BIKE_CRUISE_SPEED_KPH = 20;
-// UI default for the walk-speed input, derived from WALKING_SPEED_M_S (so the
-// two stay numerically consistent rather than drifting apart as separate
-// hand-picked constants) and rounded to 1 decimal for a clean display value
-// (raw WALKING_SPEED_M_S * 3.6 is 5.004, which some locales render as
-// "5,004" in a number input — easily misread as five thousand).
-export const DEFAULT_WALK_SPEED_KPH = Math.round(WALKING_SPEED_M_S * 3.6 * 10) / 10;
+export const BIKE_CRUISE_SPEED_KPH = 18;
+// UI default for the walk-speed input. Deliberately independent of
+// WALKING_SPEED_M_S above: that one is fixed by the stored graph encoding,
+// whereas this is just the speed we assume for a person until they say
+// otherwise, and is free to change.
+export const DEFAULT_WALK_SPEED_KPH = 4;
 export const CAR_FALLBACK_SPEED_KPH = 30;
 // Kept numerically identical to FERRY_FALLBACK_SPEED_KPH in
 // data_pipeline/src/isochrone_pipeline/adjacency.py.

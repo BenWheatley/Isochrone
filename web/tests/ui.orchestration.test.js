@@ -11,6 +11,7 @@ import {
   getSpeedOptionsFromShell,
   getTransitOptionsFromShell,
   populateLocationSelect,
+  restoreDefaultModeIfNoneSelected,
   updateTransitControlAvailability,
 } from '../src/ui/orchestration.js';
 import {
@@ -188,16 +189,60 @@ test('getAllowedModeMaskFromShell falls back to car when neither a mode nor tran
   const shell = { modeCheckboxes, transitEnabledInput };
 
   assert.equal(getAllowedModeMaskFromShell(shell), EDGE_MODE_CAR_BIT);
-  assert.equal(modeCheckboxes.find((checkbox) => checkbox.value === 'car').checked, true);
 });
 
-test('getAllowedModeMaskFromShell ignores a checked-but-hidden transit checkbox (no transit data for the region)', () => {
-  const modeCheckboxes = createModeCheckboxes(['car']);
+test('getAllowedModeMaskFromShell never mutates the selection (reading the mask is side-effect free)', () => {
+  const modeCheckboxes = createModeCheckboxes([]);
+  const transitEnabledInput = createModeCheckbox('transit', false);
+  modeCheckboxes.push(transitEnabledInput);
+  const shell = { modeCheckboxes, transitEnabledInput };
+
+  getAllowedModeMaskFromShell(shell);
+
+  assert.deepEqual(
+    modeCheckboxes.map((checkbox) => checkbox.checked),
+    modeCheckboxes.map(() => false),
+  );
+});
+
+test('getAllowedModeMaskFromShell honours a checked transit box before the row has been revealed', () => {
+  // The transit row starts hidden and is only revealed once the graph
+  // reports transit tables. A ?modes=transit URL checks the box during shell
+  // init, i.e. while it is still hidden - that must still read as
+  // transit-only rather than silently degrading to Car.
+  const modeCheckboxes = createModeCheckboxes([]);
   const transitEnabledInput = createModeCheckbox('transit', true);
   modeCheckboxes.push(transitEnabledInput);
   const shell = { modeCheckboxes, transitEnabledInput, transitEnabledRow: { hidden: true } };
 
-  assert.equal(getAllowedModeMaskFromShell(shell), EDGE_MODE_CAR_BIT);
+  assert.equal(getAllowedModeMaskFromShell(shell), TRANSIT_ONLY_ALLOWED_MODE_MASK);
+});
+
+test('restoreDefaultModeIfNoneSelected re-checks car only when nothing at all is selected', () => {
+  const emptyModeCheckboxes = createModeCheckboxes([]);
+  const uncheckedTransit = createModeCheckbox('transit', false);
+  emptyModeCheckboxes.push(uncheckedTransit);
+  assert.equal(
+    restoreDefaultModeIfNoneSelected({
+      modeCheckboxes: emptyModeCheckboxes,
+      transitEnabledInput: uncheckedTransit,
+    }),
+    true,
+  );
+  assert.equal(emptyModeCheckboxes.find((checkbox) => checkbox.value === 'car').checked, true);
+
+  // Transit-only is a legitimate selection and must be left alone.
+  const transitOnlyCheckboxes = createModeCheckboxes([]);
+  const checkedTransit = createModeCheckbox('transit', true);
+  transitOnlyCheckboxes.push(checkedTransit);
+  assert.equal(
+    restoreDefaultModeIfNoneSelected({
+      modeCheckboxes: transitOnlyCheckboxes,
+      transitEnabledInput: checkedTransit,
+    }),
+    false,
+  );
+  assert.equal(transitOnlyCheckboxes.find((checkbox) => checkbox.value === 'car').checked, false);
 });
 
 test('getSpeedOptionsFromShell converts km/h inputs to the expected units, defaulting when missing/invalid', () => {
