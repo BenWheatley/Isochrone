@@ -24,6 +24,13 @@ import {
   persistWalkSpeedKphToLocation,
 } from '../core/coords.js';
 import {
+  displaySpeedToKph,
+  kphToDisplaySpeed,
+  normalizeUnitSystem,
+  resolveDefaultUnitSystem,
+  speedUnitLabel,
+} from './units.js';
+import {
   applyCommonMessagesToDocument,
   getCommonMessage,
 } from './localization.js';
@@ -32,6 +39,7 @@ const CANONICAL_MODE_VALUES = ['walk', 'bike', 'car', 'water', 'transit'];
 const CANONICAL_THEME_VALUES = ['light', 'dark', 'auto'];
 const THEME_STORAGE_KEY = 'isochrone-theme';
 const POINTER_BUTTON_INVERSION_STORAGE_KEY = 'isochrone-invert-pointer-buttons';
+const UNIT_SYSTEM_STORAGE_KEY = 'isochrone-unit-system';
 
 export function initializeAppShell(doc, options = {}) {
   const resolvedDocument = doc ?? globalThis.document;
@@ -56,6 +64,10 @@ export function initializeAppShell(doc, options = {}) {
   const routingDisclaimerOsm = resolvedDocument.getElementById('routing-disclaimer-osm');
   const routingDisclaimerTransit = resolvedDocument.getElementById('routing-disclaimer-transit');
   const themeRadios = Array.from(resolvedDocument.querySelectorAll('input[name="theme"]'));
+  const unitSystemRadios = Array.from(
+    resolvedDocument.querySelectorAll('input[name="unit-system"]'),
+  );
+  const speedUnitLabelElement = resolvedDocument.getElementById('speed-unit-label');
   const invertPointerButtonsInput = resolvedDocument.getElementById('invert-pointer-buttons');
   const modeCheckboxGroup = resolvedDocument.getElementById('mode-checkbox-group');
   const modeCheckboxes = Array.from(resolvedDocument.querySelectorAll('.mode-checkbox'));
@@ -121,6 +133,12 @@ export function initializeAppShell(doc, options = {}) {
   }
   if (themeRadios.length !== 3 || themeRadios.some((radio) => radio.tagName !== 'INPUT')) {
     throw new Error('index.html is missing three <input type="radio" name="theme"> elements');
+  }
+  if (unitSystemRadios.length !== 2 || unitSystemRadios.some((radio) => radio.tagName !== 'INPUT')) {
+    throw new Error('index.html is missing two <input type="radio" name="unit-system"> elements');
+  }
+  if (!speedUnitLabelElement || speedUnitLabelElement.tagName !== 'SPAN') {
+    throw new Error('index.html is missing <span id="speed-unit-label">');
   }
   if (!invertPointerButtonsInput || invertPointerButtonsInput.tagName !== 'INPUT') {
     throw new Error('index.html is missing <input id="invert-pointer-buttons">');
@@ -246,6 +264,8 @@ export function initializeAppShell(doc, options = {}) {
     routingDisclaimerOsm,
     routingDisclaimerTransit,
     themeRadios,
+    unitSystemRadios,
+    speedUnitLabelElement,
     invertPointerButtonsInput,
     modeCheckboxGroup,
     modeCheckboxes,
@@ -513,6 +533,101 @@ export function bindThemeControl(shell, options = {}) {
   };
 }
 
+function getCheckedRadioValue(radios) {
+  return radios.find((radio) => radio.checked)?.value ?? radios[0]?.value;
+}
+
+export function getUnitSystemFromShell(shell) {
+  if (!shell || typeof shell !== 'object' || !Array.isArray(shell.unitSystemRadios)) {
+    return 'metric';
+  }
+  return normalizeUnitSystem(getCheckedRadioValue(shell.unitSystemRadios));
+}
+
+/**
+ * Metric/imperial display. Only presentation changes: the speed inputs are
+ * re-expressed in the newly chosen unit (same underlying speed, so the
+ * isochrone is unaffected) and the scale bar re-reads the system from
+ * data-units on the root element.
+ */
+export function bindUnitSystemControl(shell, options = {}) {
+  if (!shell || typeof shell !== 'object' || !Array.isArray(shell.unitSystemRadios)
+    || shell.unitSystemRadios.length === 0) {
+    throw new Error('shell.unitSystemRadios is required');
+  }
+
+  const rootElement = options.rootElement ?? globalThis.document?.documentElement ?? null;
+  if (!rootElement || typeof rootElement !== 'object' || typeof rootElement.dataset !== 'object') {
+    throw new Error('rootElement with dataset is required');
+  }
+  const storage = options.storage ?? globalThis.localStorage ?? null;
+  const storageKey = options.storageKey ?? UNIT_SYSTEM_STORAGE_KEY;
+  const onUnitSystemChange = options.onUnitSystemChange ?? null;
+
+  // Starts at the canonical system, because the speed inputs are seeded from
+  // km/h constants and the ?walkKph=/?bikeKph= params. The first apply below
+  // therefore converts them into whatever the user actually reads.
+  let appliedUnitSystem = 'metric';
+
+  const applyUnitSystem = (value, { persist = true, notify = false } = {}) => {
+    const nextUnitSystem = normalizeUnitSystem(
+      value,
+      options.defaultUnitSystem ?? resolveDefaultUnitSystem(),
+    );
+    const previousUnitSystem = appliedUnitSystem;
+    appliedUnitSystem = nextUnitSystem;
+
+    for (const radio of shell.unitSystemRadios) {
+      radio.checked = radio.value === nextUnitSystem;
+    }
+    rootElement.dataset.units = nextUnitSystem;
+    if (shell.speedUnitLabelElement) {
+      shell.speedUnitLabelElement.textContent = speedUnitLabel(nextUnitSystem);
+    }
+
+    // Restate the speeds in the new unit. Converting through km/h keeps the
+    // actual speed identical, so switching units never moves the isochrone.
+    if (previousUnitSystem !== nextUnitSystem) {
+      for (const input of [shell.walkSpeedInput, shell.bikeSpeedInput]) {
+        const shown = parsePositiveFloatOrNull(input?.value);
+        if (shown === null) {
+          continue;
+        }
+        const speedKph = displaySpeedToKph(shown, previousUnitSystem);
+        input.value = String(Math.round(kphToDisplaySpeed(speedKph, nextUnitSystem) * 10) / 10);
+      }
+    }
+
+    if (persist) {
+      safeStorageSet(storage, storageKey, nextUnitSystem);
+    }
+    if (notify && onUnitSystemChange) {
+      onUnitSystemChange(nextUnitSystem);
+    }
+    return nextUnitSystem;
+  };
+
+  applyUnitSystem(safeStorageGet(storage, storageKey), { persist: false });
+
+  const handleChange = (event) => {
+    applyUnitSystem(event.target.value, { persist: true, notify: true });
+  };
+  for (const radio of shell.unitSystemRadios) {
+    radio.addEventListener('change', handleChange);
+  }
+
+  return {
+    dispose() {
+      for (const radio of shell.unitSystemRadios) {
+        radio.removeEventListener('change', handleChange);
+      }
+    },
+    getUnitSystem() {
+      return appliedUnitSystem;
+    },
+  };
+}
+
 // Public transit sits in the same checkbox group as Walk/Bike/Car/Ferry (it
 // reads as a peer transport mode to a normal user), but it isn't an
 // allowedModeMask bit - it's a boolean CSA-augmentation flag consumed
@@ -723,8 +838,16 @@ export function getSpeedOptionsFromShell(shell) {
     throw new Error('shell is required');
   }
 
-  const walkSpeedKph = parsePositiveFloatOrNull(shell.walkSpeedInput?.value) ?? DEFAULT_WALK_SPEED_KPH;
-  const bikeCruiseSpeedKph = parsePositiveFloatOrNull(shell.bikeSpeedInput?.value) ?? BIKE_CRUISE_SPEED_KPH;
+  const unitSystem = getUnitSystemFromShell(shell);
+  const walkSpeedInputValue = parsePositiveFloatOrNull(shell.walkSpeedInput?.value);
+  const bikeSpeedInputValue = parsePositiveFloatOrNull(shell.bikeSpeedInput?.value);
+  // The inputs carry whatever unit is on display; routing only ever speaks km/h.
+  const walkSpeedKph = walkSpeedInputValue === null
+    ? DEFAULT_WALK_SPEED_KPH
+    : displaySpeedToKph(walkSpeedInputValue, unitSystem);
+  const bikeCruiseSpeedKph = bikeSpeedInputValue === null
+    ? BIKE_CRUISE_SPEED_KPH
+    : displaySpeedToKph(bikeSpeedInputValue, unitSystem);
 
   return {
     walkingSpeedMps: walkSpeedKph / 3.6,
@@ -913,13 +1036,16 @@ export function bindModeSelectControl(shell, dependencies = {}) {
     maybeRequestIsochroneRedraw();
   };
   const handleSpeedControlChange = () => {
-    const walkSpeedKph = parsePositiveFloatOrNull(shell.walkSpeedInput?.value);
-    if (walkSpeedKph !== null) {
-      persistWalkSpeedKphToLocation(walkSpeedKph);
+    // The URL always carries km/h, whatever unit the box happens to show, so
+    // a shared link means the same speed to everyone who opens it.
+    const unitSystem = getUnitSystemFromShell(shell);
+    const walkSpeedShown = parsePositiveFloatOrNull(shell.walkSpeedInput?.value);
+    if (walkSpeedShown !== null) {
+      persistWalkSpeedKphToLocation(displaySpeedToKph(walkSpeedShown, unitSystem));
     }
-    const bikeSpeedKph = parsePositiveFloatOrNull(shell.bikeSpeedInput?.value);
-    if (bikeSpeedKph !== null) {
-      persistBikeSpeedKphToLocation(bikeSpeedKph);
+    const bikeSpeedShown = parsePositiveFloatOrNull(shell.bikeSpeedInput?.value);
+    if (bikeSpeedShown !== null) {
+      persistBikeSpeedKphToLocation(displaySpeedToKph(bikeSpeedShown, unitSystem));
     }
     maybeRequestIsochroneRedraw();
   };

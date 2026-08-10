@@ -4,40 +4,14 @@ import { validateGraphHeaderForBoundaryAlignment } from '../core/graph-validatio
 import { resolveViewportFrame } from '../core/viewport.js';
 import { getShellLocaleMessages } from './status.js';
 import { resolveIsochroneTheme } from './theme.js';
+import {
+  formatDistanceLabel,
+  pickNiceDistanceMetres,
+  resolveUnitSystem,
+} from './units.js';
 
 // The two map overlays that explain the isochrone: the colour-band legend
 // and the distance scale bar (which also backs the SVG export's scale bar).
-
-export function formatDistanceLabel(distanceMetres) {
-  if (distanceMetres >= 1000) {
-    const km = distanceMetres / 1000;
-    if (km >= 10) {
-      return `${Math.round(km)} km`;
-    }
-    return `${km.toFixed(1)} km`;
-  }
-  return `${Math.round(distanceMetres)} m`;
-}
-
-export function pickScaleDistanceMetres(targetDistanceMetres) {
-  const safeTarget = Math.max(1, targetDistanceMetres);
-  const exponent = Math.floor(Math.log10(safeTarget));
-  const base = 10 ** exponent;
-  const multipliers = [1, 2, 5];
-
-  let chosen = base;
-  for (const multiplier of multipliers) {
-    const candidate = multiplier * base;
-    if (candidate <= safeTarget) {
-      chosen = candidate;
-    }
-  }
-
-  if (chosen > safeTarget) {
-    return chosen / 10;
-  }
-  return chosen;
-}
 
 export function pickScaleBucketDistanceMetres(totalDistanceMetres) {
   const safeTotal = Math.max(1, totalDistanceMetres);
@@ -87,7 +61,8 @@ export function pickScaleBucketDistanceMetres(totalDistanceMetres) {
 export function computeDistanceScaleBarGeometry(metresPerPixel) {
   const preferredWidthPx = 120;
   const preferredDistanceMetres = preferredWidthPx * metresPerPixel;
-  const chosenDistanceMetres = pickScaleDistanceMetres(preferredDistanceMetres);
+  const unitSystem = resolveUnitSystem();
+  const chosenDistanceMetres = pickNiceDistanceMetres(preferredDistanceMetres, unitSystem);
   const lineWidthPx = Math.max(24, Math.round(chosenDistanceMetres / metresPerPixel));
   const bucketDistanceMetres = pickScaleBucketDistanceMetres(chosenDistanceMetres);
   const segmentWidthPx = Math.max(4, Math.round(bucketDistanceMetres / metresPerPixel));
@@ -96,7 +71,7 @@ export function computeDistanceScaleBarGeometry(metresPerPixel) {
     lineWidthPx,
     bucketDistanceMetres,
     segmentWidthPx,
-    label: formatDistanceLabel(chosenDistanceMetres),
+    label: formatDistanceLabel(chosenDistanceMetres, unitSystem),
   };
 }
 

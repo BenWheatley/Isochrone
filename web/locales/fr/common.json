@@ -7,6 +7,8 @@
   "body.options.theme.auto": "Automatique",
   "body.options.theme.light": "Mode clair",
   "body.options.theme.dark": "Mode sombre",
+  "body.options.units.metric": "Métrique",
+  "body.options.units.imperial": "Impérial",
   "body.options.invertPointerButtons": "Inverser les boutons principal/secondaire de la souris",
   "body.options.mode": "Modes de transport",
   "body.options.mode.walk": "Marche",

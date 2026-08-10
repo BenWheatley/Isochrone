@@ -7,6 +7,8 @@
   "body.options.theme.auto": "Automatisch",
   "body.options.theme.light": "Heller Modus",
   "body.options.theme.dark": "Dunkler Modus",
+  "body.options.units.metric": "Metrisch",
+  "body.options.units.imperial": "Angloamerikanisch",
   "body.options.invertPointerButtons": "Primäre/sekundäre Maustasten tauschen",
   "body.options.mode": "Verkehrsmittel",
   "body.options.mode.walk": "Zu Fuß",

@@ -74,7 +74,7 @@
               <input id="walk-speed-kph" name="walk-speed-kph" type="number" min="1" step="0.1" value="4" />
               <label for="bike-speed-kph" data-i18n="body.options.bikeSpeed">Cycling speed</label>
               <input id="bike-speed-kph" name="bike-speed-kph" type="number" min="1" step="0.5" value="18" />
-              <span class="control-unit">km/h</span>
+              <span class="control-unit" id="speed-unit-label">km/h</span>
             </div>
             <div class="control-row" id="transit-walk-budget-row" hidden>
               <label for="transit-walk-budget-minutes" data-i18n="body.options.transitWalkBudget">
@@ -119,6 +119,16 @@
               <label class="radio-option">
                 <input type="radio" name="theme" value="dark" />
                 <span data-i18n="body.options.theme.dark">Dark mode</span>
+              </label>
+            </div>
+            <div class="control-row control-row-radio-group" id="unit-system-radio-group">
+              <label class="radio-option">
+                <input type="radio" name="unit-system" value="metric" checked />
+                <span data-i18n="body.options.units.metric">Metric</span>
+              </label>
+              <label class="radio-option">
+                <input type="radio" name="unit-system" value="imperial" />
+                <span data-i18n="body.options.units.imperial">Imperial</span>
               </label>
             </div>
             <div class="control-row control-row-checkbox">

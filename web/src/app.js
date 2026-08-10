@@ -54,6 +54,7 @@ import {
   bindHeaderMenuControl as bindHeaderMenuControlInternal,
   bindPointerButtonInversionControl as bindPointerButtonInversionControlInternal,
   bindThemeControl as bindThemeControlInternal,
+  bindUnitSystemControl,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
   getSpeedOptionsFromShell,
@@ -3483,6 +3484,18 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         });
         if (!rerendered) {
           routingBinding?.requestIsochroneRedraw();
+        }
+      },
+    });
+    bindUnitSystemControl(shell, {
+      onUnitSystemChange() {
+        // Distances are the only thing on the map itself expressed in units;
+        // the speed inputs restate themselves inside the control.
+        if (initializedMapData?.graph?.header) {
+          updateDistanceScaleBar(shell, initializedMapData.graph.header, {
+            viewport: initializedMapData.viewport,
+            fitBoundingBoxPx: initializedMapData.boundaryFitBoundingBoxPx,
+          });
         }
       },
     });

@@ -7,6 +7,8 @@
   "body.options.theme.auto": "Auto",
   "body.options.theme.light": "Light mode",
   "body.options.theme.dark": "Dark mode",
+  "body.options.units.metric": "Metric",
+  "body.options.units.imperial": "Imperial",
   "body.options.invertPointerButtons": "Left mouse button to move start/right mouse button to move map",
   "body.options.mode": "Transport modes",
   "body.options.mode.walk": "Walk",
