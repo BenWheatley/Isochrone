@@ -25,6 +25,9 @@ web/dist/
 *.log
 .cache/
 target/
+
+# Local dev-server config (port numbers churn per session)
+.claude/launch.json
 data_pipeline/output/*benchmark*.json
 # Keep web/wasm/*.wasm so that GitHub Pages works
 /data_pipeline/input

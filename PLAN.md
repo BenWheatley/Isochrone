@@ -74,7 +74,7 @@ Estimated time: 45 min
 Estimated time: 15 min
 
 Tasks
-- [x] Use `docs/berlin_overpass_routing_query.ql` with `data_pipeline/fetch-data.sh`
+- [x] Use `docs/berlin_overpass_routing_query.ql` with `data_pipeline/fetch-data.sh` (superseded by the generalized `docs/overpass_routing_query.sh` + `region-data.py fetch` in Phase 10.6)
 - [x] Store output as `/data_pipeline/input/berlin-routing.osm.json`
 
 ### 2.1.2 Survey walkable way tags
@@ -713,60 +713,113 @@ Estimated time: 3 hours 45 min
 
 *This phase generalizes the current Berlin-specific Overpass fetch flow into a reusable multi-location pipeline stage without changing routing internals yet.*
 
+**Implementation note:** this shipped with a different concrete design than originally planned below — a single `data_pipeline/regions.json` registry (array of region entries) instead of one manifest file per location, and a `region-data.py` CLI (`fetch` / `build` / `all` subcommands) instead of a bare parameterized shell script. The design goals (deterministic selectors, templated queries, tested, non-Berlin fixtures, documented onboarding) are all met; the file layout is just simpler than planned. Tasks below are checked against what actually exists.
+
 ### 10.6.1 Add location manifests
 Estimated time: 40 min
 
 Tasks
-- [ ] Add `data_pipeline/locations/<slug>.json` manifests with required fields: `slug`, `display_name`, `relation_id`, `wikidata` (optional), `epsg`, `boundary_admin_level`, `default_timeout_s`.
-- [ ] Add a Berlin manifest as canonical baseline and define validation rules for required fields.
-- [ ] Add deterministic location-selection precedence (`--location` explicit arg, then default location).
+- [x] `data_pipeline/regions.json` holds one array of region entries (not per-file manifests) with fields: `id`, `name`, `localizedNames`, `graphFileName`, `boundaryFileName`, `locationRelation`, `subdivisionAdminLevel`, `subdivisionDiscoveryModes`, `epsg`, `graphBinaryFileName`, `graphSummaryFileName`, `boundaryResolution`, `boundaryUnits`, `coastal`, `coastSource` — parsed and validated by `load_region_specs()` in `region_pipeline.py`
+- [x] Berlin is the canonical baseline entry; validation rejects duplicate ids and missing required fields
+- [x] Deterministic selection: `--only <id>[,<id>...]` limits processing to specific regions; default (no `--only`) processes every region in the file
 
 ### 10.6.2 Add Overpass query templating
 Estimated time: 45 min
 
 Tasks
-- [ ] Replace Berlin-only query sources with reusable routing/boundary query templates parameterized by relation/admin-level selectors.
-- [ ] Render concrete `.ql` files per location for reproducibility/debugging before fetch.
-- [ ] Keep deterministic selector policy: relation-id-first, with optional guard tags (`name`/`wikidata`) where available.
+- [x] `docs/overpass_routing_query.sh` and `docs/overpass_boundary_query.sh` are location-agnostic templates parameterized by `--location-label`, `--location-relation`, `--subdivision-admin-level`, `--subdivision-discovery-modes`
+- [x] `region_pipeline.render_query()` renders the concrete query text per region before fetching (logged to stderr for reproducibility/debugging, not written to a persisted `.ql` file per location)
+- [x] Deterministic selector policy: the region's `locationRelation` selector is used as-is (relation-id-first where the region config specifies one, e.g. Berlin/Athens/London/Portsmouth), with `name`/`wikidata` guard tags where available
 
 ### 10.6.3 Replace hardcoded fetch script with parameterized fetch entrypoint
 Estimated time: 45 min
 
 Tasks
-- [ ] Replace `data_pipeline/fetch-data.sh` hardcoded Berlin paths with a parameterized fetch command (`--location`, `--dataset routing|boundaries`, `--output`, `--timeout`, `--endpoint`).
-- [ ] Keep strict shell behavior (`set -euo pipefail`) and explicit error output from `curl`.
-- [ ] Store fetched JSON under per-location paths by default, with optional explicit output override.
+- [x] `data_pipeline/region-data.py fetch --only <id> --components routing,boundary` replaces the old Berlin-only `fetch-data.sh`; components also accept `way`/`ways`/`boundaries` aliases
+- [x] Strict shell behavior (`set -euo pipefail`) preserved in the query templates; `fetch_overpass_json()` fails loudly on non-2xx/empty responses and saves the failed query + response for debugging
+- [x] Output paths are resolved from the region id by default (`--input-dir`/`--output-dir` override the base directory, not per-file paths)
 
 ### 10.6.4 Standardize per-location artifact layout
 Estimated time: 25 min
 
 Tasks
-- [ ] Standardize OSM input paths as `data_pipeline/input/<slug>/routing.osm.json` and `data_pipeline/input/<slug>/boundaries.osm.json`.
-- [ ] Standardize pipeline outputs as `data_pipeline/output/<slug>/...` for summaries and generated artifacts.
-- [ ] Keep temporary compatibility aliases for existing Berlin paths until migration is complete.
+- [x] Actual layout is flat and slug-prefixed, not nested directories: `data_pipeline/input/<id>-routing.osm.json`, `<id>-district-boundaries.osm.json`; outputs as `data_pipeline/output/<id>-graph.bin(.gz)`, `<id>-district-boundaries-canvas.json`, `<id>-graph-summary.json`
+- [x] Compatibility aliases: Berlin still uses its original `graph-walk.bin(.gz)` graph filenames (configured via `graphFileName`/`graphBinaryFileName` in its region entry) since that is what the deployed web runtime references by default
 
 ### 10.6.5 Add location-aware pipeline wiring
 Estimated time: 25 min
 
 Tasks
-- [ ] Add optional `--location` convenience resolution to data pipeline scripts that currently rely on Berlin defaults.
-- [ ] Resolve default `--epsg` and input/output paths from location manifests when `--location` is provided.
-- [ ] Preserve explicit `--input`/`--output`/`--epsg` overrides for deterministic manual runs.
+- [x] `region-data.py fetch|build|all --only <id>` resolves relation selector, `epsg`, admin level, and file paths from `regions.json` — no per-script `--location` flag needed since the CLI itself is the location-aware entrypoint
+- [x] `--epsg`/output naming stay explicit per-region-entry (not overridable per-invocation); this matches the deterministic/reproducible-build goal better than ad hoc manual overrides
 
 ### 10.6.6 Generalize Overpass survey tooling
 Estimated time: 20 min
 
 Tasks
-- [ ] Update Overpass survey script/query builder to use location manifests instead of hardcoded Berlin relation IDs.
-- [ ] Ensure report headers and output metadata include location slug/display name.
+- [x] `osm_json_survey.py`/`overpass_survey.py` operate on whatever input file is passed in, with no hardcoded Berlin relation IDs
+- [x] Survey output includes the source file path, which carries the region slug
 
 ### 10.6.7 Tests and migration docs
 Estimated time: 25 min
 
 Tasks
-- [ ] Add tests for manifest validation, query rendering, and location-based path resolution.
-- [ ] Add at least one non-Berlin test fixture manifest to verify location-agnostic behavior.
-- [ ] Document onboarding steps in `docs/locations.md` and mark legacy Berlin-only commands as compatibility paths.
+- [x] `data_pipeline/tests/test_region_pipeline.py` covers manifest (region spec) validation, `test_fetch_queries.py` covers query rendering for both discovery modes, both use Paris/London/Luxembourg fixtures throughout (not Berlin-only)
+- [x] Non-Berlin fixtures are the norm across the pipeline test suite, not just one token fixture
+- [x] Onboarding steps are documented in `docs/region-data-pipeline.md` (the `docs/locations.md` filename in the original plan didn't end up matching what shipped); legacy Berlin filenames are called out explicitly as a compatibility path, not hidden
+
+**Currently configured regions** (`data_pipeline/regions.json`): berlin, paris, cologne, athens, london, rome, portsmouth, rhode-island, luxembourg-country, singapore, adelaide, nairobi. **Deployed** (present in `web/src/data/locations.json`, i.e. actually fetched/built and shipped): berlin, paris, rome, luxembourg-country, london, cologne, rhode-island.
+
+---
+
+## 10.7 Post-MVP: Basemap Context Layers (Coastal Water, Forest, Inland Water, Waterways, Airports)
+Estimated time: 6 hours
+
+*Not in the original plan — added in response to user feedback wanting more visual context on the map. Rendering-only: none of this affects the routing graph, edge costs, or reachability. See the "Note On Public Polygons" section below — polygon context is deliberately not treated as uniformly walkable.*
+
+### 10.7.1 Coastal water polygons (opt-in, external dataset)
+Estimated time: 2 hours
+
+Tasks
+- [x] `data_pipeline/src/isochrone_pipeline/water_polygons.py`: clip the OSM coastline water-polygon shapefile (osmdata.openstreetmap.de, ~900 MB) to a region's bbox
+- [x] Cache the downloaded archive at `data_pipeline/.cache/water-polygons/` (gitignored) so it is fetched once total, not once per region build
+- [x] Opt-in `"coastal": true` (+ optional `"coastSource"`) field on `regions.json` entries, threaded through `region_pipeline.py`'s `run_build_pipeline` as `include_coast`/`coast_source` — opt-in specifically because of the external download cost, unlike everything else in this phase
+- [x] Clipped sea polygons are written into the boundary canvas JSON as `water_features`; rendered as a filled layer and exported to SVG (`isochrone-sea` group)
+
+### 10.7.2 Forest, inland water, waterway, and airport context (always-on, same Overpass fetch)
+Estimated time: 2.5 hours
+
+Tasks
+- [x] Extend `docs/overpass_boundary_query.sh` with an unconditional `.naturalArea` binding (independent of subdivision discovery mode) selecting way-tagged `natural=wood`/`landuse=forest`/`natural=water`/`waterway=river|canal|stream`/`aeroway=aerodrome` — always fetched, no per-region flag, since it rides the same Overpass request as admin boundaries rather than an external download
+- [x] Extract into `forest_features`, `inland_water_features`, `waterway_features` (with a `navigable` flag derived from the `boat` tag: `yes`/`permissive`/`designated` → navigable, `no` → not, otherwise canals default navigable and rivers/streams default not), and `airport_features` in `boundary_canvas.py`
+- [x] Filter polygon features under ~1 hectare (shoelace area via a dedicated metric transformer, independent of `units`/the render transformer, which is `None` in degrees-mode builds) to drop digitizing-noise slivers
+- [x] Render as new canvas layers, bottom-to-top: forest → airports → inland water → sea → waterways → admin boundaries; export the same layers (plus the previously-missing sea layer) to SVG
+
+### 10.7.3 Multipolygon relation support for water and airports
+Estimated time: 1.5 hours
+
+Tasks
+- [x] `_stitch_ways_into_rings` in `boundary_canvas.py`: greedily reassemble a relation's outer/inner member ways (frequently split into dozens of segments — the Thames alone is 31 outer + 58 inner) into closed rings by matching shared endpoints
+- [x] Normalize outer/inner ring winding direction so nonzero-winding fill punches holes correctly (e.g. islands within a water body), matching the convention already used for coastal water's multi-ring shapefile features
+- [x] Scope relation-typed area scans narrowly to `natural=water` and `aeroway=aerodrome` only, and verified live against London (~7 s round trip) — a *broad* relation-typed area scan (`boundary=administrative`) was previously found too expensive for London specifically (see 10.6's `subdivisionDiscoveryModes` note), so this is a deliberate scope limit, not an oversight
+- [x] Deliberately out of scope for now: multipolygon relations for `natural=wood`/`landuse=forest` (ways only) — no evidence yet that forest/wood is commonly relation-mapped enough to need it
+
+Verification note (2026-08-06): confirmed against London — the tidal Thames (previously rendered as a bare, gapped centerline with an unfilled border) is a single 89-member relation and now renders as a continuous filled body with correct island holes; Heathrow (a relation) and 6 smaller airfields (ways) render as a new muted airport context layer. Rolled out to the other deployed regions (berlin, paris, rome, luxembourg-country, cologne, rhode-island) the same day.
+
+**Update:** the "Water" transport mode described as deferred above was subsequently implemented — see 10.8.
+
+---
+
+### 10.8 Water/ferry transport mode
+*Implements the routing half of the "Water" mode deferred in 10.7.3 above — the rendering-only waterway/sea layers already existed; this adds an actual connectivity graph and a fourth selectable mode.*
+
+Tasks
+- [x] Extract ferry ways (`route=ferry`) as a separate pass alongside the walkable-network extraction, carrying the `duration=` tag through for duration-aware speed costing — `osm_graph_extract.py`.
+- [x] Fold ferry ways into the same adjacency graph with a composite mode mask bit (`EDGE_MODE_WATER_BIT`) and duration-aware or fallback speed — `adjacency.py`.
+- [x] Add a water-mode branch to both routing kernels (Rust `edge_cost_seconds` and the JS `computeEdgeTraversalCostSeconds` reference) — ferry legs cost at the baked ferry speed regardless of which boarding mode bit matched, since a ferry crossing takes the same time whether you walked, biked, or drove onto it.
+- [x] Add "Ferry" as a fourth `#mode-select` option (now a checkbox in the "Transport modes" group, see 12.8) and rebuild every deployed region's graph with ferry edges included.
+- [x] Replace the fixed 80km per-way ferry span cutoff with a grid-size budget: ferry candidates are accepted nearest-to-the-core-network first, up to a safety margin below the binary format's actual hard limit (u16 `grid_width_px`/`grid_height_px` header fields cap extent at 65,535 × 10m/pixel ≈ 655km) — the fixed cutoff was too small for regions whose own coastline exceeds 80km (e.g. Cyprus) — `select_ferry_ways_within_grid_budget` in `osm_graph_extract.py`.
+- [x] Decouple the default/max-zoom-out viewport from the full routing grid extent, fitting the district boundary (+5% padding) instead — legitimate-but-distant ferry connections (e.g. Singapore's regional ferry routes) were otherwise dragging the default view out to include far-flung endpoints nobody wants to see by default; panning still reaches the wider ferry network at the same zoom level, since panning stays clamped against the full grid — `web/src/core/viewport.js`'s `resolveFitScale`/`createDefaultMapViewport`.
 
 ---
 
@@ -774,12 +827,14 @@ Tasks
 
 *This phase is explicitly deferred from MVP. Goal: support public transport data ingestion and routing for any region, not just Berlin/Germany, by separating source formats from a canonical routing format.*
 
+**Implementation note (Berlin pilot, landed):** the sections below marked `[x]` reflect a deliberately trimmed pass — GTFS **static** only (no GTFS-RT/NeTEx/SIRI), **Berlin only**, and **weekday-recurring calendar patterns** rather than full `calendar_dates.txt` exception fidelity (single-date holiday overrides aren't modeled) — confirmed against user intent ("proceed with Berlin specifically so I can test the result", later extended per user request to cover every date the feed actually supports rather than one locked reference day). See `data_pipeline/src/isochrone_pipeline/gtfs_transit.py`, the `transitFeed` block in `data_pipeline/regions.json`, and `runConnectionScanFromWalkingReachableStops`/`runWalkingIsochroneFromSourceNode` in `web/src/app.js`. Full feed-registry generalization (11.1, 11.7) and realtime/NeTEx adapters (11.2.2, 11.2.3) remain deferred.
+
 ## 11.1 Define feed registry and region config
 Estimated time: 45 min
 
 Tasks
 - [ ] Add a feed registry file (`docs/transit_feed_registry.md` or JSON) with per-region metadata: provider, licence URL, update cadence, timezone, and feed format.
-- [ ] Add pipeline config inputs (`--region`, `--transit-feed`, `--transit-format`) so the same scripts run for any city/country.
+- [x] Add pipeline config inputs so the same scripts run for any city — done as a per-region optional `transitFeed` block in `regions.json` (`RegionSpec.transit_feed`) plus a `transit`/`gtfs` fetch+build component (`region-data.py fetch|build --components transit`), rather than the originally-sketched `--region`/`--transit-feed`/`--transit-format` CLI flags.
 - [ ] Define licence gate rules (allowed for local processing, allowed for redistribution, attribution requirements) and fail export when redistribution is disallowed.
 
 ---
@@ -791,9 +846,9 @@ Estimated time: 3 hours
 Estimated time: 1 hour 15 min
 
 Tasks
-- [ ] Parse `stops.txt`, `trips.txt`, `stop_times.txt`, `calendar.txt`, `calendar_dates.txt`, `routes.txt`, `agency.txt`.
-- [ ] Normalize timezone/day rollover semantics (`25:10:00`, etc.) into service-day-relative seconds.
-- [ ] Keep raw identifiers for traceability while emitting normalized numeric IDs.
+- [x] Parse `stops.txt`, `trips.txt`, `stop_times.txt`, `calendar.txt`, `calendar_dates.txt`, `routes.txt`, `agency.txt` — `data_pipeline/src/isochrone_pipeline/gtfs_transit.py`.
+- [x] Normalize timezone/day rollover semantics (`25:10:00`, etc.) into service-day-relative seconds.
+- [x] Keep raw identifiers for traceability while emitting normalized numeric IDs (stop/route ids resolved to compact integer indices for the binary export).
 
 ### 11.2.2 GTFS-Realtime adapter (optional overlay)
 Estimated time: 45 min
@@ -816,10 +871,10 @@ Tasks
 Estimated time: 2 hours
 
 Tasks
-- [ ] Define canonical tables independent of source format: `stops`, `routes`, `trips`, `connections`, `services`, `transfers`, `agencies`.
-- [ ] Define canonical units/types: projected meters for geometry, seconds for times, bitmasks/bitsets for service days, integer IDs for joins.
-- [ ] Define walking-graph linkage table: `stop_id -> nearest_node_index`, `walk_attach_cost_seconds`, `attach_distance_m`.
-- [ ] Persist canonical intermediate artifacts as deterministic JSON/Parquet snapshots for debugging and repeatable builds.
+- [x] Define canonical tables independent of source format — `TransitStop`/`TransitConnection` dataclasses in `gtfs_transit.py` (a trimmed subset: `stops` + `connections` derived from `trips`/`stop_times`, not separately-persisted `routes`/`services`/`transfers`/`agencies` tables).
+- [x] Define canonical units/types: projected meters (UTM, matching the walking graph's `epsg`) for stop geometry, seconds-since-midnight for times, compact integer indices for stop/route joins. Service-day bitmask field is populated per connection from its real GTFS weekday pattern and consulted at query time (see 11.5's day-mask indexing entry below).
+- [x] Define walking-graph linkage: stop → nearest walking-node attachment via a grid-bucketed spatial index (mirrors `findNearestNodeIndexForModeFromSpatialIndex`'s technique), with a 300m attach-radius cutoff and drop-count logging.
+- [ ] Persist canonical intermediate artifacts as deterministic JSON/Parquet snapshots for debugging and repeatable builds — not done; the only persisted transit artifact is the final binary graph (stop/tedge tables folded into `graph-walk.bin`), no intermediate canonical-table dump.
 
 ---
 
@@ -827,10 +882,10 @@ Tasks
 Estimated time: 1 hour 30 min
 
 Tasks
-- [ ] Validate schedule monotonicity (`arrival/departure` non-decreasing along each trip).
-- [ ] Validate spatial linkage (stop attachment distance thresholds and coverage statistics).
-- [ ] Validate referential integrity across all tables (`trip -> route/service`, `connection -> stops/trip`).
-- [ ] Emit per-region QA summary: stop count, attached-stop %, connection count, service-day coverage, dropped-record reasons.
+- [ ] Validate schedule monotonicity (`arrival/departure` non-decreasing along each trip) — not explicitly validated; malformed source rows would surface as CSA scan anomalies rather than a build-time check.
+- [x] Validate spatial linkage — stop attachment respects a 300m radius cutoff, with dropped-stop count logged (`dropped_stop_count` in `graph-binary-summary.json`'s `transit` block).
+- [ ] Validate referential integrity across all tables (`trip -> route/service`, `connection -> stops/trip`) — not done as a standalone gate; would fail loudly downstream instead.
+- [x] Emit per-region QA summary — `graph-binary-summary.json`'s `transit` block reports `parsed_stop_count`, `attached_stop_count`, `dropped_stop_count`, `total_stop_count_in_feed`, `raw_connection_count`, `date_range`, `final_stop_count`, `final_connection_count` (Berlin: 7,670 of 10,688 in-extent stops attached, 42,078 in the full feed, 1,892,441 final connections spanning every weekday-recurring service in the feed's 2026-08-04–2026-12-12 calendar window).
 
 ---
 
@@ -838,10 +893,10 @@ Tasks
 Estimated time: 2 hours
 
 Tasks
-- [ ] Generate CSA-ready `connections` sorted by departure time, with packed columns tuned for sequential scan.
-- [ ] Materialize transfer edges/penalties for stop-to-stop interchange and stop-to-walk-node transfers.
-- [ ] Build service-day indexing (day masks and date exceptions) for fast query-time filtering.
-- [ ] Export deterministic binary transit tables and wire into graph header flags/versioning.
+- [x] Generate CSA-ready `connections` sorted by departure time — a build-time invariant relied on by `runConnectionScanFromWalkingReachableStops`'s early-exit scan.
+- [ ] Materialize transfer edges/penalties for stop-to-stop interchange and stop-to-walk-node transfers — stop-to-walk-node attach cost exists (straight-line distance / walking speed), but there's no dedicated stop-to-stop interchange/transfer-penalty model; CSA implicitly "transfers" by walking back onto the road graph between transit legs.
+- [x] Build service-day indexing (day masks) for fast query-time filtering — the build includes every weekday-recurring service across the feed's whole calendar window (not just one day), and `runConnectionScanFromWalkingReachableStops` in `web/src/app.js` filters each connection's `service_day_mask` against the query date's ISO weekday bit. `calendar_dates.txt` single-date exceptions (e.g. holiday schedules) are still out of scope — they can't be expressed as a weekly bitmask and would need a per-date table instead.
+- [x] Export deterministic binary transit tables and wire into graph header flags/versioning — `n_stops`/`n_tedges`/`stop_table_offset` header fields, `flags` bit 0 (`has_transit`), 24-byte stop records and 20-byte transit-edge records in `graph_binary.py`/`binary_reader.py`.
 
 ---
 
@@ -849,10 +904,10 @@ Tasks
 Estimated time: 2 hours
 
 Tasks
-- [ ] Load transit tables in JS alongside existing road graph tables.
-- [ ] Implement CSA pass using walking-reachable stops as seeds, then merge back into road Dijkstra via multi-source seeding.
-- [ ] Add query controls for departure time/day and transit enable/disable.
-- [ ] Handle missing transit tables gracefully (road-only fallback without console noise).
+- [x] Load transit tables in JS alongside existing road graph tables — `parseGraphBinary` parses stop/transit-edge tables into typed-array views, gated on `graph.header.nStops > 0` (zero-cost for every non-Berlin region).
+- [x] Implement CSA pass using walking-reachable stops as seeds, then merge back into road Dijkstra via multi-source seeding — `runConnectionScanFromWalkingReachableStops` (pass 1 → CSA scan) feeds a new WASM `compute_travel_time_field_multi_source` export (pass 2, origin + transit-improved stops as seeds) in `runWalkingIsochroneFromSourceNode`.
+- [x] Add query controls for departure time/day and transit enable/disable — a single `#departure-datetime` (`type="datetime-local"`) input constrained to the feed's actual calendar window, and a `Public transit` checkbox grouped alongside Walk/Bike/Car/Ferry in the "Transport modes" checkbox group (not a separate control), wired via `getTransitOptionsFromShell`/`updateTransitControlAvailability`.
+- [x] Handle missing transit tables gracefully (road-only fallback without console noise) — `nStops === 0` (every non-Berlin region today) short-circuits to the unchanged single-pass walk/bike/car/ferry behavior, and the transit checkbox is hidden rather than shown-and-inert.
 
 ---
 
@@ -860,9 +915,9 @@ Tasks
 Estimated time: 1 hour
 
 Tasks
-- [ ] Document repeatable onboarding steps for a new region: discover feed, validate licence, run adapters, run QA, export artifacts.
-- [ ] Add one non-Berlin fixture dataset in tests to ensure region-agnostic behavior.
-- [ ] Add per-region attribution templating so required legal text is emitted in UI/export outputs.
+- [ ] Document repeatable onboarding steps for a new region: discover feed, validate licence, run adapters, run QA, export artifacts — not written up; today onboarding a second region means adding a `transitFeed` block to `regions.json` and rerunning `fetch|build --components graph,transit` by reading the code, not a doc.
+- [x] Add one non-Berlin fixture dataset in tests to ensure region-agnostic behavior — `data_pipeline/tests/test_gtfs_transit.py` builds a small synthetic GTFS fixture (`_write_gtfs_fixture`) covering a normal day, a past-midnight trip, an out-of-extent stop, and a `calendar_dates.txt` exception; none of the pipeline unit tests depend on the real Berlin feed.
+- [x] Add per-region attribution templating so required legal text is emitted in UI/export outputs — `#routing-disclaimer-transit` (VBB/CC BY line) is shown/hidden by `updateTransitControlAvailability` alongside the transit checkbox (`graph.header.nStops > 0`), and the SVG export's `copyrightNotice` reads both disclaimer elements' live text, combining them into one line only when the transit line isn't hidden.
 
 ---
 
@@ -910,6 +965,7 @@ Tasks
 - [x] Write last selected start node ID to URL query parameters (`node=<graphNodeId>`) after successful routing
 - [x] On page load, read `node` from URL and restore that start node if valid for current graph
 - [x] Keep URL updates deterministic and bookmark/share safe (`history.replaceState`, preserve other params/hash)
+- [x] Extend the same pattern to transport modes (`modes=`), colour cycle (`cycle=`), departure date+time (`departure=`), and walk/bike speed (`walkKph=`/`bikeKph=`) — `web/src/core/coords.js`'s `parse*FromLocationSearch`/`persist*ToLocation` pairs, applied on init and on each control's `change` event in `web/src/ui/orchestration.js`.
 
 ## 12.6 Add map zoom and pan controls
 Estimated time: 4 hours
@@ -969,6 +1025,27 @@ Tasks
 - [ ] Add manual verification checklist for desktop mouse, desktop trackpad, iPad touch, and mobile Safari/Chrome.
 - [ ] Decide whether camera state should also become URL-shareable (`x`, `y`, `z`) after the interaction model is stable; do not bundle that into the first implementation step.
 
+## 12.7 Configurable walk/bike speeds
+*Not in the original plan — added from user feedback ("we should probably also add walking/cycling speed options").*
+Estimated time: 2 hours
+
+Tasks
+- [x] Add walk-speed/bike-speed (km/h) inputs in a collapsed `<details>` sub-section of the options panel, since they're rarely changed — `#speed-settings` in `web/index.html`.
+- [x] Thread the configured speeds through both routing kernels — new `walking_speed_m_s`/`bike_cruise_speed_kph` params on the Rust `precompute_edge_costs` export (`wasm/routing-kernel/src/lib.rs`) and the JS reference implementation (`computeEdgeTraversalCostSeconds` in `web/src/core/routing.js`); the walk-mode cost is rescaled by the user's speed relative to the graph's build-time `WALKING_SPEED_M_S` (the speed the data pipeline assumed when it baked `walking_cost_seconds` from real edge geometry), not the other way round — only the walk/bike cost derivations change, ferry/car costs are unaffected.
+- [x] Key the per-mode edge-cost cache on `(allowedModeMask, walkingSpeedMps, bikeCruiseSpeedKph)`, not just the mode mask, so a speed change can't silently reuse a stale precomputed cost array for the same mode.
+- [x] Apply the configured walk speed to the CSA walk-attach-cost estimate too (`runConnectionScanFromWalkingReachableStops` in `web/src/app.js`), for consistency between the routing kernel and the transit-stop-attachment estimate.
+- [x] Persist both values to the URL (see 12.5).
+
+## 12.8 Single departure date+time control, and Public transit grouped with Transport modes
+*Not in the original plan — added from user feedback questioning the departure-time UX and asking "is transit as much a movement mode as ferries?".*
+Estimated time: 1.5 hours
+
+Tasks
+- [x] Merge the separate departure-date and departure-time inputs into one `<input type="datetime-local">` (`#departure-datetime`) — the date input previously had no `change` listener at all, so changing the date silently left the isochrone stale; a single input with one listener fixes that structurally rather than by remembering to wire a second listener.
+- [x] Default the input to "now" clamped into the feed's calendar window, but preserve an existing value (e.g. restored from the URL) when it's already in range.
+- [x] Convert "Transport modes" from a `<select multiple>` to a checkbox fieldset (Walk/Bike/Car/Ferry), and fold the previously-separate "Public transit" checkbox into the same group as a peer, since a normal user has no reason to think of transit as different in kind from the others.
+- [x] Keep Public transit's checked state out of the routing `allowedModeMask` computation (it's a boolean CSA-augmentation flag, not an edge-mode bit) while still including it in the shared URL-persisted checkbox-group state (see 12.5) — `getAllowedModeMaskFromShell`'s mask loop and "nothing selected" fallback in `web/src/ui/orchestration.js` explicitly filter it out.
+
 ---
 
 # Architectural Notes
@@ -977,7 +1054,7 @@ Tasks
 Web Workers are **not planned** at any phase. The routing loop is time-sliced via `requestAnimationFrame` (Phase 7.2), which gives adequate UI responsiveness without the complexity of cross-thread `ArrayBuffer` transfer, Worker lifecycle management, or the risk of needing `SharedArrayBuffer` (which requires specific COOP/COEP HTTP headers). If profiling after Phase 8 reveals that even 8 ms slices cause dropped frames (unlikely on a modern device for a 30-min isochrone), a Worker can be added then — but there is no basis for scheduling that work now.
 
 ## On future region support
-The pipeline is parameterised from Phase 3.2 onward: `--epsg`, `--input`, `--output` flags on all pipeline scripts. The binary header stores the EPSG code so the JS client knows which projection was used. To build a graph for any other city, the operator provides an Overpass query (or equivalent OSM JSON extract) and optionally a transit feed (GTFS static/GTFS-RT first, with NeTEx/SIRI adapters planned in Phase 11), then runs the pipeline. No code changes are needed for regions using any UTM zone or national grid projection supported by `pyproj`.
+The pipeline is parameterised from Phase 3.2 onward: `--epsg`, `--input`, `--output` flags on all pipeline scripts. The binary header stores the EPSG code so the JS client knows which projection was used. As of Phase 10.6, the actual way to add a region is `data_pipeline/regions.json` (one entry: relation selector, EPSG, admin level) plus `./data_pipeline/region-data.py fetch|build --only <id>` — see `docs/region-data-pipeline.md` for the full onboarding walkthrough. Optionally add a transit feed (GTFS static/GTFS-RT first, with NeTEx/SIRI adapters planned in Phase 11). No code changes are needed for regions using any UTM zone or national grid projection supported by `pyproj`.
 
 ---
 
@@ -998,11 +1075,14 @@ The pipeline is parameterised from Phase 3.2 onward: `--epsg`, `--input`, `--out
 
 **MVP total: ~21 hours for a junior developer**
 
-Post-MVP adds approximately **26–28 hours** of development:
-- [ ] Phase 10.4 (multimodal road schema + extraction): ~4.5 hours
-- [ ] Phase 10.6 (multi-location OSM fetch generalization): ~3.75 hours
-- [ ] Phase 11 (global public transit pipeline): ~12.25 hours
-- [ ] Phase 12 (UX and sharing enhancements): ~9.5 hours
+Post-MVP adds approximately **36–40 hours** of development:
+- [x] Phase 10.4 (multimodal road schema + extraction): ~4.5 hours
+- [x] Phase 10.5 (routing hot-path performance follow-ups): ~2.5 hours (10.5.1 parallel SSSP sub-item still not implemented)
+- [x] Phase 10.6 (multi-location OSM fetch generalization): ~3.75 hours (shipped as `regions.json` + `region-data.py`, different file layout than originally planned — see 10.6 note)
+- [x] Phase 10.7 (basemap context layers: coastal water, forest, inland water, waterways, airports): ~6 hours — not in the original plan, added from user feedback
+- [x] Phase 10.8 (water/ferry transport mode, incl. the grid-budget ferry filter and boundary-fit viewport): ~4 hours — not in the original plan, added from user feedback
+- [x] Phase 11 (global public transit pipeline): ~12.25 hours (11.2.1/11.5/11.6 done for a Berlin-only GTFS-static pilot; 11.1/11.2.2/11.2.3/11.7 and full canonical-model/QA-gate fidelity in 11.3/11.4 stay deferred — see per-section notes)
+- [ ] Phase 12 (UX and sharing enhancements): ~13 hours (12.1/12.2/12.3/12.5/12.7/12.8 done; 12.4 and most of 12.6 still open)
 - [ ] Plus variable time to obtain/validate feed licences and feed-specific integration constraints.
 
 ---
@@ -1013,7 +1093,7 @@ Post-MVP adds approximately **26–28 hours** of development:
 - `berlin_graph.bin.gz` — compressed walking-only binary graph
 - `/data_pipeline/input/berlin-routing.osm.json` — Overpass JSON extract for Berlin routing build
 - `/data_pipeline/output/berlin-district-boundaries-canvas.json` — simplified boundary basemap JSON
-- `/docs/berlin_district_boundaries_query.ql` — Overpass query for Berlin district boundaries
+- `/docs/berlin_district_boundaries_query.ql` — Overpass query for Berlin district boundaries (superseded by the generalized `docs/overpass_boundary_query.sh` in Phase 10.6)
 - `/web/index.html`
 - `/web/src/app.js` — vanilla JS module entrypoint
 - `/data_pipeline/` — Python pipeline scripts
@@ -1021,16 +1101,22 @@ Post-MVP adds approximately **26–28 hours** of development:
 ## Post-MVP additions
 - `berlin_graph.bin.gz` schema v2 with per-edge mode mask + speed metadata (bike/car/walk support)
 - Pipeline summaries for speed/access coverage and mode-specific edge counts
-- Location manifest registry (`data_pipeline/locations/*.json`) and rendered per-location Overpass queries
-- Per-location OSM input/output layout (`data_pipeline/input/<slug>/...`, `data_pipeline/output/<slug>/...`)
+- Region registry (`data_pipeline/regions.json`, one array, not per-file manifests) and `region-data.py` CLI (`fetch`/`build`/`all`) that renders location-agnostic Overpass queries per region
+- Per-region OSM input/output layout: `data_pipeline/input/<id>-routing.osm.json` / `<id>-district-boundaries.osm.json`, `data_pipeline/output/<id>-graph.bin(.gz)` / `<id>-district-boundaries-canvas.json` (flat, slug-prefixed — not the nested `<slug>/...` directories originally planned); Berlin keeps its legacy `graph-walk.bin(.gz)` filenames as a compatibility alias
+- Optional coastal sea-water context (`--include-coast`, opt-in per region because of a ~900 MB external download, cached locally after first use)
+- Always-on forest/inland-water/waterway/airport basemap context for every region, including multipolygon-relation support for water bodies and airports (ways-only for forest/wood)
 - Canonical transit snapshots (`stops/routes/trips/connections/services/transfers`) independent of source format
 - Transit-enabled graph export with populated stop/connection tables
 - CSA runtime module and source-adapter pipeline (`GTFS`, `GTFS-RT`, `NeTEx`, `SIRI` scaffold)
+- Ferry/water routing: a fourth `Water` edge mode mask bit through the full pipeline (extraction, adjacency, WASM/JS routing kernels), grid-size-budgeted ferry inclusion, and a boundary-fit default viewport decoupled from the full (ferry-widened) routing grid
+- User-configurable walk/bike speeds (collapsed sub-menu), a single departure date+time control, and Public transit grouped as a checkbox alongside Walk/Bike/Car/Ferry — all persisted to the URL alongside the pre-existing `node`/`modes`/`cycle` params
 
 ---
 
 ## Note On Public Polygons
 Public polygons (parks, greens, woods, recreation areas) are useful for context and optional future area-aware routing, but movement inside them is neither always free nor always represented by dense internal paths. Densely wooded and otherwise inaccessible sub-areas exist; in other cases only sparse walkable tracks are mapped. The routing model must therefore treat polygon-level walkability as conditional and constrained, not uniformly traversable.
+
+*Realized (partially) in Phase 10.7:* forest and airport polygons are now rendered as basemap context (see 10.7.2). This is rendering-only — the caveat above still holds in full: neither forest interiors nor airport grounds ("mostly, but not entirely, non-reachable") feed into the routing graph or edge costs in any way.
 
 ---
 

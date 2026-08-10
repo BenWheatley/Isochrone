@@ -64,6 +64,14 @@ def parse_exported_string_constants(js_source: str) -> dict[str, str]:
     return {match.group("name"): match.group("value") for match in matches}
 
 
+def parse_exported_numeric_constants(js_source: str) -> dict[str, float]:
+    matches = re.finditer(
+        r"export const (?P<name>[A-Z0-9_]+)\s*=\s*(?P<value>-?\d+(?:\.\d+)?);",
+        js_source,
+    )
+    return {match.group("name"): float(match.group("value")) for match in matches}
+
+
 def parse_markdown_links(markdown_text: str) -> dict[str, str]:
     matches = re.finditer(r"\[(?P<label>[^\]]+)\]\((?P<target>[^)]+)\)", markdown_text)
     return {match.group("label"): match.group("target") for match in matches}
@@ -94,11 +102,14 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
         "location-select",
         "controls-menu",
         "controls-menu-summary",
-        "theme-select",
+        "theme-radio-group",
         "invert-pointer-buttons",
-        "mode-select",
+        "mode-checkbox-group",
         "colour-cycle-minutes",
-        "departure-time",
+        "walk-speed-kph",
+        "bike-speed-kph",
+        "transit-walk-budget-minutes",
+        "departure-datetime",
         "export-svg-button",
         "isochrone-legend",
         "distance-scale",
@@ -128,10 +139,8 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
 
     assert parsed.elements_by_id["location-select"].tag == "select"
     assert parsed.elements_by_id["location-select"].attrs["name"] == "location-select"
-    assert parsed.elements_by_id["theme-select"].tag == "select"
-    assert parsed.elements_by_id["mode-select"].tag == "select"
-    assert parsed.elements_by_id["mode-select"].attrs["multiple"] == ""
-    assert parsed.elements_by_id["mode-select"].attrs["size"] == "3"
+    assert parsed.elements_by_id["theme-radio-group"].tag == "div"
+    assert parsed.elements_by_id["mode-checkbox-group"].tag == "fieldset"
     assert parsed.elements_by_id["invert-pointer-buttons"].tag == "input"
     assert parsed.elements_by_id["invert-pointer-buttons"].attrs["type"] == "checkbox"
 
@@ -142,11 +151,33 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
     assert colour_cycle_input.attrs["step"] == "5"
     assert colour_cycle_input.attrs["value"] == "75"
 
-    departure_time_input = parsed.elements_by_id["departure-time"]
-    assert departure_time_input.tag == "input"
-    assert departure_time_input.attrs["type"] == "time"
-    assert departure_time_input.attrs["value"] == "08:00"
-    assert departure_time_input.attrs["step"] == "60"
+    departure_datetime_input = parsed.elements_by_id["departure-datetime"]
+    assert departure_datetime_input.tag == "input"
+    assert departure_datetime_input.attrs["type"] == "datetime-local"
+    assert departure_datetime_input.attrs["step"] == "60"
+
+    # The speed inputs' HTML defaults must agree with the JS constants, or a
+    # fresh page shows one speed while routing uses another.
+    constants_js = (WEB_ROOT / "src" / "config" / "constants.js").read_text(encoding="utf-8")
+    numeric_constants = parse_exported_numeric_constants(constants_js)
+
+    walk_speed_input = parsed.elements_by_id["walk-speed-kph"]
+    assert walk_speed_input.tag == "input"
+    assert walk_speed_input.attrs["type"] == "number"
+    assert float(walk_speed_input.attrs["value"]) == numeric_constants["DEFAULT_WALK_SPEED_KPH"]
+
+    bike_speed_input = parsed.elements_by_id["bike-speed-kph"]
+    assert bike_speed_input.tag == "input"
+    assert bike_speed_input.attrs["type"] == "number"
+    assert float(bike_speed_input.attrs["value"]) == numeric_constants["BIKE_CRUISE_SPEED_KPH"]
+
+    walk_budget_input = parsed.elements_by_id["transit-walk-budget-minutes"]
+    assert walk_budget_input.tag == "input"
+    assert walk_budget_input.attrs["type"] == "number"
+    assert (
+        float(walk_budget_input.attrs["value"])
+        == numeric_constants["DEFAULT_TRANSIT_WALK_BUDGET_MINUTES"]
+    )
 
     export_button = parsed.elements_by_id["export-svg-button"]
     assert export_button.tag == "button"

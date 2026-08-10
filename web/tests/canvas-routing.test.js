@@ -177,6 +177,51 @@ test('requestIsochroneRedraw reruns from the last completed node', async () => {
   assert.equal(runCount, 2);
 });
 
+test('runFromCanvasPixel forwards getTransitOptionsFromShell result into routing options', async () => {
+  const { shell } = createCanvasFixture();
+  const mapData = {
+    graph: {
+      header: {
+        nNodes: 16,
+      },
+    },
+  };
+
+  let capturedOptions = null;
+  const binding = bindCanvasClickRouting(shell, mapData, {}, {
+    findNearestNodeForCanvasPixel() {
+      return { nodeIndex: 7 };
+    },
+    getAllowedModeMaskFromShell() {
+      return 4;
+    },
+    getColourCycleMinutesFromShell() {
+      return 75;
+    },
+    getTransitOptionsFromShell() {
+      return { transitEnabled: true, departureSecondsOfDay: 30_600 };
+    },
+    mapClientPointToCanvasPixel() {
+      return { xPx: 10, yPx: 12 };
+    },
+    parseNodeIndexFromLocationSearch() {
+      return null;
+    },
+    persistNodeIndexToLocation() {},
+    renderIsochroneLegendIfNeeded() {},
+    async runWalkingIsochroneFromSourceNode(_shell, _mapData, _nodeIndex, _timeLimit, options) {
+      capturedOptions = options;
+      return { cancelled: false };
+    },
+    setRoutingStatus() {},
+  });
+
+  await binding.runFromCanvasPixel(10, 12);
+
+  assert.equal(capturedOptions.transitEnabled, true);
+  assert.equal(capturedOptions.departureSecondsOfDay, 30_600);
+});
+
 test('waitForIdle resolves after active routing run completes', async () => {
   const { shell } = createCanvasFixture();
   const mapData = {
@@ -570,4 +615,193 @@ test('invert pointer buttons swaps navigation and selection drag roles', async (
   ]);
   assert.notDeepEqual(binding.getViewportState(), viewportBeforePan);
   assert.equal(redrawViewportCount, 2);
+});
+
+test('single-touch tap selects origin without panning', async () => {
+  const { shell } = createCanvasFixture();
+  const mapData = {
+    graph: {
+      header: {
+        nNodes: 512,
+        gridWidthPx: 400,
+        gridHeightPx: 300,
+      },
+    },
+  };
+
+  const routedNodeIndices = [];
+  let redrawViewportCount = 0;
+  const binding = bindCanvasClickRouting(shell, mapData, {}, {
+    findNearestNodeForCanvasPixel(_mapData, xPx) {
+      return { nodeIndex: Math.round(xPx) };
+    },
+    getAllowedModeMaskFromShell() {
+      return 4;
+    },
+    getColourCycleMinutesFromShell() {
+      return 75;
+    },
+    mapClientPointToCanvasPixel(_canvas, clientX, clientY) {
+      return { xPx: Math.round(clientX), yPx: Math.round(clientY) };
+    },
+    parseNodeIndexFromLocationSearch() {
+      return null;
+    },
+    persistNodeIndexToLocation() {},
+    renderIsochroneLegendIfNeeded() {},
+    async runWalkingIsochroneFromSourceNode(_shell, _mapData, nodeIndex) {
+      routedNodeIndices.push(nodeIndex);
+      return { cancelled: false };
+    },
+    setRoutingStatus() {},
+    updateDistanceScaleBar() {},
+    redrawViewport() {
+      redrawViewportCount += 1;
+    },
+  });
+
+  const viewportBefore = binding.getViewportState();
+  shell.isochroneCanvas.emit('pointerdown', {
+    button: 0,
+    buttons: 1,
+    clientX: 180,
+    clientY: 140,
+    pointerId: 20,
+    pointerType: 'touch',
+  });
+  shell.isochroneCanvas.emit('pointerup', {
+    button: 0,
+    buttons: 0,
+    clientX: 180,
+    clientY: 140,
+    pointerId: 20,
+    pointerType: 'touch',
+  });
+  await flushTasks();
+
+  assert.deepEqual(routedNodeIndices, [180]);
+  assert.deepEqual(binding.getViewportState(), viewportBefore);
+  assert.equal(redrawViewportCount, 0);
+});
+
+test('two-finger touch pinch zooms and two-finger drag pans without rerouting', async () => {
+  const { shell } = createCanvasFixture();
+  const mapData = {
+    graph: {
+      header: {
+        nNodes: 512,
+        gridWidthPx: 400,
+        gridHeightPx: 300,
+      },
+    },
+  };
+
+  const routedNodeIndices = [];
+  let scaleBarUpdateCount = 0;
+  let redrawViewportCount = 0;
+  const binding = bindCanvasClickRouting(shell, mapData, {}, {
+    findNearestNodeForCanvasPixel(_mapData, xPx) {
+      return { nodeIndex: Math.round(xPx) };
+    },
+    getAllowedModeMaskFromShell() {
+      return 4;
+    },
+    getColourCycleMinutesFromShell() {
+      return 75;
+    },
+    mapClientPointToCanvasPixel(_canvas, clientX, clientY) {
+      return { xPx: Math.round(clientX), yPx: Math.round(clientY) };
+    },
+    parseNodeIndexFromLocationSearch() {
+      return null;
+    },
+    persistNodeIndexToLocation() {},
+    renderIsochroneLegendIfNeeded() {},
+    async runWalkingIsochroneFromSourceNode(_shell, _mapData, nodeIndex) {
+      routedNodeIndices.push(nodeIndex);
+      return { cancelled: false };
+    },
+    setRoutingStatus() {},
+    updateDistanceScaleBar() {
+      scaleBarUpdateCount += 1;
+    },
+    redrawViewport() {
+      redrawViewportCount += 1;
+    },
+  });
+
+  shell.isochroneCanvas.emit('pointerdown', {
+    button: 0,
+    buttons: 1,
+    clientX: 170,
+    clientY: 150,
+    pointerId: 30,
+    pointerType: 'touch',
+  });
+  shell.isochroneCanvas.emit('pointerdown', {
+    button: 0,
+    buttons: 1,
+    clientX: 230,
+    clientY: 150,
+    pointerId: 31,
+    pointerType: 'touch',
+  });
+
+  shell.isochroneCanvas.emit('pointermove', {
+    buttons: 1,
+    clientX: 150,
+    clientY: 150,
+    pointerId: 30,
+    pointerType: 'touch',
+  });
+  shell.isochroneCanvas.emit('pointermove', {
+    buttons: 1,
+    clientX: 250,
+    clientY: 150,
+    pointerId: 31,
+    pointerType: 'touch',
+  });
+
+  const viewportAfterPinch = binding.getViewportState();
+  assert.ok(viewportAfterPinch.scale > 1);
+  assert.equal(scaleBarUpdateCount >= 1, true);
+
+  const viewportBeforePan = binding.getViewportState();
+  shell.isochroneCanvas.emit('pointermove', {
+    buttons: 1,
+    clientX: 170,
+    clientY: 170,
+    pointerId: 30,
+    pointerType: 'touch',
+  });
+  shell.isochroneCanvas.emit('pointermove', {
+    buttons: 1,
+    clientX: 270,
+    clientY: 170,
+    pointerId: 31,
+    pointerType: 'touch',
+  });
+  const viewportAfterPan = binding.getViewportState();
+
+  shell.isochroneCanvas.emit('pointerup', {
+    button: 0,
+    buttons: 0,
+    clientX: 170,
+    clientY: 170,
+    pointerId: 30,
+    pointerType: 'touch',
+  });
+  shell.isochroneCanvas.emit('pointerup', {
+    button: 0,
+    buttons: 0,
+    clientX: 270,
+    clientY: 170,
+    pointerId: 31,
+    pointerType: 'touch',
+  });
+  await flushTasks();
+
+  assert.deepEqual(routedNodeIndices, []);
+  assert.notDeepEqual(viewportAfterPan, viewportBeforePan);
+  assert.equal(redrawViewportCount >= 2, true);
 });

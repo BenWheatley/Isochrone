@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Isochrone</title>
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
@@ -31,12 +32,104 @@
             <span data-i18n="body.options">Options</span>
           </summary>
           <div class="controls-menu-panel">
+            <fieldset class="mode-icon-group" id="mode-checkbox-group">
+              <legend class="control-title" data-i18n="body.options.mode">Transport modes</legend>
+              <div class="mode-icon-row">
+                <label class="mode-icon-option">
+                  <input class="mode-checkbox" type="checkbox" name="mode" value="walk" />
+                  <span class="mode-icon material-symbols-outlined" aria-hidden="true">directions_walk</span>
+                  <span class="sr-only" data-i18n="body.options.mode.walk">Walk</span>
+                </label>
+                <label class="mode-icon-option">
+                  <input class="mode-checkbox" type="checkbox" name="mode" value="bike" />
+                  <span class="mode-icon material-symbols-outlined" aria-hidden="true">directions_bike</span>
+                  <span class="sr-only" data-i18n="body.options.mode.bike">Bike</span>
+                </label>
+                <label class="mode-icon-option">
+                  <input class="mode-checkbox" type="checkbox" name="mode" value="car" checked />
+                  <span class="mode-icon material-symbols-outlined" aria-hidden="true">directions_car</span>
+                  <span class="sr-only" data-i18n="body.options.mode.car">Car</span>
+                </label>
+                <label class="mode-icon-option">
+                  <input class="mode-checkbox" type="checkbox" name="mode" value="water" />
+                  <span class="mode-icon material-symbols-outlined" aria-hidden="true">directions_boat</span>
+                  <span class="sr-only" data-i18n="body.options.mode.water">Ferry</span>
+                </label>
+                <label class="mode-icon-option" id="transit-enabled-row" hidden>
+                  <input class="mode-checkbox" id="transit-enabled" name="transit-enabled" type="checkbox" value="transit" />
+                  <span class="mode-icon material-symbols-outlined" aria-hidden="true">directions_bus</span>
+                  <span class="sr-only" data-i18n="body.options.transit">Public transit</span>
+                </label>
+              </div>
+            </fieldset>
+            <div class="control-row" id="departure-datetime-row" hidden>
+              <label for="departure-datetime" data-i18n="body.options.departureDatetime">
+                Departure date &amp; time
+              </label>
+              <input id="departure-datetime" name="departure-datetime" type="datetime-local" step="60" />
+            </div>
+            <hr class="control-divider" />
+            <div class="control-row control-row-speeds">
+              <label for="walk-speed-kph" data-i18n="body.options.walkSpeed">Walking speed</label>
+              <input id="walk-speed-kph" name="walk-speed-kph" type="number" min="1" step="0.1" value="4" />
+              <label for="bike-speed-kph" data-i18n="body.options.bikeSpeed">Cycling speed</label>
+              <input id="bike-speed-kph" name="bike-speed-kph" type="number" min="1" step="0.5" value="18" />
+              <span class="control-unit" id="speed-unit-label">km/h</span>
+            </div>
+            <div class="control-row" id="transit-walk-budget-row" hidden>
+              <label for="transit-walk-budget-minutes" data-i18n="body.options.transitWalkBudget">
+                Most walking per transit leg
+              </label>
+              <span class="control-row-value">
+                <input
+                  id="transit-walk-budget-minutes"
+                  name="transit-walk-budget-minutes"
+                  type="number"
+                  min="0"
+                  max="60"
+                  step="1"
+                  value="5"
+                />
+                <span class="control-unit" data-i18n="body.options.minutesUnit">min</span>
+              </span>
+            </div>
             <div class="control-row">
-              <label for="theme-select" data-i18n="body.options.theme">Theme</label>
-              <select id="theme-select" name="theme-select">
-                <option value="light" selected data-i18n="body.options.theme.light">Light</option>
-                <option value="dark" data-i18n="body.options.theme.dark">Dark</option>
-              </select>
+              <label for="colour-cycle-minutes" data-i18n="body.options.colourCycle">
+                Colour repeating period (minutes)
+              </label>
+              <input
+                id="colour-cycle-minutes"
+                name="colour-cycle-minutes"
+                type="number"
+                min="5"
+                step="5"
+                value="75"
+              />
+            </div>
+            <hr class="control-divider" />
+            <div class="control-row control-row-radio-group" id="theme-radio-group">
+              <label class="radio-option">
+                <input type="radio" name="theme" value="auto" checked />
+                <span data-i18n="body.options.theme.auto">Auto</span>
+              </label>
+              <label class="radio-option">
+                <input type="radio" name="theme" value="light" />
+                <span data-i18n="body.options.theme.light">Light mode</span>
+              </label>
+              <label class="radio-option">
+                <input type="radio" name="theme" value="dark" />
+                <span data-i18n="body.options.theme.dark">Dark mode</span>
+              </label>
+            </div>
+            <div class="control-row control-row-radio-group" id="unit-system-radio-group">
+              <label class="radio-option">
+                <input type="radio" name="unit-system" value="metric" checked />
+                <span data-i18n="body.options.units.metric">Metric</span>
+              </label>
+              <label class="radio-option">
+                <input type="radio" name="unit-system" value="imperial" />
+                <span data-i18n="body.options.units.imperial">Imperial</span>
+              </label>
             </div>
             <div class="control-row control-row-checkbox">
               <label for="invert-pointer-buttons" data-i18n="body.options.invertPointerButtons">
@@ -48,34 +141,13 @@
                 type="checkbox"
               />
             </div>
-            <div class="control-row">
-              <label for="mode-select" data-i18n="body.options.mode">Transport modes</label>
-              <select id="mode-select" name="mode-select" multiple size="3">
-                <option value="walk" data-i18n="body.options.mode.walk">Walk</option>
-                <option value="bike" data-i18n="body.options.mode.bike">Bike</option>
-                <option value="car" selected data-i18n="body.options.mode.car">Car</option>
-              </select>
-            </div>
-            <div class="control-row">
-              <label for="colour-cycle-minutes" data-i18n="body.options.colourCycle">
-                Colour cycle (min)
-              </label>
-              <input
-                id="colour-cycle-minutes"
-                name="colour-cycle-minutes"
-                type="number"
-                min="5"
-                step="5"
-                value="75"
-              />
-            </div>
-            <div class="control-row">
-              <label for="departure-time" data-i18n="body.options.departureTime">Departure time</label>
-              <input id="departure-time" name="departure-time" type="time" value="08:00" step="60" />
-            </div>
-            <div class="control-row">
+            <hr class="control-divider" />
+            <div class="control-row control-row-actions">
               <button id="export-svg-button" type="button" disabled data-i18n="body.options.exportSvg">
                 Export SVG
+              </button>
+              <button id="print-button" type="button" disabled data-i18n="body.options.print">
+                Print
               </button>
             </div>
           </div>
@@ -123,18 +195,35 @@
           Renderer: Detecting...
         </div>
         <div id="routing-disclaimer">
-          <span data-i18n="body.disclaimer">
-            Note: OSM data can include isolated disconnected route segments. Map data © OpenStreetMap
-            contributors, available under the Open Database License (ODbL):
+          <span id="routing-disclaimer-osm">
+            <span data-i18n="body.disclaimer">
+              Note: OSM data can include isolated disconnected route segments. Map data © OpenStreetMap
+              contributors, available under the Open Database License (ODbL):
+            </span>
+            <a
+              href="https://www.openstreetmap.org/copyright"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-i18n="body.disclaimer.link"
+            >
+              https://www.openstreetmap.org/copyright
+            </a>
           </span>
-          <a
-            href="https://www.openstreetmap.org/copyright"
-            target="_blank"
-            rel="noopener noreferrer"
-            data-i18n="body.disclaimer.link"
-          >
-            https://www.openstreetmap.org/copyright
-          </a>
+          <span id="routing-disclaimer-transit" hidden>
+            ;
+            <span data-i18n="body.disclaimer.transit">
+              Public transit data © VBB (Verkehrsverbund Berlin-Brandenburg), available under the
+              Creative Commons Attribution 4.0 licence (CC BY 4.0):
+            </span>
+            <a
+              href="http://www.vbb.de/vbbgtfs"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-i18n="body.disclaimer.transit.link"
+            >
+              http://www.vbb.de/vbbgtfs
+            </a>
+          </span>
         </div>
       </footer>
     </main>

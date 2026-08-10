@@ -22,6 +22,26 @@ function normalizeLocaleKey(locale) {
   return locale.trim().replace('_', '-').toLowerCase();
 }
 
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function normalizeIsoDateRange(value, fieldName) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an object when provided`);
+  }
+  const min = normalizeNonEmptyString(value.min, `${fieldName}.min`);
+  const max = normalizeNonEmptyString(value.max, `${fieldName}.max`);
+  if (!ISO_DATE_PATTERN.test(min) || !ISO_DATE_PATTERN.test(max)) {
+    throw new Error(`${fieldName}.min and ${fieldName}.max must be ISO dates (YYYY-MM-DD)`);
+  }
+  if (min > max) {
+    throw new Error(`${fieldName}.min must not be after ${fieldName}.max`);
+  }
+  return { min, max };
+}
+
 function normalizeLocalizedNames(value, fieldName) {
   if (value === undefined) {
     return undefined;
@@ -87,13 +107,20 @@ export function parseLocationRegistry(payload) {
       entry?.boundaryFileName,
       `locations[${index}].boundaryFileName`,
     );
+    const transitDateRange = normalizeIsoDateRange(
+      entry?.transitDateRange,
+      `locations[${index}].transitDateRange`,
+    );
     if (seenLocationIds.has(id)) {
       throw new Error(`duplicate location id: ${id}`);
     }
     seenLocationIds.add(id);
-    return localizedNames === undefined
-      ? { id, name, graphFileName, boundaryFileName }
-      : { id, name, localizedNames, graphFileName, boundaryFileName };
+    const base = { id, name, graphFileName, boundaryFileName };
+    return {
+      ...base,
+      ...(localizedNames === undefined ? null : { localizedNames }),
+      ...(transitDateRange === undefined ? null : { transitDateRange }),
+    };
   });
 
   normalizedLocations.sort(compareLocationEntriesAlphabetically);

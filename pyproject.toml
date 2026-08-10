@@ -12,7 +12,14 @@ dependencies = [
   "numpy>=2.4,<3.0",
   "osmium>=4.3,<5.0",
   "pyproj>=3.7,<4.0",
-  "requests>=2.32,<3.0",
+  # 2.34.0 is the first release shipping a py.typed marker. Below that floor
+  # mypy sees requests as untyped and the import needs a
+  # `# type: ignore[import-untyped]`; at or above it that ignore becomes an
+  # error under strict mode's warn_unused_ignores. Pinning the floor keeps
+  # water_polygons.py type-checking identically everywhere, instead of the
+  # result depending on which side of 2.34.0 pip happened to resolve.
+  "requests>=2.34,<3.0",
+  "pyshp>=2.3,<3.0",
 ]
 
 [project.optional-dependencies]

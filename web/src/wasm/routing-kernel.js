@@ -1,9 +1,12 @@
+import { BIKE_CRUISE_SPEED_KPH, WALKING_SPEED_M_S } from '../config/constants.js';
+
 const REQUIRED_EXPORTS = [
   'memory',
   'wasm_alloc',
   'wasm_dealloc',
   'precompute_edge_costs',
   'compute_travel_time_field',
+  'compute_travel_time_field_multi_source',
 ];
 const DEFAULT_WASM_URL = new URL('../../wasm/routing-kernel.wasm', import.meta.url).toString();
 
@@ -159,6 +162,8 @@ export function createWasmRoutingKernelFacade(exportsObject) {
       edgeWalkCostSecondsPtr,
       edgeCount,
       allowedModeMask,
+      walkingSpeedMps = WALKING_SPEED_M_S,
+      bikeCruiseSpeedKph = BIKE_CRUISE_SPEED_KPH,
     }) {
       exportsObject.precompute_edge_costs(
         outCostSecondsPtr,
@@ -168,6 +173,8 @@ export function createWasmRoutingKernelFacade(exportsObject) {
         edgeWalkCostSecondsPtr,
         edgeCount,
         allowedModeMask,
+        walkingSpeedMps,
+        bikeCruiseSpeedKph,
       );
     },
     precomputeEdgeCostsForGraph({
@@ -177,6 +184,8 @@ export function createWasmRoutingKernelFacade(exportsObject) {
       edgeWalkCostSeconds,
       outCostSeconds,
       allowedModeMask,
+      walkingSpeedMps = WALKING_SPEED_M_S,
+      bikeCruiseSpeedKph = BIKE_CRUISE_SPEED_KPH,
     }) {
       if (!(edgeModeMask instanceof Uint8Array)) {
         throw new Error('edgeModeMask must be a Uint8Array');
@@ -223,6 +232,8 @@ export function createWasmRoutingKernelFacade(exportsObject) {
         edgeWalkCostSecondsPtr,
         edgeCount,
         allowedModeMask,
+        walkingSpeedMps,
+        bikeCruiseSpeedKph,
       );
       copyTypedArrayFromWasm(outCostSeconds, outPtr);
     },
@@ -290,6 +301,104 @@ export function createWasmRoutingKernelFacade(exportsObject) {
         edgeCostTicksPtr,
         edgeCount,
         sourceNodeIndex,
+        normalizedTimeLimitSeconds,
+      );
+      const result = {
+        settledNodeCount: Number.isInteger(settledNodeCount) && settledNodeCount >= 0
+          ? settledNodeCount
+          : 0,
+      };
+      if (returnSharedOutputView) {
+        result.outDistSecondsView = new Float32Array(
+          exportsObject.memory.buffer,
+          outDistSecondsPtr,
+          nodeCount,
+        );
+        return result;
+      }
+      copyTypedArrayFromWasm(outDistSeconds, outDistSecondsPtr);
+      return result;
+    },
+    computeTravelTimeFieldMultiSourceForGraph({
+      nodeFirstEdgeIndex,
+      nodeEdgeCount,
+      edgeTargetNodeIndex,
+      edgeCostTicks,
+      outDistSeconds,
+      seedNodeIndices,
+      seedStartDistSeconds,
+      returnSharedOutputView = false,
+      timeLimitSeconds = Number.POSITIVE_INFINITY,
+    }) {
+      if (!(nodeFirstEdgeIndex instanceof Uint32Array)) {
+        throw new Error('nodeFirstEdgeIndex must be a Uint32Array');
+      }
+      if (!(nodeEdgeCount instanceof Uint16Array)) {
+        throw new Error('nodeEdgeCount must be a Uint16Array');
+      }
+      if (!(edgeTargetNodeIndex instanceof Uint32Array)) {
+        throw new Error('edgeTargetNodeIndex must be a Uint32Array');
+      }
+      if (!(edgeCostTicks instanceof Uint32Array)) {
+        throw new Error('edgeCostTicks must be a Uint32Array');
+      }
+      if (!(outDistSeconds instanceof Float32Array)) {
+        throw new Error('outDistSeconds must be a Float32Array');
+      }
+      if (!(seedNodeIndices instanceof Uint32Array)) {
+        throw new Error('seedNodeIndices must be a Uint32Array');
+      }
+      if (!(seedStartDistSeconds instanceof Float32Array)) {
+        throw new Error('seedStartDistSeconds must be a Float32Array');
+      }
+      if (seedNodeIndices.length !== seedStartDistSeconds.length) {
+        throw new Error('seedNodeIndices and seedStartDistSeconds must be the same length');
+      }
+      if (typeof returnSharedOutputView !== 'boolean') {
+        throw new Error('returnSharedOutputView must be a boolean');
+      }
+
+      const nodeCount = outDistSeconds.length;
+      const edgeCount = edgeTargetNodeIndex.length;
+      const seedCount = seedNodeIndices.length;
+      if (nodeFirstEdgeIndex.length < nodeCount || nodeEdgeCount.length < nodeCount) {
+        throw new Error('node arrays must each cover outDistSeconds.length');
+      }
+      if (edgeCostTicks.length < edgeCount) {
+        throw new Error('edgeCostTicks must cover edgeTargetNodeIndex.length');
+      }
+      for (const seedNodeIndex of seedNodeIndices) {
+        if (seedNodeIndex >= nodeCount) {
+          throw new Error(`seed node index out of range: ${seedNodeIndex}`);
+        }
+      }
+
+      const normalizedTimeLimitSeconds =
+        Number.isFinite(timeLimitSeconds) && timeLimitSeconds > 0
+          ? timeLimitSeconds
+          : Number.POSITIVE_INFINITY;
+
+      const outDistSecondsPtr = allocateCachedOutputBufferForTypedArray(outDistSeconds);
+      const nodeFirstEdgeIndexPtr = copyTypedArrayToCachedWasm(nodeFirstEdgeIndex);
+      const nodeEdgeCountPtr = copyTypedArrayToCachedWasm(nodeEdgeCount);
+      const edgeTargetNodeIndexPtr = copyTypedArrayToCachedWasm(edgeTargetNodeIndex);
+      const edgeCostTicksPtr = copyTypedArrayToCachedWasm(edgeCostTicks);
+      const seedNodeIndicesPtr =
+        seedCount > 0 ? copyTypedArrayToCachedWasm(seedNodeIndices) : 0;
+      const seedStartDistSecondsPtr =
+        seedCount > 0 ? copyTypedArrayToCachedWasm(seedStartDistSeconds) : 0;
+
+      const settledNodeCount = exportsObject.compute_travel_time_field_multi_source(
+        outDistSecondsPtr,
+        nodeFirstEdgeIndexPtr,
+        nodeEdgeCountPtr,
+        nodeCount,
+        edgeTargetNodeIndexPtr,
+        edgeCostTicksPtr,
+        edgeCount,
+        seedNodeIndicesPtr,
+        seedStartDistSecondsPtr,
+        seedCount,
         normalizedTimeLimitSeconds,
       );
       const result = {

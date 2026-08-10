@@ -7,6 +7,7 @@ import argparse
 from pathlib import Path
 
 from isochrone_pipeline.artifacts import write_simplified_boundary_canvas
+from isochrone_pipeline.water_polygons import DEFAULT_WATER_POLYGONS_SOURCE
 
 
 def main() -> int:
@@ -46,6 +47,33 @@ def main() -> int:
         default="9",
         help="Administrative level filter (default: 9).",
     )
+    parser.add_argument(
+        "--include-coast",
+        action="store_true",
+        help=(
+            "Also clip OSM-derived coastal water polygons to the boundary bbox "
+            "and store them in the output JSON."
+        ),
+    )
+    parser.add_argument(
+        "--coast-source",
+        type=Path,
+        default=None,
+        help=(
+            "Optional local .zip or .shp override for --include-coast. "
+            f"Defaults to {DEFAULT_WATER_POLYGONS_SOURCE}."
+        ),
+    )
+    parser.add_argument(
+        "--coast-cache-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Directory to cache the downloaded water-polygon archive in, so repeated "
+            "--include-coast builds do not re-download it. Defaults to "
+            "data_pipeline/.cache/water-polygons. Ignored when --coast-source is a local file."
+        ),
+    )
     args = parser.parse_args()
 
     output = write_simplified_boundary_canvas(
@@ -55,6 +83,9 @@ def main() -> int:
         units=args.units,
         epsg=args.epsg,
         admin_level=args.admin_level,
+        include_coast=args.include_coast,
+        coast_source=args.coast_source,
+        coast_cache_dir=args.coast_cache_dir,
     )
 
     print(f"Wrote {args.output}")
@@ -62,6 +93,8 @@ def main() -> int:
     print(f"path_count={output['stats']['path_count']}")
     print(f"input_point_count={output['stats']['input_point_count']}")
     print(f"output_point_count={output['stats']['output_point_count']}")
+    print(f"water_feature_count={output['stats']['water_feature_count']}")
+    print(f"water_path_count={output['stats']['water_path_count']}")
 
     return 0
 

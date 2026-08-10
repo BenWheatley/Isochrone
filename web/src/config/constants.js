@@ -11,14 +11,49 @@ export const GRAPH_MAGIC = 0x49534f43;
 export const HEADER_SIZE = 64;
 export const NODE_RECORD_SIZE = 16;
 export const EDGE_RECORD_SIZE = 12;
+export const STOP_RECORD_SIZE = 24;
+export const TEDGE_RECORD_SIZE = 20;
 export const BYTES_PER_MEBIBYTE = 1024 * 1024;
 export const SUPPORTED_GRAPH_VERSIONS = new Set([2]);
 export const EDGE_MODE_WALK_BIT = 1;
 export const EDGE_MODE_BIKE_BIT = 1 << 1;
 export const EDGE_MODE_CAR_BIT = 1 << 2;
+export const EDGE_MODE_WATER_BIT = 1 << 3;
+// A query-time sentinel passed as allowedModeMask when the user has
+// selected Public transit but no real road/ferry mode. It deliberately
+// matches no bit any real graph edge ever carries (edge_mode_mask is only
+// ever built from the four bits above, max value 0b1111), so every
+// road/ferry edge costs Infinity and pass 1 can't spread past the origin
+// node at all - CSA then reaches only stops within walk-attach range of
+// that single node, and transit connections carry the isochrone from
+// there. This makes "Public transit" alone route strictly via transit,
+// with no implicit walking/biking/driving through the road network.
+export const TRANSIT_ONLY_ALLOWED_MODE_MASK = 1 << 4;
+// GRAPH ENCODING CONSTANT - not a user preference, and not safe to retune.
+// data_pipeline/src/isochrone_pipeline/adjacency.py divides each edge's real
+// length by this to store walkingCostSeconds, and the runtime multiplies it
+// back out to recover the edge's physical length (see
+// core/routing.js computeEdgeTraversalCostSeconds and the matching
+// edge_cost_seconds in wasm/routing-kernel/src/lib.rs). Bike, car and ferry
+// costs are all derived from that reconstructed length, so changing this
+// without rebuilding every region's graph binary would silently distort
+// every mode's travel times.
 export const WALKING_SPEED_M_S = 1.39;
-export const BIKE_CRUISE_SPEED_KPH = 20;
+export const BIKE_CRUISE_SPEED_KPH = 18;
+// UI default for the walk-speed input. Deliberately independent of
+// WALKING_SPEED_M_S above: that one is fixed by the stored graph encoding,
+// whereas this is just the speed we assume for a person until they say
+// otherwise, and is free to change.
+export const DEFAULT_WALK_SPEED_KPH = 4;
+// How long a rider may walk on each leg of a transit journey - to the first
+// stop, between stops when changing, and away from the last one. Bounds the
+// walking that public-transit routing is allowed to add on top of the
+// vehicle legs themselves.
+export const DEFAULT_TRANSIT_WALK_BUDGET_MINUTES = 5;
 export const CAR_FALLBACK_SPEED_KPH = 30;
+// Kept numerically identical to FERRY_FALLBACK_SPEED_KPH in
+// data_pipeline/src/isochrone_pipeline/adjacency.py.
+export const WATER_FALLBACK_SPEED_KPH = 25;
 export const ROAD_CLASS_MOTORWAY = 15;
 export const DEFAULT_COLOUR_CYCLE_MINUTES = 75;
 export const LOADING_FADE_MS = 180;
@@ -27,6 +62,10 @@ export const SELECTED_REGION_QUERY_PARAM = 'region';
 export const LANGUAGE_QUERY_PARAM = 'lang';
 export const MODE_SELECTION_QUERY_PARAM = 'modes';
 export const COLOUR_CYCLE_QUERY_PARAM = 'cycle';
+export const DEPARTURE_DATETIME_QUERY_PARAM = 'departure';
+export const WALK_SPEED_QUERY_PARAM = 'walkKph';
+export const BIKE_SPEED_QUERY_PARAM = 'bikeKph';
+export const TRANSIT_WALK_BUDGET_QUERY_PARAM = 'walkMin';
 export const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;
 export const INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE = 3;
 export const FINAL_EDGE_INTERPOLATION_STEP_STRIDE = 1;

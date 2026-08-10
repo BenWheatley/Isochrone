@@ -6,7 +6,12 @@ import {
 } from '../render/colour.js';
 import { formatLegendRange, formatLegendRepeatNote } from '../ui/legend-format.js';
 import {
+  getAirportFillStyle,
   getBoundaryStrokeStyle,
+  getBoundaryWaterFillStyle,
+  getForestFillStyle,
+  getInlandWaterFillStyle,
+  getWaterwayStrokeStyle,
   projectBoundaryBasemapToGraphPaths,
 } from '../core/boundary-basemap.js';
 
@@ -22,6 +27,12 @@ const DEFAULT_OVERLAY_COLOURS = {
     scaleLineAlternate: '#31577a',
     scaleLineBorder: '#c1d6e9',
     boundaryStroke: getBoundaryStrokeStyle('dark'),
+    boundaryWaterFill: getBoundaryWaterFillStyle('dark'),
+    forestFill: getForestFillStyle('dark'),
+    inlandWaterFill: getInlandWaterFillStyle('dark'),
+    waterwayNavigableStroke: getWaterwayStrokeStyle('dark', true),
+    waterwayNonNavigableStroke: getWaterwayStrokeStyle('dark', false),
+    airportFill: getAirportFillStyle('dark'),
   },
   light: {
     overlayBackground: 'rgba(251, 253, 255, 0.92)',
@@ -32,6 +43,12 @@ const DEFAULT_OVERLAY_COLOURS = {
     scaleLineAlternate: '#eef5fb',
     scaleLineBorder: '#21435d',
     boundaryStroke: getBoundaryStrokeStyle('light'),
+    boundaryWaterFill: getBoundaryWaterFillStyle('light'),
+    forestFill: getForestFillStyle('light'),
+    inlandWaterFill: getInlandWaterFillStyle('light'),
+    waterwayNavigableStroke: getWaterwayStrokeStyle('light', true),
+    waterwayNonNavigableStroke: getWaterwayStrokeStyle('light', false),
+    airportFill: getAirportFillStyle('light'),
   },
 };
 
@@ -104,11 +121,21 @@ function wrapTextByWords(text, maxCharsPerLine, maxLines) {
   if (normalizedText.length === 0) {
     return [];
   }
-  const words = normalizedText.split(' ');
+  const words = [];
+  for (const rawWord of normalizedText.split(' ')) {
+    if (rawWord.length <= maxCharsPerLine) {
+      words.push(rawWord);
+      continue;
+    }
+    for (let index = 0; index < rawWord.length; index += maxCharsPerLine) {
+      words.push(rawWord.slice(index, index + maxCharsPerLine));
+    }
+  }
   const lines = [];
   let currentLine = '';
   let truncated = false;
   let wordIndex = 0;
+  const boundedLineCount = Number.isFinite(maxLines);
   for (; wordIndex < words.length; wordIndex += 1) {
     const word = words[wordIndex];
     const candidate = currentLine.length === 0 ? word : `${currentLine} ${word}`;
@@ -118,14 +145,14 @@ function wrapTextByWords(text, maxCharsPerLine, maxLines) {
     }
     lines.push(currentLine);
     currentLine = word;
-    if (lines.length >= maxLines - 1) {
+    if (boundedLineCount && lines.length >= maxLines - 1) {
       break;
     }
   }
-  if (wordIndex < words.length - 1) {
+  if (boundedLineCount && wordIndex < words.length - 1) {
     truncated = true;
   }
-  if (currentLine.length > 0 && lines.length < maxLines) {
+  if (currentLine.length > 0 && (!boundedLineCount || lines.length < maxLines)) {
     lines.push(currentLine);
   }
   if (truncated && lines.length > 0) {
@@ -179,7 +206,7 @@ function readComputedCssCustomProperty(computedStyle, propertyName) {
   return value.length > 0 ? value : null;
 }
 
-function resolveSvgBackgroundColour(shell, options = {}) {
+export function resolveSvgBackgroundColour(shell, options = {}) {
   const explicitColour = options.backgroundColour ?? options.backgroundColor;
   if (typeof explicitColour === 'string' && explicitColour.trim().length > 0) {
     return explicitColour.trim();
@@ -213,7 +240,7 @@ function resolveSvgBackgroundColour(shell, options = {}) {
   return '#ffffff';
 }
 
-function resolveSvgTheme(shell, options = {}) {
+export function resolveSvgTheme(shell, options = {}) {
   if (typeof options.theme === 'string' && options.theme.trim().length > 0) {
     return normalizeIsochroneTheme(options.theme.trim(), ISOCHRONE_THEME_DARK);
   }
@@ -223,7 +250,7 @@ function resolveSvgTheme(shell, options = {}) {
   return normalizeIsochroneTheme(datasetTheme, ISOCHRONE_THEME_DARK);
 }
 
-function resolveSvgOverlayColours(shell, options = {}) {
+export function resolveSvgOverlayColours(shell, options = {}) {
   const theme = resolveSvgTheme(shell, options);
   const defaults = DEFAULT_OVERLAY_COLOURS[theme];
   const explicit = options.overlayColours && typeof options.overlayColours === 'object'
@@ -265,17 +292,22 @@ function resolveSvgOverlayColours(shell, options = {}) {
       ?? readComputedCssCustomProperty(rootComputedStyle, '--map-scale-line-border')
       ?? defaults.scaleLineBorder,
     boundaryStroke: explicit.boundaryStroke ?? defaults.boundaryStroke,
+    boundaryWaterFill: explicit.boundaryWaterFill ?? defaults.boundaryWaterFill,
+    forestFill: explicit.forestFill ?? defaults.forestFill,
+    inlandWaterFill: explicit.inlandWaterFill ?? defaults.inlandWaterFill,
+    waterwayNavigableStroke: explicit.waterwayNavigableStroke ?? defaults.waterwayNavigableStroke,
+    waterwayNonNavigableStroke:
+      explicit.waterwayNonNavigableStroke ?? defaults.waterwayNonNavigableStroke,
+    airportFill: explicit.airportFill ?? defaults.airportFill,
     theme,
   };
 }
 
 function buildSvgTitleOverlayMarkup(widthPx, title, overlayColours) {
-  const boxHeight = 32;
-  const titleWidthPx = Math.min(Math.max(220, title.length * 7.2 + 22), Math.max(220, widthPx - 24));
+  void widthPx;
   return [
     '  <g id="isochrone-title">',
-    `    <rect x="12" y="12" width="${formatSvgNumber(titleWidthPx)}" height="${boxHeight}" rx="6" fill="${escapeXml(overlayColours.overlayBackground)}" stroke="${escapeXml(overlayColours.overlayBorder)}" />`,
-    `    <text x="22" y="33" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="15" fill="${escapeXml(overlayColours.overlayText)}">${escapeXml(title)}</text>`,
+    `    <text x="12" y="24" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="15" fill="${escapeXml(overlayColours.overlayText)}">${escapeXml(title)}</text>`,
     '  </g>',
   ].join('\n');
 }
@@ -293,10 +325,9 @@ function buildSvgLegendOverlayMarkup(widthPx, cycleMinutes, overlayColours, opti
 
   const lines = [
     '  <g id="isochrone-legend">',
-    `    <rect x="${formatSvgNumber(boxX)}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="6" fill="${escapeXml(overlayColours.overlayBackground)}" stroke="${escapeXml(overlayColours.overlayBorder)}" />`,
   ];
 
-  let textY = boxY + 18;
+  let textY = boxY + 10;
   for (const entry of entries) {
     lines.push(
       `    <rect x="${formatSvgNumber(boxX + 10)}" y="${formatSvgNumber(textY - 10)}" width="11" height="11" rx="2" fill="rgb(${entry.colour[0]}, ${entry.colour[1]}, ${entry.colour[2]})" />`,
@@ -326,17 +357,15 @@ function buildSvgScaleOverlayMarkup(
     Math.min(clampedScaleWidthPx, Math.round(scaleBarSegmentWidthPx)),
   );
   const boxWidth = Math.max(120, clampedScaleWidthPx + 24);
-  const boxHeight = 40;
   const boxX = 12;
-  const boxY = Math.max(12, heightPx - boxHeight - 12);
-  const lineX = boxX + 12;
-  const lineY = boxY + 14;
+  const lineX = boxX;
+  const lineY = Math.max(12, heightPx - 30);
   const lineHeight = 5;
   const clipId = 'isochrone-scale-pattern-clip';
+  const labelY = Math.min(heightPx - 8, lineY + 19);
 
   const lines = [
     '  <g id="isochrone-scale">',
-    `    <rect x="${boxX}" y="${formatSvgNumber(boxY)}" width="${boxWidth}" height="${boxHeight}" rx="6" fill="${escapeXml(overlayColours.overlayBackground)}" stroke="${escapeXml(overlayColours.overlayBorder)}" />`,
     `    <defs><clipPath id="${clipId}"><rect x="${lineX}" y="${formatSvgNumber(lineY)}" width="${clampedScaleWidthPx}" height="${lineHeight}" rx="3" /></clipPath></defs>`,
     `    <rect x="${lineX}" y="${formatSvgNumber(lineY)}" width="${clampedScaleWidthPx}" height="${lineHeight}" rx="3" fill="${escapeXml(overlayColours.scaleLineBackground)}" stroke="${escapeXml(overlayColours.scaleLineBorder)}" />`,
     `    <g id="isochrone-scale-pattern" clip-path="url(#${clipId})">`,
@@ -355,59 +384,53 @@ function buildSvgScaleOverlayMarkup(
 
   lines.push('    </g>');
   lines.push(
-    `    <text x="${formatSvgNumber(boxX + boxWidth / 2)}" y="${formatSvgNumber(boxY + 33)}" text-anchor="middle" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="11" fill="${escapeXml(overlayColours.overlayText)}">${escapeXml(scaleBarLabel)}</text>`,
+    `    <text x="${formatSvgNumber(boxX + boxWidth / 2)}" y="${formatSvgNumber(labelY)}" text-anchor="middle" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="11" fill="${escapeXml(overlayColours.overlayText)}">${escapeXml(scaleBarLabel)}</text>`,
   );
   lines.push('  </g>');
   return lines.join('\n');
 }
 
 function buildSvgCopyrightOverlayMarkup(widthPx, heightPx, copyrightNotice, overlayColours) {
-  const wrappedLines = wrapTextByWords(copyrightNotice, 58, 3);
+  const maxCharsPerLine = Math.max(12, Math.floor((widthPx - 24) / 5.5));
+  const wrappedLines = wrapTextByWords(copyrightNotice, maxCharsPerLine, Number.POSITIVE_INFINITY);
   if (wrappedLines.length === 0) {
     return '';
   }
 
-  const boxWidth = 388;
-  const boxHeight = 14 + wrappedLines.length * 12;
-  const boxX = Math.max(12, widthPx - boxWidth - 12);
-  const boxY = Math.max(12, heightPx - boxHeight - 12);
+  const lineHeight = 12;
+  const textX = Math.max(12, widthPx - 12);
+  const firstTextY = Math.max(12, heightPx - 12 - (wrappedLines.length - 1) * lineHeight);
 
-  const lines = [
-    '  <g id="isochrone-copyright">',
-    `    <rect x="${formatSvgNumber(boxX)}" y="${formatSvgNumber(boxY)}" width="${boxWidth}" height="${boxHeight}" rx="6" fill="${escapeXml(overlayColours.overlayBackground)}" stroke="${escapeXml(overlayColours.overlayBorder)}" />`,
-  ];
-  let textY = boxY + 16;
+  const lines = ['  <g id="isochrone-copyright">'];
+  let textY = firstTextY;
   for (const line of wrappedLines) {
     lines.push(
-      `    <text x="${formatSvgNumber(boxX + 10)}" y="${formatSvgNumber(textY)}" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="10" fill="${escapeXml(overlayColours.overlayNote)}">${escapeXml(line)}</text>`,
+      `    <text x="${formatSvgNumber(textX)}" y="${formatSvgNumber(textY)}" text-anchor="end" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="10" fill="${escapeXml(overlayColours.overlayNote)}">${escapeXml(line)}</text>`,
     );
-    textY += 12;
+    textY += lineHeight;
   }
   lines.push('  </g>');
   return lines.join('\n');
 }
 
-function buildSvgBoundaryPathMarkup(boundaryPayload, graphHeader, boundaryStroke) {
-  if (!boundaryPayload || !graphHeader) {
-    return '';
+function buildSvgPathCommands(path) {
+  const commands = [];
+  for (let index = 0; index < path.length; index += 1) {
+    const [graphX, graphY] = path[index];
+    commands.push(`${index === 0 ? 'M' : 'L'} ${formatSvgNumber(graphX)} ${formatSvgNumber(graphY)}`);
   }
+  return commands.join(' ');
+}
 
-  const projectedBoundary = projectBoundaryBasemapToGraphPaths(boundaryPayload, graphHeader);
+function buildSvgFilledPolygonMarkup(features, fillColour, groupId) {
   const pathMarkup = [];
-  for (const feature of projectedBoundary.features) {
+  for (const feature of features) {
     for (const path of feature.paths) {
-      if (path.length < 2) {
+      if (path.length < 3) {
         continue;
       }
-      const commands = [];
-      for (let index = 0; index < path.length; index += 1) {
-        const [graphX, graphY] = path[index];
-        commands.push(
-          `${index === 0 ? 'M' : 'L'} ${formatSvgNumber(graphX)} ${formatSvgNumber(graphY)}`,
-        );
-      }
       pathMarkup.push(
-        `    <path d="${commands.join(' ')}" fill="none" stroke="${escapeXml(boundaryStroke)}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />`,
+        `    <path d="${buildSvgPathCommands(path)} Z" fill="${escapeXml(fillColour)}" stroke="none" />`,
       );
     }
   }
@@ -416,7 +439,32 @@ function buildSvgBoundaryPathMarkup(boundaryPayload, graphHeader, boundaryStroke
     return '';
   }
 
-  return ['  <g id="isochrone-boundaries">', ...pathMarkup, '  </g>'].join('\n');
+  return [`  <g id="${groupId}">`, ...pathMarkup, '  </g>'].join('\n');
+}
+
+function buildSvgStrokedLineMarkup(features, resolveStrokeColour, groupId) {
+  const pathMarkup = [];
+  for (const feature of features) {
+    const strokeColour = resolveStrokeColour(feature);
+    for (const path of feature.paths) {
+      if (path.length < 2) {
+        continue;
+      }
+      pathMarkup.push(
+        `    <path d="${buildSvgPathCommands(path)}" fill="none" stroke="${escapeXml(strokeColour)}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />`,
+      );
+    }
+  }
+
+  if (pathMarkup.length === 0) {
+    return '';
+  }
+
+  return [`  <g id="${groupId}">`, ...pathMarkup, '  </g>'].join('\n');
+}
+
+function buildSvgBoundaryLineMarkup(features, boundaryStroke) {
+  return buildSvgStrokedLineMarkup(features, () => boundaryStroke, 'isochrone-boundaries');
 }
 
 export function buildIsochroneEdgeLineMarkup(edgeVertexData, options = {}) {
@@ -506,11 +554,54 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
     throw new Error('graphHeader and boundaryPayload must be provided together');
   }
 
-  const boundaryMarkup = buildSvgBoundaryPathMarkup(
-    options.boundaryPayload ?? null,
-    options.graphHeader ?? null,
-    overlayColours.boundaryStroke,
-  );
+  const projectedBoundary =
+    options.boundaryPayload && options.graphHeader
+      ? projectBoundaryBasemapToGraphPaths(options.boundaryPayload, options.graphHeader)
+      : null;
+
+  // Bottom-to-top, matching the canvas draw order: forest, airports, inland
+  // water, sea, waterways, then admin boundary lines.
+  const forestMarkup = projectedBoundary
+    ? buildSvgFilledPolygonMarkup(
+        projectedBoundary.forestFeatures,
+        overlayColours.forestFill,
+        'isochrone-forest',
+      )
+    : '';
+  const airportMarkup = projectedBoundary
+    ? buildSvgFilledPolygonMarkup(
+        projectedBoundary.airportFeatures,
+        overlayColours.airportFill,
+        'isochrone-airports',
+      )
+    : '';
+  const inlandWaterMarkup = projectedBoundary
+    ? buildSvgFilledPolygonMarkup(
+        projectedBoundary.inlandWaterFeatures,
+        overlayColours.inlandWaterFill,
+        'isochrone-inland-water',
+      )
+    : '';
+  const seaMarkup = projectedBoundary
+    ? buildSvgFilledPolygonMarkup(
+        projectedBoundary.waterFeatures,
+        overlayColours.boundaryWaterFill,
+        'isochrone-sea',
+      )
+    : '';
+  const waterwayMarkup = projectedBoundary
+    ? buildSvgStrokedLineMarkup(
+        projectedBoundary.waterwayFeatures,
+        (feature) =>
+          feature.navigable
+            ? overlayColours.waterwayNavigableStroke
+            : overlayColours.waterwayNonNavigableStroke,
+        'isochrone-waterways',
+      )
+    : '';
+  const boundaryMarkup = projectedBoundary
+    ? buildSvgBoundaryLineMarkup(projectedBoundary.features, overlayColours.boundaryStroke)
+    : '';
   const edgeLines = buildIsochroneEdgeLineMarkup(edgeVertexData, {
     cycleMinutes,
     theme,
@@ -539,6 +630,11 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
     `<svg xmlns="http://www.w3.org/2000/svg" width="${widthPx}" height="${heightPx}" viewBox="0 0 ${widthPx} ${heightPx}" role="img" aria-label="${escapedTitle}">`,
     `  <title>${escapedTitle}</title>`,
     `  <rect id="isochrone-background" x="0" y="0" width="${widthPx}" height="${heightPx}" fill="${escapedBackgroundColour}" />`,
+    forestMarkup,
+    airportMarkup,
+    inlandWaterMarkup,
+    seaMarkup,
+    waterwayMarkup,
     boundaryMarkup,
     '  <g id="isochrone-edges">',
     edgeLines,

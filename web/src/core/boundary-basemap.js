@@ -30,43 +30,22 @@ export function parseBoundaryBasemapPayload(payload) {
     throw new Error('boundary payload is missing features[]');
   }
 
-  const features = rawFeatures
-    .map((feature, featureIndex) => {
-      if (!feature || typeof feature !== 'object') {
-        throw new Error(`features[${featureIndex}] must be an object`);
-      }
-
-      const name = typeof feature.name === 'string' ? feature.name : `feature_${featureIndex}`;
-      const relationId = Number.isFinite(feature.relation_id) ? feature.relation_id : null;
-
-      if (!Array.isArray(feature.paths)) {
-        throw new Error(`features[${featureIndex}].paths must be an array`);
-      }
-
-      const paths = feature.paths
-        .map((path, pathIndex) => {
-          if (!Array.isArray(path)) {
-            throw new Error(`features[${featureIndex}].paths[${pathIndex}] must be an array`);
-          }
-
-          return path
-            .map((point, pointIndex) =>
-              parseCoordinatePair(
-                point,
-                `features[${featureIndex}].paths[${pathIndex}][${pointIndex}]`,
-              ),
-            )
-            .filter((point) => point.length === 2);
-        })
-        .filter((path) => path.length >= 2);
-
-      return {
-        name,
-        relationId,
-        paths,
-      };
-    })
-    .filter((feature) => feature.paths.length > 0);
+  const features = parseDrawableFeatures(rawFeatures, 'features');
+  const waterFeatures = parseDrawableFeatures(payload.water_features ?? [], 'water_features');
+  const forestFeatures = parseDrawableFeatures(payload.forest_features ?? [], 'forest_features');
+  const inlandWaterFeatures = parseDrawableFeatures(
+    payload.inland_water_features ?? [],
+    'inland_water_features',
+  );
+  const waterwayFeatures = parseDrawableFeatures(
+    payload.waterway_features ?? [],
+    'waterway_features',
+    ['category', 'navigable'],
+  );
+  const airportFeatures = parseDrawableFeatures(
+    payload.airport_features ?? [],
+    'airport_features',
+  );
 
   if (features.length === 0) {
     throw new Error('boundary payload has no drawable paths');
@@ -81,6 +60,11 @@ export function parseBoundaryBasemapPayload(payload) {
       axis,
     },
     features,
+    waterFeatures,
+    forestFeatures,
+    inlandWaterFeatures,
+    waterwayFeatures,
+    airportFeatures,
   };
 }
 
@@ -91,22 +75,69 @@ export function projectBoundaryBasemapToGraphPaths(payloadOrParsedBoundary, grap
     : parseBoundaryBasemapPayload(payloadOrParsedBoundary);
 
   const maxY = graphHeader.gridHeightPx - 1;
+  const coordinateSpace = parsedBoundary.coordinateSpace;
+  const project = (featureList, extraFieldNames = []) =>
+    projectFeatureList(featureList ?? [], coordinateSpace, graphHeader, maxY, extraFieldNames);
+
   return {
-    coordinateSpace: parsedBoundary.coordinateSpace,
-    features: parsedBoundary.features.map((feature) => ({
+    coordinateSpace,
+    waterFeatures: project(parsedBoundary.waterFeatures),
+    forestFeatures: project(parsedBoundary.forestFeatures),
+    inlandWaterFeatures: project(parsedBoundary.inlandWaterFeatures),
+    waterwayFeatures: project(parsedBoundary.waterwayFeatures, ['category', 'navigable']),
+    airportFeatures: project(parsedBoundary.airportFeatures),
+    features: project(parsedBoundary.features),
+  };
+}
+
+function projectFeatureList(featureList, coordinateSpace, graphHeader, maxY, extraFieldNames) {
+  return featureList.map((feature) => {
+    const projectedFeature = {
       name: feature.name,
       relationId: feature.relationId,
       paths: feature.paths.map((path) =>
         path.map((point) => {
-          const easting = parsedBoundary.coordinateSpace.xOrigin + point[0];
-          const northing = parsedBoundary.coordinateSpace.yOrigin - point[1];
+          const easting = coordinateSpace.xOrigin + point[0];
+          const northing = coordinateSpace.yOrigin - point[1];
           const xPx = (easting - graphHeader.originEasting) / graphHeader.pixelSizeM;
           const yPx = maxY - (northing - graphHeader.originNorthing) / graphHeader.pixelSizeM;
           return [xPx, yPx];
         }),
       ),
-    })),
-  };
+    };
+    for (const fieldName of extraFieldNames) {
+      if (fieldName in feature) {
+        projectedFeature[fieldName] = feature[fieldName];
+      }
+    }
+    return projectedFeature;
+  });
+}
+
+export function computeProjectedFeatureListBoundingBoxPx(projectedFeatures) {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let seenAny = false;
+
+  for (const feature of projectedFeatures ?? []) {
+    for (const path of feature?.paths ?? []) {
+      for (const point of path ?? []) {
+        const [x, y] = point;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+          continue;
+        }
+        seenAny = true;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  return seenAny ? { minX, minY, maxX, maxY } : null;
 }
 
 export function isClosedPath(path) {
@@ -124,6 +155,40 @@ export function getBoundaryStrokeStyle(colourTheme) {
     : 'rgba(125, 175, 220, 0.55)';
 }
 
+export function getBoundaryWaterFillStyle(colourTheme) {
+  return normalizeIsochroneTheme(colourTheme, 'dark') === 'light'
+    ? 'rgba(120, 235, 255, 0.72)'
+    : 'rgba(16, 55, 106, 0.78)';
+}
+
+export function getForestFillStyle(colourTheme) {
+  return normalizeIsochroneTheme(colourTheme, 'dark') === 'light'
+    ? 'rgba(80, 165, 90, 0.42)'
+    : 'rgba(28, 66, 38, 0.55)';
+}
+
+export function getInlandWaterFillStyle(colourTheme) {
+  return normalizeIsochroneTheme(colourTheme, 'dark') === 'light'
+    ? 'rgba(110, 200, 220, 0.65)'
+    : 'rgba(18, 68, 88, 0.72)';
+}
+
+export function getAirportFillStyle(colourTheme) {
+  return normalizeIsochroneTheme(colourTheme, 'dark') === 'light'
+    ? 'rgba(160, 140, 110, 0.38)'
+    : 'rgba(120, 105, 80, 0.45)';
+}
+
+export function getWaterwayStrokeStyle(colourTheme, navigable) {
+  const isLight = normalizeIsochroneTheme(colourTheme, 'dark') === 'light';
+  // Matches the inland-water fill hue (lakes/ponds) so rivers/canals read as
+  // the same "large body of water" family rather than a distinct blue.
+  if (navigable) {
+    return isLight ? 'rgba(110, 200, 220, 0.9)' : 'rgba(18, 68, 88, 0.95)';
+  }
+  return isLight ? 'rgba(110, 200, 220, 0.55)' : 'rgba(18, 68, 88, 0.6)';
+}
+
 function isParsedBoundaryBasemapPayload(value) {
   return (
     value
@@ -132,6 +197,57 @@ function isParsedBoundaryBasemapPayload(value) {
     && typeof value.coordinateSpace === 'object'
     && Array.isArray(value.features)
   );
+}
+
+function parseDrawableFeatures(rawFeatures, contextName, extraFieldNames = []) {
+  if (!Array.isArray(rawFeatures)) {
+    throw new Error(`boundary payload is missing ${contextName}[]`);
+  }
+
+  return rawFeatures
+    .map((feature, featureIndex) => {
+      if (!feature || typeof feature !== 'object') {
+        throw new Error(`${contextName}[${featureIndex}] must be an object`);
+      }
+
+      const name =
+        typeof feature.name === 'string' ? feature.name : `${contextName}_feature_${featureIndex}`;
+      const relationId = Number.isFinite(feature.relation_id) ? feature.relation_id : null;
+
+      if (!Array.isArray(feature.paths)) {
+        throw new Error(`${contextName}[${featureIndex}].paths must be an array`);
+      }
+
+      const paths = feature.paths
+        .map((path, pathIndex) => {
+          if (!Array.isArray(path)) {
+            throw new Error(`${contextName}[${featureIndex}].paths[${pathIndex}] must be an array`);
+          }
+
+          return path
+            .map((point, pointIndex) =>
+              parseCoordinatePair(
+                point,
+                `${contextName}[${featureIndex}].paths[${pathIndex}][${pointIndex}]`,
+              ),
+            )
+            .filter((point) => point.length === 2);
+        })
+        .filter((path) => path.length >= 2);
+
+      const parsedFeature = {
+        name,
+        relationId,
+        paths,
+      };
+      for (const fieldName of extraFieldNames) {
+        if (fieldName in feature) {
+          parsedFeature[fieldName] = feature[fieldName];
+        }
+      }
+      return parsedFeature;
+    })
+    .filter((feature) => feature.paths.length > 0);
 }
 
 function parseCoordinatePair(value, context) {

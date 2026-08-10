@@ -30,6 +30,9 @@ EDGE_FLAG_MODE_SPEED_DIRECTIONAL_PRESENT = EDGE_FLAG_RESERVED_DYNAMIC_ACCESS
 MODE_MASK_WALK = 1 << 0
 MODE_MASK_BIKE = 1 << 1
 MODE_MASK_CAR = 1 << 2
+MODE_MASK_WATER = 1 << 3
+
+FERRY_FALLBACK_SPEED_KPH = 25
 
 ALLOW_VALUES = {"yes", "designated", "permissive", "official", "destination"}
 DENY_VALUES = {"no", "private"}
@@ -181,7 +184,8 @@ class _AdjacencyBuilder:
 
     def build(self, ways: tuple[WayCandidate, ...]) -> AdjacencyGraph:
         for way in ways:
-            if _is_way_disallowed(way):
+            is_ferry = way.highway == "ferry"
+            if not is_ferry and _is_way_disallowed(way):
                 self._skipped_constraint_way_count += 1
                 continue
 
@@ -191,8 +195,15 @@ class _AdjacencyBuilder:
             if edge_mode_mask == 0:
                 self._skipped_constraint_way_count += 1
                 continue
-            edge_maxspeed_kph_forward = _maxspeed_kph_for_way_direction(way, is_forward=True)
-            edge_maxspeed_kph_backward = _maxspeed_kph_for_way_direction(way, is_forward=False)
+            if is_ferry:
+                edge_mode_mask |= MODE_MASK_WATER
+            total_distance_m = self._way_total_distance_m(way)
+            edge_maxspeed_kph_forward = _maxspeed_kph_for_way_direction(
+                way, is_forward=True, total_distance_m=total_distance_m
+            )
+            edge_maxspeed_kph_backward = _maxspeed_kph_for_way_direction(
+                way, is_forward=False, total_distance_m=total_distance_m
+            )
             edge_road_class_id = _road_class_id_for_way(way.highway)
 
             for src_osm_id, dst_osm_id in zip(way.node_ids, way.node_ids[1:], strict=False):
@@ -335,6 +346,14 @@ class _AdjacencyBuilder:
             road_class_id=road_class_id,
         )
 
+    def _way_total_distance_m(self, way: WayCandidate) -> float:
+        total = 0.0
+        for src_osm_id, dst_osm_id in zip(way.node_ids, way.node_ids[1:], strict=False):
+            src_xy = self._node_positions[self._osm_id_to_index[src_osm_id]]
+            dst_xy = self._node_positions[self._osm_id_to_index[dst_osm_id]]
+            total += math.hypot(dst_xy[0] - src_xy[0], dst_xy[1] - src_xy[1])
+        return total
+
     def _append_synthetic_node(self, xy: tuple[float, float]) -> int:
         node = GraphNode(
             osm_id=self._synthetic_next_id,
@@ -412,16 +431,25 @@ def _connector_flags(extracted: WalkableGraphExtract, osm_id: int) -> int:
 
 
 def _mode_mask_for_way(way: WayCandidate) -> int:
-    mask = 0
+    if way.highway == "ferry":
+        # Most route=ferry ways with no explicit access tags are ordinary
+        # passenger/foot+bike ferries. Deliberately excludes MODE_MASK_CAR
+        # from the baseline: vehicle-carrying ferries should require an
+        # explicit motor_vehicle=yes/vehicle=yes tag rather than being
+        # assumed (car-continuation ferries tagged via highway=* are a
+        # different OSM convention, handled elsewhere, unaffected by this).
+        mask = MODE_MASK_WALK | MODE_MASK_BIKE
+    else:
+        mask = 0
 
-    if way.highway in WALK_DEFAULT_HIGHWAYS:
-        mask |= MODE_MASK_WALK
-    if way.highway in BIKE_DEFAULT_HIGHWAYS:
-        mask |= MODE_MASK_BIKE
-    if way.highway in CAR_DEFAULT_HIGHWAYS:
-        mask |= MODE_MASK_CAR
-    if "cycleway" in way.constraints:
-        mask |= MODE_MASK_BIKE
+        if way.highway in WALK_DEFAULT_HIGHWAYS:
+            mask |= MODE_MASK_WALK
+        if way.highway in BIKE_DEFAULT_HIGHWAYS:
+            mask |= MODE_MASK_BIKE
+        if way.highway in CAR_DEFAULT_HIGHWAYS:
+            mask |= MODE_MASK_CAR
+        if "cycleway" in way.constraints:
+            mask |= MODE_MASK_BIKE
 
     access = _normalized_constraint(way, "access")
     if access in DENY_VALUES:
@@ -445,7 +473,9 @@ def _mode_mask_for_way(way: WayCandidate) -> int:
     return mask
 
 
-def _maxspeed_kph_for_way_direction(way: WayCandidate, *, is_forward: bool) -> int:
+def _maxspeed_kph_for_way_direction(
+    way: WayCandidate, *, is_forward: bool, total_distance_m: float = 0.0
+) -> int:
     base_speed = _parse_maxspeed_kph(_normalized_constraint(way, "maxspeed"))
     directional_key = "maxspeed:forward" if is_forward else "maxspeed:backward"
     directional_value = _normalized_constraint(way, directional_key)
@@ -454,6 +484,11 @@ def _maxspeed_kph_for_way_direction(way: WayCandidate, *, is_forward: bool) -> i
     )
     if selected_speed > 0:
         return selected_speed
+
+    duration_speed = _speed_kph_from_duration(way, total_distance_m)
+    if duration_speed > 0:
+        return duration_speed
+
     return _fallback_maxspeed_kph_for_way(way)
 
 
@@ -511,7 +546,39 @@ def _parse_maxspeed_token_kph(token: str) -> int | None:
     return max(0, min(rounded, 65535))
 
 
+_DURATION_PATTERN = re.compile(r"^(\d+):([0-5]\d)(?::([0-5]\d))?$")
+
+
+def _parse_duration_seconds(raw: str | None) -> int:
+    if raw is None:
+        return 0
+
+    match = _DURATION_PATTERN.match(raw.strip())
+    if match is None:
+        return 0
+
+    hours = int(match.group(1))
+    minutes = int(match.group(2))
+    seconds = int(match.group(3) or 0)
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _speed_kph_from_duration(way: WayCandidate, total_distance_m: float) -> int:
+    if total_distance_m <= 0:
+        return 0
+
+    duration_seconds = _parse_duration_seconds(_normalized_constraint(way, "duration"))
+    if duration_seconds <= 0:
+        return 0
+
+    speed_kph = (total_distance_m / duration_seconds) * 3.6
+    return max(0, min(int(round(speed_kph)), 65535))
+
+
 def _fallback_maxspeed_kph_for_way(way: WayCandidate) -> int:
+    if way.highway == "ferry":
+        return FERRY_FALLBACK_SPEED_KPH
+
     mode_mask = _mode_mask_for_way(way)
     candidates: list[int] = []
 

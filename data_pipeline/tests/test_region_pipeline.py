@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import gzip
 import json
 import subprocess
@@ -10,6 +11,7 @@ import pytest
 from isochrone_pipeline.region_pipeline import (
     DEFAULT_LOCATIONS_FILE,
     RegionSpec,
+    TransitFeedSpec,
     build_arg_parser,
     build_location_manifest,
     fetch_overpass_json,
@@ -25,6 +27,8 @@ def _make_region_spec(
     region_id: str = "paris",
     name: str = "Paris",
     epsg: int = 2154,
+    coastal: bool = False,
+    coast_source: str | None = None,
 ) -> RegionSpec:
     return RegionSpec(
         id=region_id,
@@ -39,6 +43,8 @@ def _make_region_spec(
         graph_summary_file_name=f"{region_id}-graph-summary.json",
         boundary_resolution=25.0,
         boundary_units="meters",
+        coastal=coastal,
+        coast_source=coast_source,
     )
 
 
@@ -136,6 +142,228 @@ def test_load_region_specs_reads_external_json_config(tmp_path: Path) -> None:
     )
 
 
+def test_load_region_specs_reads_coastal_flag_and_coast_source(tmp_path: Path) -> None:
+    locations_file = tmp_path / "regions.json"
+    locations_file.write_text(
+        json.dumps(
+            {
+                "locations": [
+                    {
+                        "id": "rhode-island",
+                        "name": "Rhode Island",
+                        "graphFileName": "rhode-island-graph.bin.gz",
+                        "boundaryFileName": "rhode-island-district-boundaries-canvas.json",
+                        "locationRelation": (
+                            'rel["boundary"="administrative"]["wikidata"="Q1387"]'
+                        ),
+                        "subdivisionAdminLevel": "6",
+                        "epsg": 32130,
+                        "coastal": True,
+                        "coastSource": "/local/water-polygons.zip",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    specs = load_region_specs(locations_file)
+
+    assert specs[0].coastal is True
+    assert specs[0].coast_source == "/local/water-polygons.zip"
+
+
+def test_load_region_specs_defaults_coastal_to_false(tmp_path: Path) -> None:
+    locations_file = tmp_path / "regions.json"
+    locations_file.write_text(
+        json.dumps(
+            {
+                "locations": [
+                    {
+                        "id": "paris",
+                        "name": "Paris",
+                        "graphFileName": "paris-graph.bin.gz",
+                        "boundaryFileName": "paris-district-boundaries-canvas.json",
+                        "locationRelation": ('rel["boundary"="administrative"]["wikidata"="Q90"]'),
+                        "subdivisionAdminLevel": "9",
+                        "epsg": 2154,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    specs = load_region_specs(locations_file)
+
+    assert specs[0].coastal is False
+    assert specs[0].coast_source is None
+
+
+def test_load_region_specs_reads_transit_feed_block(tmp_path: Path) -> None:
+    locations_file = tmp_path / "regions.json"
+    locations_file.write_text(
+        json.dumps(
+            {
+                "locations": [
+                    {
+                        "id": "berlin",
+                        "name": "Berlin",
+                        "graphFileName": "berlin-graph.bin.gz",
+                        "boundaryFileName": "berlin-district-boundaries-canvas.json",
+                        "locationRelation": ('rel["boundary"="administrative"]["wikidata"="Q64"]'),
+                        "subdivisionAdminLevel": "9",
+                        "epsg": 25833,
+                        "transitFeed": {
+                            "baseUrl": "https://example.test/gtfs/",
+                            "licence": "CC BY 4.0 — Example Transit Authority",
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    specs = load_region_specs(locations_file)
+
+    assert specs[0].transit_feed is not None
+    # Trailing slash stripped for consistent f"{base_url}/{file}.csv" joins.
+    assert specs[0].transit_feed.base_url == "https://example.test/gtfs"
+    assert specs[0].transit_feed.licence == "CC BY 4.0 — Example Transit Authority"
+    assert specs[0].transit_input_dir_name == "berlin-transit-gtfs"
+
+
+def test_load_region_specs_defaults_transit_feed_to_none(tmp_path: Path) -> None:
+    locations_file = tmp_path / "regions.json"
+    locations_file.write_text(
+        json.dumps(
+            {
+                "locations": [
+                    {
+                        "id": "paris",
+                        "name": "Paris",
+                        "graphFileName": "paris-graph.bin.gz",
+                        "boundaryFileName": "paris-district-boundaries-canvas.json",
+                        "locationRelation": ('rel["boundary"="administrative"]["wikidata"="Q90"]'),
+                        "subdivisionAdminLevel": "9",
+                        "epsg": 2154,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    specs = load_region_specs(locations_file)
+
+    assert specs[0].transit_feed is None
+
+
+def test_run_fetch_pipeline_fetches_transit_only_when_component_and_feed_present(
+    tmp_path: Path,
+) -> None:
+    input_dir = tmp_path / "input"
+    stderr = StringIO()
+    fetch_calls: list[tuple[str, Path]] = []
+    spec_with_feed = dataclasses.replace(
+        _make_region_spec(region_id="berlin", name="Berlin"),
+        transit_feed=TransitFeedSpec(
+            base_url="https://example.test/gtfs",
+            licence="CC BY 4.0",
+        ),
+    )
+    spec_without_feed = _make_region_spec(region_id="paris", name="Paris")
+
+    def fake_render_query(query_script: Path, *args: str) -> str:
+        return f"/* {query_script.name} */\n" + " ".join(args) + "\n"
+
+    def fake_fetch_overpass_json(**kwargs) -> None:
+        del kwargs
+
+    def fake_fetch_gtfs_transit_files(
+        *, base_url: str, output_dir: Path, max_time_seconds: int, stderr=None
+    ) -> None:
+        del max_time_seconds, stderr
+        fetch_calls.append((base_url, output_dir))
+
+    run_fetch_pipeline(
+        [spec_with_feed, spec_without_feed],
+        input_dir=input_dir,
+        overpass_url="https://overpass.example/api/interpreter",
+        max_time_seconds=600,
+        render_query_fn=fake_render_query,
+        fetch_overpass_json_fn=fake_fetch_overpass_json,
+        fetch_gtfs_transit_files_fn=fake_fetch_gtfs_transit_files,
+        fetch_components=frozenset({"routing", "boundary", "transit"}),
+        stderr=stderr,
+    )
+
+    assert fetch_calls == [
+        ("https://example.test/gtfs", input_dir / "berlin-transit-gtfs"),
+    ]
+
+
+def test_run_fetch_pipeline_skips_transit_when_component_not_requested(
+    tmp_path: Path,
+) -> None:
+    input_dir = tmp_path / "input"
+    stderr = StringIO()
+    fetch_calls: list[tuple[str, Path]] = []
+    spec_with_feed = dataclasses.replace(
+        _make_region_spec(region_id="berlin", name="Berlin"),
+        transit_feed=TransitFeedSpec(
+            base_url="https://example.test/gtfs",
+            licence="CC BY 4.0",
+        ),
+    )
+
+    def fake_render_query(query_script: Path, *args: str) -> str:
+        return f"/* {query_script.name} */\n" + " ".join(args) + "\n"
+
+    def fake_fetch_overpass_json(**kwargs) -> None:
+        del kwargs
+
+    def fake_fetch_gtfs_transit_files(**kwargs) -> None:
+        fetch_calls.append((kwargs["base_url"], kwargs["output_dir"]))
+
+    run_fetch_pipeline(
+        [spec_with_feed],
+        input_dir=input_dir,
+        overpass_url="https://overpass.example/api/interpreter",
+        max_time_seconds=600,
+        render_query_fn=fake_render_query,
+        fetch_overpass_json_fn=fake_fetch_overpass_json,
+        fetch_gtfs_transit_files_fn=fake_fetch_gtfs_transit_files,
+        fetch_components=frozenset({"routing", "boundary"}),
+        stderr=stderr,
+    )
+
+    assert fetch_calls == []
+
+
+def test_committed_region_config_marks_rhode_island_coastal() -> None:
+    specs_by_id = {spec.id: spec for spec in load_region_specs(DEFAULT_LOCATIONS_FILE)}
+
+    assert specs_by_id["rhode-island"].coastal is True
+
+
+def test_committed_region_config_uses_deterministic_athens_relation_selector() -> None:
+    specs_by_id = {spec.id: spec for spec in load_region_specs(DEFAULT_LOCATIONS_FILE)}
+
+    assert specs_by_id["athens"].location_relation == (
+        'rel(1370736)["name"="Athens"]["wikidata"="Q1524"]'
+    )
+
+
+def test_committed_region_config_uses_deterministic_portsmouth_relation_selector() -> None:
+    specs_by_id = {spec.id: spec for spec in load_region_specs(DEFAULT_LOCATIONS_FILE)}
+
+    assert specs_by_id["portsmouth"].location_relation == (
+        'rel(127167)["name"="Portsmouth"]["wikidata"="Q72259"]'
+    )
+
+
 def test_build_location_manifest_strips_pipeline_only_fields() -> None:
     manifest = build_location_manifest(
         [
@@ -166,6 +394,52 @@ def test_build_location_manifest_strips_pipeline_only_fields() -> None:
             }
         ]
     }
+
+
+def _berlin_region_spec_with_transit_feed() -> RegionSpec:
+    return RegionSpec(
+        id="berlin",
+        name="Berlin",
+        graph_file_name="graph-walk.bin.gz",
+        boundary_file_name="berlin-district-boundaries-canvas.json",
+        location_relation='rel(62422)["name"="Berlin"]',
+        subdivision_admin_level="9",
+        subdivision_discovery_modes=("area", "subarea"),
+        epsg=25833,
+        graph_binary_file_name="graph-walk.bin",
+        graph_summary_file_name="graph-binary-summary.json",
+        boundary_resolution=25.0,
+        boundary_units="meters",
+        transit_feed=TransitFeedSpec(
+            base_url="https://vbb-gtfs.jannisr.de/latest",
+            licence="CC BY 4.0 — VBB",
+        ),
+    )
+
+
+def test_build_location_manifest_includes_transit_date_range_when_provided() -> None:
+    manifest = build_location_manifest(
+        [_berlin_region_spec_with_transit_feed()],
+        transit_date_ranges={"berlin": {"min": "2026-01-01", "max": "2026-12-31"}},
+    )
+
+    assert manifest == {
+        "locations": [
+            {
+                "id": "berlin",
+                "name": "Berlin",
+                "graphFileName": "graph-walk.bin.gz",
+                "boundaryFileName": "berlin-district-boundaries-canvas.json",
+                "transitDateRange": {"min": "2026-01-01", "max": "2026-12-31"},
+            }
+        ]
+    }
+
+
+def test_build_location_manifest_omits_transit_date_range_when_not_yet_built() -> None:
+    manifest = build_location_manifest([_berlin_region_spec_with_transit_feed()])
+
+    assert "transitDateRange" not in manifest["locations"][0]
 
 
 def test_run_build_pipeline_writes_outputs_and_returns_manifest(
@@ -721,3 +995,57 @@ def test_fetch_overpass_json_failure_writes_debug_bundle(tmp_path: Path, monkeyp
     )
     assert not output_path.exists()
     assert "Rendered routing extract for London" in stderr.getvalue()
+
+
+def test_fetch_overpass_json_empty_success_response_writes_debug_bundle(
+    tmp_path: Path, monkeypatch
+) -> None:
+    output_path = tmp_path / "athens-routing.osm.json"
+    stderr = StringIO()
+
+    def fake_run(
+        args: list[str],
+        *,
+        check: bool,
+        text: bool,
+        capture_output: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        del check, text, capture_output
+        output_arg_index = args.index("-o") + 1
+        Path(args[output_arg_index]).write_text('{"elements":[]}\n', encoding="utf-8")
+        header_arg_index = args.index("--dump-header") + 1
+        Path(args[header_arg_index]).write_text(
+            "HTTP/1.1 200 OK\nContent-Type: application/json\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout="200",
+            stderr="",
+        )
+
+    monkeypatch.setattr("isochrone_pipeline.region_pipeline.subprocess.run", fake_run)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        fetch_overpass_json(
+            query_text='[out:json];way["highway"](0,0,1,1);out body qt;',
+            output_path=output_path,
+            overpass_url="https://overpass.example/api/interpreter",
+            max_time_seconds=600,
+            stderr=stderr,
+            request_label="routing extract for Athens",
+        )
+
+    message = str(exc_info.value)
+    assert "routing extract for Athens" in message
+    assert "http_status=200" in message
+    assert "response_validation=empty_overpass_elements" in message
+    assert str(output_path.with_name("athens-routing.osm.json.failed-response-body.txt")) in message
+    assert (
+        output_path.with_name("athens-routing.osm.json.failed-response-body.txt").read_text(
+            encoding="utf-8"
+        )
+        == '{"elements":[]}\n'
+    )
+    assert not output_path.exists()

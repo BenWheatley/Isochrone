@@ -8,6 +8,7 @@ import {
   instantiateRoutingKernelWasmFromBytes,
   validateRoutingKernelExports,
 } from '../src/wasm/routing-kernel.js';
+import { BIKE_CRUISE_SPEED_KPH, WALKING_SPEED_M_S } from '../src/config/constants.js';
 
 test('hasWebAssemblySupport checks runtime feature availability', () => {
   assert.equal(hasWebAssemblySupport({}), false);
@@ -35,6 +36,9 @@ test('createWasmRoutingKernelFacade forwards precompute call to wasm export', ()
     compute_travel_time_field() {
       return 0;
     },
+    compute_travel_time_field_multi_source() {
+      return 0;
+    },
   };
   const facade = createWasmRoutingKernelFacade(fakeExports);
 
@@ -49,7 +53,43 @@ test('createWasmRoutingKernelFacade forwards precompute call to wasm export', ()
   });
 
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0], [1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(calls[0], [1, 2, 3, 4, 5, 6, 7, WALKING_SPEED_M_S, BIKE_CRUISE_SPEED_KPH]);
+});
+
+test('createWasmRoutingKernelFacade forwards custom walking/bike speeds to wasm export', () => {
+  const calls = [];
+  const fakeExports = {
+    memory: {},
+    wasm_alloc() {
+      return 1;
+    },
+    wasm_dealloc() {},
+    precompute_edge_costs(...args) {
+      calls.push(args);
+    },
+    compute_travel_time_field() {
+      return 0;
+    },
+    compute_travel_time_field_multi_source() {
+      return 0;
+    },
+  };
+  const facade = createWasmRoutingKernelFacade(fakeExports);
+
+  facade.precomputeEdgeCosts({
+    outCostSecondsPtr: 1,
+    edgeModeMaskPtr: 2,
+    edgeRoadClassPtr: 3,
+    edgeMaxspeedKphPtr: 4,
+    edgeWalkCostSecondsPtr: 5,
+    edgeCount: 6,
+    allowedModeMask: 7,
+    walkingSpeedMps: 2.5,
+    bikeCruiseSpeedKph: 25,
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], [1, 2, 3, 4, 5, 6, 7, 2.5, 25]);
 });
 
 test('instantiateRoutingKernelWasm uses instantiateStreaming and validates exports', async () => {
@@ -62,6 +102,9 @@ test('instantiateRoutingKernelWasm uses instantiateStreaming and validates expor
       wasm_dealloc() {},
       precompute_edge_costs() {},
       compute_travel_time_field() {
+        return 0;
+      },
+      compute_travel_time_field_multi_source() {
         return 0;
       },
     },
@@ -97,6 +140,9 @@ test('instantiateRoutingKernelWasm default URL resolves relative to module path'
       compute_travel_time_field() {
         return 0;
       },
+      compute_travel_time_field_multi_source() {
+        return 0;
+      },
     },
   };
 
@@ -128,6 +174,9 @@ test('instantiateRoutingKernelWasmFromBytes validates exports from byte instanti
       wasm_dealloc() {},
       precompute_edge_costs() {},
       compute_travel_time_field() {
+        return 0;
+      },
+      compute_travel_time_field_multi_source() {
         return 0;
       },
     },
@@ -174,6 +223,9 @@ test('precomputeEdgeCostsForGraph writes back wasm results to output array', () 
       }
     },
     compute_travel_time_field() {
+      return 0;
+    },
+    compute_travel_time_field_multi_source() {
       return 0;
     },
   };
@@ -225,6 +277,9 @@ test('computeTravelTimeFieldForGraph writes back wasm results and settled count'
       }
       return 2;
     },
+    compute_travel_time_field_multi_source() {
+      return 0;
+    },
   };
   const facade = createWasmRoutingKernelFacade(fakeExports);
 
@@ -242,6 +297,101 @@ test('computeTravelTimeFieldForGraph writes back wasm results and settled count'
   assert.equal(outDistSeconds[0], 0);
   assert.equal(outDistSeconds[1], 42);
   assert.equal(outDistSeconds[2], Number.POSITIVE_INFINITY);
+});
+
+test('computeTravelTimeFieldMultiSourceForGraph forwards seed arrays to wasm export', () => {
+  const memory = { buffer: new ArrayBuffer(8192) };
+  let nextPtr = 256;
+  let capturedSeedNodeIndices = null;
+  let capturedSeedStartDistSeconds = null;
+  const fakeExports = {
+    memory,
+    wasm_alloc(byteLength) {
+      // Round up to 4-byte alignment like the real Rust allocator does (8),
+      // so seed pointers stay valid Uint32Array/Float32Array view offsets.
+      const ptr = nextPtr;
+      nextPtr += byteLength + ((4 - (byteLength % 4)) % 4);
+      return ptr;
+    },
+    wasm_dealloc() {},
+    precompute_edge_costs() {},
+    compute_travel_time_field() {
+      return 0;
+    },
+    compute_travel_time_field_multi_source(
+      outDistSecondsPtr,
+      _nodeFirstEdgeIndexPtr,
+      _nodeEdgeCountPtr,
+      nodeCount,
+      _edgeTargetNodeIndexPtr,
+      _edgeCostTicksPtr,
+      _edgeCount,
+      seedNodeIndicesPtr,
+      seedStartDistSecondsPtr,
+      seedCount,
+      _timeLimitSeconds,
+    ) {
+      capturedSeedNodeIndices = Array.from(
+        new Uint32Array(memory.buffer, seedNodeIndicesPtr, seedCount),
+      );
+      capturedSeedStartDistSeconds = Array.from(
+        new Float32Array(memory.buffer, seedStartDistSecondsPtr, seedCount),
+      );
+      const outView = new Float32Array(memory.buffer, outDistSecondsPtr, nodeCount);
+      outView.fill(Number.POSITIVE_INFINITY);
+      outView[0] = 0;
+      outView[2] = 1;
+      return 2;
+    },
+  };
+  const facade = createWasmRoutingKernelFacade(fakeExports);
+
+  const outDistSeconds = new Float32Array(3);
+  const result = facade.computeTravelTimeFieldMultiSourceForGraph({
+    nodeFirstEdgeIndex: new Uint32Array([0, 1, 2]),
+    nodeEdgeCount: new Uint16Array([1, 1, 0]),
+    edgeTargetNodeIndex: new Uint32Array([1, 2]),
+    edgeCostTicks: new Uint32Array([72_000, 72_000]),
+    outDistSeconds,
+    seedNodeIndices: new Uint32Array([0, 2]),
+    seedStartDistSeconds: new Float32Array([0, 1]),
+  });
+
+  assert.equal(result.settledNodeCount, 2);
+  assert.deepEqual(capturedSeedNodeIndices, [0, 2]);
+  assert.deepEqual(capturedSeedStartDistSeconds, [0, 1]);
+  assert.equal(outDistSeconds[0], 0);
+  assert.equal(outDistSeconds[2], 1);
+});
+
+test('computeTravelTimeFieldMultiSourceForGraph rejects mismatched seed array lengths', () => {
+  const fakeExports = {
+    memory: { buffer: new ArrayBuffer(64) },
+    wasm_alloc: () => 1,
+    wasm_dealloc() {},
+    precompute_edge_costs() {},
+    compute_travel_time_field() {
+      return 0;
+    },
+    compute_travel_time_field_multi_source() {
+      return 0;
+    },
+  };
+  const facade = createWasmRoutingKernelFacade(fakeExports);
+
+  assert.throws(
+    () =>
+      facade.computeTravelTimeFieldMultiSourceForGraph({
+        nodeFirstEdgeIndex: new Uint32Array([0]),
+        nodeEdgeCount: new Uint16Array([0]),
+        edgeTargetNodeIndex: new Uint32Array([]),
+        edgeCostTicks: new Uint32Array([]),
+        outDistSeconds: new Float32Array(1),
+        seedNodeIndices: new Uint32Array([0, 1]),
+        seedStartDistSeconds: new Float32Array([0]),
+      }),
+    /same length/,
+  );
 });
 
 test('computeTravelTimeFieldForGraph can return shared output view from wasm memory', () => {
@@ -270,6 +420,9 @@ test('computeTravelTimeFieldForGraph can return shared output view from wasm mem
       outView.fill(Number.POSITIVE_INFINITY);
       outView[sourceNodeIndex] = 0;
       return 1;
+    },
+    compute_travel_time_field_multi_source() {
+      return 0;
     },
   };
   const facade = createWasmRoutingKernelFacade(fakeExports);
@@ -327,6 +480,9 @@ test('computeTravelTimeFieldForGraph reuses cached graph buffers across runs', (
       }
       outView[sourceNodeIndex] = 0;
       return 1;
+    },
+    compute_travel_time_field_multi_source() {
+      return 0;
     },
   };
   const facade = createWasmRoutingKernelFacade(fakeExports);
@@ -393,6 +549,9 @@ test('computeTravelTimeFieldForGraph shared output views stay stable across alte
       outView[sourceNodeIndex] = 0;
       return 1;
     },
+    compute_travel_time_field_multi_source() {
+      return 0;
+    },
   };
   const facade = createWasmRoutingKernelFacade(fakeExports);
   const graphInputs = {
@@ -455,6 +614,9 @@ test('precomputeEdgeCostsForGraph reuses cached edge metadata buffers across run
       }
     },
     compute_travel_time_field() {
+      return 0;
+    },
+    compute_travel_time_field_multi_source() {
       return 0;
     },
   };
@@ -521,6 +683,9 @@ test('computeTravelTimeFieldForGraph reuses cached output buffer for repeated wr
       outView.fill(Number.POSITIVE_INFINITY);
       outView[sourceNodeIndex] = 0;
       return 1;
+    },
+    compute_travel_time_field_multi_source() {
+      return 0;
     },
   };
   const facade = createWasmRoutingKernelFacade(fakeExports);

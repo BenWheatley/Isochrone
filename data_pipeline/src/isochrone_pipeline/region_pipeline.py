@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TextIO, cast
 
+from isochrone_pipeline.osm_json_survey import iter_overpass_elements
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_LOCATIONS_FILE = REPO_ROOT / "data_pipeline" / "regions.json"
 DEFAULT_INPUT_DIR = REPO_ROOT / "data_pipeline" / "input"
@@ -32,6 +34,16 @@ QueryRenderer = Callable[..., str]
 OverpassFetcher = Callable[..., None]
 DEFAULT_FETCH_COMPONENTS: frozenset[str] = frozenset({"routing", "boundary"})
 DEFAULT_BUILD_COMPONENTS: frozenset[str] = frozenset({"graph", "boundary"})
+GTFS_TRANSIT_FILE_NAMES: tuple[str, ...] = (
+    "agency",
+    "calendar",
+    "calendar_dates",
+    "routes",
+    "stops",
+    "transfers",
+    "trips",
+    "stop_times",
+)
 
 
 class RegionDataHelpFormatter(
@@ -39,6 +51,12 @@ class RegionDataHelpFormatter(
     argparse.RawDescriptionHelpFormatter,
 ):
     """Formatter that preserves example blocks and includes defaults."""
+
+
+@dataclass(frozen=True)
+class TransitFeedSpec:
+    base_url: str
+    licence: str
 
 
 @dataclass(frozen=True)
@@ -56,6 +74,9 @@ class RegionSpec:
     boundary_resolution: float
     boundary_units: BoundaryUnits
     localized_names: dict[str, str] | None = None
+    coastal: bool = False
+    coast_source: str | None = None
+    transit_feed: TransitFeedSpec | None = None
 
     @property
     def routing_input_file_name(self) -> str:
@@ -64,6 +85,10 @@ class RegionSpec:
     @property
     def boundary_input_file_name(self) -> str:
         return f"{self.id}-district-boundaries.osm.json"
+
+    @property
+    def transit_input_dir_name(self) -> str:
+        return f"{self.id}-transit-gtfs"
 
 
 def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
@@ -135,6 +160,20 @@ def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
         if boundary_units not in {"meters", "degrees"}:
             raise ValueError(f"locations[{index}].boundaryUnits must be 'meters' or 'degrees'")
         normalized_boundary_units = cast(BoundaryUnits, boundary_units)
+        coastal = _normalize_optional_bool(
+            entry.get("coastal", False),
+            field_name=f"locations[{index}].coastal",
+        )
+        coast_source = entry.get("coastSource")
+        if coast_source is not None:
+            coast_source = _require_non_empty_string(
+                coast_source,
+                f"locations[{index}].coastSource",
+            )
+        transit_feed = _normalize_transit_feed(
+            entry.get("transitFeed"),
+            field_name=f"locations[{index}].transitFeed",
+        )
 
         region_specs.append(
             RegionSpec(
@@ -151,17 +190,33 @@ def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
                 boundary_resolution=boundary_resolution,
                 boundary_units=normalized_boundary_units,
                 localized_names=localized_names,
+                coastal=coastal,
+                coast_source=coast_source,
+                transit_feed=transit_feed,
             )
         )
 
     return tuple(region_specs)
 
 
-def build_location_manifest(region_specs: Sequence[RegionSpec]) -> dict[str, Any]:
-    return {"locations": [_build_manifest_location_entry(spec) for spec in region_specs]}
+def build_location_manifest(
+    region_specs: Sequence[RegionSpec],
+    *,
+    transit_date_ranges: dict[str, dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    transit_date_ranges = transit_date_ranges or {}
+    return {
+        "locations": [
+            _build_manifest_location_entry(spec, transit_date_ranges.get(spec.id))
+            for spec in region_specs
+        ]
+    }
 
 
-def _build_manifest_location_entry(spec: RegionSpec) -> dict[str, Any]:
+def _build_manifest_location_entry(
+    spec: RegionSpec,
+    transit_date_range: dict[str, str] | None = None,
+) -> dict[str, Any]:
     entry: dict[str, Any] = {
         "id": spec.id,
         "name": spec.name,
@@ -170,6 +225,8 @@ def _build_manifest_location_entry(spec: RegionSpec) -> dict[str, Any]:
     }
     if spec.localized_names:
         entry["localizedNames"] = dict(spec.localized_names)
+    if spec.transit_feed is not None and transit_date_range is not None:
+        entry["transitDateRange"] = dict(transit_date_range)
     return entry
 
 
@@ -204,6 +261,7 @@ def run_fetch_pipeline(
     boundary_query_script: Path = BOUNDARY_QUERY_SCRIPT,
     render_query_fn: QueryRenderer | None = None,
     fetch_overpass_json_fn: OverpassFetcher | None = None,
+    fetch_gtfs_transit_files_fn: Callable[..., None] | None = None,
     fetch_components: frozenset[str] = DEFAULT_FETCH_COMPONENTS,
     stderr: TextIO | None = None,
 ) -> None:
@@ -211,6 +269,7 @@ def run_fetch_pipeline(
     input_dir.mkdir(parents=True, exist_ok=True)
     render_query_fn = render_query_fn or render_query
     fetch_overpass_json_fn = fetch_overpass_json_fn or fetch_overpass_json
+    fetch_gtfs_transit_files_fn = fetch_gtfs_transit_files_fn or fetch_gtfs_transit_files
 
     for spec in region_specs:
         if "routing" in fetch_components:
@@ -269,6 +328,69 @@ def run_fetch_pipeline(
                 request_label=f"boundary extract for {spec.name}",
             )
 
+        if "transit" in fetch_components and spec.transit_feed is not None:
+            _log(stderr, f"Fetching GTFS transit feed for {spec.name}")
+            transit_dir = input_dir / spec.transit_input_dir_name
+            fetch_gtfs_transit_files_fn(
+                base_url=spec.transit_feed.base_url,
+                output_dir=transit_dir,
+                max_time_seconds=max_time_seconds,
+                stderr=stderr,
+            )
+
+
+def fetch_gtfs_transit_files(
+    *,
+    base_url: str,
+    output_dir: Path,
+    max_time_seconds: int,
+    file_names: tuple[str, ...] = GTFS_TRANSIT_FILE_NAMES,
+    stderr: TextIO | None = None,
+) -> None:
+    stderr = stderr or sys.stderr
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for file_name in file_names:
+        output_path = output_dir / f"{file_name}.txt"
+        source_url = f"{base_url}/{file_name}.csv"
+        _log(stderr, f"  downloading {source_url} -> {output_path}")
+
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=output_dir,
+            prefix=f"{file_name}-",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_output:
+            temp_output_path = Path(temp_output.name)
+
+        try:
+            result = subprocess.run(
+                [
+                    "curl",
+                    "--show-error",
+                    "--fail",
+                    "--max-time",
+                    str(max_time_seconds),
+                    "-L",
+                    source_url,
+                    "-o",
+                    str(temp_output_path),
+                ],
+                check=False,
+                text=True,
+                capture_output=True,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"GTFS transit file download failed for {source_url}\n"
+                    f"curl_exit_code={result.returncode}\n"
+                    f"curl_stderr={result.stderr.strip()}"
+                )
+            temp_output_path.replace(output_path)
+        finally:
+            temp_output_path.unlink(missing_ok=True)
+
 
 def run_build_pipeline(
     region_specs: Sequence[RegionSpec],
@@ -292,6 +414,7 @@ def run_build_pipeline(
         simplify_boundaries = simplify_boundaries or write_simplified_boundary_canvas
         export_graph_binary = export_graph_binary or write_graph_binary_artifacts
 
+    transit_date_ranges: dict[str, dict[str, str]] = {}
     for spec in region_specs:
         routing_input_path = input_dir / spec.routing_input_file_name
         boundary_input_path = input_dir / spec.boundary_input_file_name
@@ -300,6 +423,11 @@ def run_build_pipeline(
                 raise FileNotFoundError(f"boundary input not found: {boundary_input_path}")
             boundary_output_path = output_dir / spec.boundary_file_name
             _log(stderr, f"Building boundary canvas JSON for {spec.name}")
+            coastal_kwargs: dict[str, Any] = {}
+            if spec.coastal:
+                coastal_kwargs["include_coast"] = True
+                if spec.coast_source is not None:
+                    coastal_kwargs["coast_source"] = spec.coast_source
             simplify_boundaries(
                 input_path=boundary_input_path,
                 output_path=boundary_output_path,
@@ -307,6 +435,7 @@ def run_build_pipeline(
                 units=spec.boundary_units,
                 epsg=spec.epsg,
                 admin_level=spec.subdivision_admin_level,
+                **coastal_kwargs,
             )
 
         if "graph" in build_components:
@@ -315,18 +444,28 @@ def run_build_pipeline(
             graph_binary_path = output_dir / spec.graph_binary_file_name
             graph_summary_path = output_dir / spec.graph_summary_file_name
             _log(stderr, f"Building routing graph binary for {spec.name}")
-            export_graph_binary(
+            transit_kwargs: dict[str, Any] = {}
+            if "transit" in build_components and spec.transit_feed is not None:
+                transit_input_dir = input_dir / spec.transit_input_dir_name
+                if not transit_input_dir.is_dir():
+                    raise FileNotFoundError(f"transit input not found: {transit_input_dir}")
+                transit_kwargs["transit_feed_dir"] = transit_input_dir
+            graph_summary = export_graph_binary(
                 input_path=routing_input_path,
                 binary_output=graph_binary_path,
                 summary_output=graph_summary_path,
                 epsg=spec.epsg,
+                **transit_kwargs,
             )
+            date_range = graph_summary.get("transit", {}).get("date_range")
+            if date_range is not None:
+                transit_date_ranges[spec.id] = date_range
 
             gz_output_path = output_dir / spec.graph_file_name
             _log(stderr, f"Gzipping routing graph for {spec.name}")
             gzip_file(graph_binary_path, gz_output_path)
 
-    return build_location_manifest(region_specs)
+    return build_location_manifest(region_specs, transit_date_ranges=transit_date_ranges)
 
 
 def render_query(query_script: Path, *args: str) -> str:
@@ -432,6 +571,29 @@ def fetch_overpass_json(
                     debug_bundle=debug_bundle,
                 )
             )
+        response_validation = _validate_overpass_response_body(temp_response_path)
+        if response_validation is not None:
+            output_path.unlink(missing_ok=True)
+            debug_bundle = _write_failed_overpass_debug_bundle(
+                output_path=output_path,
+                query_text=query_text,
+                curl_stdout=result.stdout,
+                curl_stderr=result.stderr,
+                response_body_path=temp_response_path,
+                response_headers_path=temp_headers_path,
+            )
+            raise RuntimeError(
+                _format_overpass_failure_message(
+                    request_label=request_label or output_path.name,
+                    output_path=output_path,
+                    overpass_url=overpass_url,
+                    max_time_seconds=max_time_seconds,
+                    curl_exit_code=result.returncode,
+                    http_status=http_status,
+                    debug_bundle=debug_bundle,
+                    response_validation=response_validation,
+                )
+            )
         temp_response_path.replace(output_path)
         _remove_failed_overpass_debug_bundle(output_path)
     finally:
@@ -519,6 +681,7 @@ def _format_overpass_failure_message(
     curl_exit_code: int,
     http_status: int,
     debug_bundle: dict[str, Path],
+    response_validation: str | None = None,
 ) -> str:
     message_lines = [
         f"Overpass request failed for {request_label}",
@@ -527,11 +690,17 @@ def _format_overpass_failure_message(
         f"max_time_seconds={max_time_seconds}",
         f"curl_exit_code={curl_exit_code}",
         f"http_status={http_status}",
-        f"saved_query={debug_bundle['query']}",
-        f"saved_curl_stderr={debug_bundle['stderr']}",
-        f"saved_response_body={debug_bundle['response_body']}",
-        f"saved_response_headers={debug_bundle['response_headers']}",
     ]
+    if response_validation is not None:
+        message_lines.append(f"response_validation={response_validation}")
+    message_lines.extend(
+        [
+            f"saved_query={debug_bundle['query']}",
+            f"saved_curl_stderr={debug_bundle['stderr']}",
+            f"saved_response_body={debug_bundle['response_body']}",
+            f"saved_response_headers={debug_bundle['response_headers']}",
+        ]
+    )
     stdout_path = debug_bundle.get("stdout")
     if stdout_path is not None:
         message_lines.append(f"saved_curl_stdout={stdout_path}")
@@ -546,6 +715,18 @@ def _parse_curl_http_status(stdout_text: str) -> int:
         return int(status_text.splitlines()[-1].strip())
     except ValueError:
         return 0
+
+
+def _validate_overpass_response_body(response_body_path: Path) -> str | None:
+    try:
+        first_element = next(iter_overpass_elements(response_body_path), None)
+    except ValueError as exc:
+        return f"invalid_overpass_json: {exc}"
+
+    if first_element is None:
+        return "empty_overpass_elements"
+
+    return None
 
 
 def main(
@@ -679,7 +860,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="routing,boundary",
         help=(
             "Comma-separated fetch components. Supported values: "
-            "routing, way, ways, boundary, boundaries."
+            "routing, way, ways, boundary, boundaries, transit, gtfs."
         ),
     )
 
@@ -710,7 +891,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="graph,boundary",
         help=(
             "Comma-separated build components. Supported values: "
-            "graph, routing, way, ways, boundary, boundaries."
+            "graph, routing, way, ways, boundary, boundaries, transit, gtfs."
         ),
     )
 
@@ -742,7 +923,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="routing,boundary",
         help=(
             "Comma-separated fetch components. Supported values: "
-            "routing, way, ways, boundary, boundaries."
+            "routing, way, ways, boundary, boundaries, transit, gtfs."
         ),
     )
     all_parser.add_argument(
@@ -750,7 +931,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="graph,boundary",
         help=(
             "Comma-separated build components. Supported values: "
-            "graph, routing, way, ways, boundary, boundaries."
+            "graph, routing, way, ways, boundary, boundaries, transit, gtfs."
         ),
     )
 
@@ -789,6 +970,27 @@ def _normalize_subdivision_discovery_modes(value: object, *, field_name: str) ->
     return tuple(normalized_modes)
 
 
+def _normalize_optional_bool(value: object, *, field_name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a boolean")
+    return value
+
+
+def _normalize_transit_feed(value: object, *, field_name: str) -> TransitFeedSpec | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be an object when provided")
+
+    base_url = _require_non_empty_string(value.get("baseUrl"), f"{field_name}.baseUrl")
+    licence = _require_non_empty_string(value.get("licence"), f"{field_name}.licence")
+
+    return TransitFeedSpec(
+        base_url=base_url.rstrip("/"),
+        licence=licence,
+    )
+
+
 def _normalize_localized_names(value: object, *, field_name: str) -> dict[str, str] | None:
     if value is None:
         return None
@@ -819,6 +1021,8 @@ def _normalize_fetch_components(value: object) -> frozenset[str]:
         "ways": "routing",
         "boundary": "boundary",
         "boundaries": "boundary",
+        "transit": "transit",
+        "gtfs": "transit",
     }
     return frozenset(_normalize_component_aliases(tokens, alias_map, field_name="components"))
 
@@ -832,6 +1036,8 @@ def _normalize_build_components(value: object) -> frozenset[str]:
         "ways": "graph",
         "boundary": "boundary",
         "boundaries": "boundary",
+        "transit": "transit",
+        "gtfs": "transit",
     }
     return frozenset(_normalize_component_aliases(tokens, alias_map, field_name="components"))
 

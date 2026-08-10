@@ -11,14 +11,20 @@ import {
   createWalkingSearchState as appCreateWalkingSearchState,
   mapCanvasPixelToGraphMeters as appMapCanvasPixelToGraphMeters,
   mapClientPointToCanvasPixel as appMapClientPointToCanvasPixel,
+  parseBikeSpeedKphFromLocationSearch as appParseBikeSpeedKphFromLocationSearch,
   parseColourCycleMinutesFromLocationSearch as appParseColourCycleMinutesFromLocationSearch,
+  parseDepartureDatetimeFromLocationSearch as appParseDepartureDatetimeFromLocationSearch,
   parseLocationIdFromLocationSearch as appParseLocationIdFromLocationSearch,
   parseModeValuesFromLocationSearch as appParseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch as appParseNodeIndexFromLocationSearch,
+  parseWalkSpeedKphFromLocationSearch as appParseWalkSpeedKphFromLocationSearch,
+  persistBikeSpeedKphToLocation as appPersistBikeSpeedKphToLocation,
   persistColourCycleMinutesToLocation as appPersistColourCycleMinutesToLocation,
+  persistDepartureDatetimeToLocation as appPersistDepartureDatetimeToLocation,
   persistLocationIdToLocation as appPersistLocationIdToLocation,
   persistModeValuesToLocation as appPersistModeValuesToLocation,
   persistNodeIndexToLocation as appPersistNodeIndexToLocation,
+  persistWalkSpeedKphToLocation as appPersistWalkSpeedKphToLocation,
   runMinHeapSelfTest as appRunMinHeapSelfTest,
   timeToColour as appTimeToColour,
 } from '../src/app.js';
@@ -30,19 +36,26 @@ import {
 import {
   mapCanvasPixelToGraphMeters,
   mapClientPointToCanvasPixel,
+  parseBikeSpeedKphFromLocationSearch,
   parseColourCycleMinutesFromLocationSearch,
+  parseDepartureDatetimeFromLocationSearch,
   parseLocationIdFromLocationSearch,
   parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
+  parseWalkSpeedKphFromLocationSearch,
+  persistBikeSpeedKphToLocation,
   persistColourCycleMinutesToLocation,
+  persistDepartureDatetimeToLocation,
   persistLocationIdToLocation,
   persistModeValuesToLocation,
   persistNodeIndexToLocation,
+  persistWalkSpeedKphToLocation,
 } from '../src/core/coords.js';
 import {
   bindThemeControl,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
+  getSpeedOptionsFromShell,
   initializeAppShell,
 } from '../src/ui/orchestration.js';
 import { bindCanvasClickRouting } from '../src/interaction/canvas-routing.js';
@@ -79,6 +92,12 @@ test('app re-exports coordinate module symbols', () => {
   assert.equal(appPersistLocationIdToLocation, persistLocationIdToLocation);
   assert.equal(appParseNodeIndexFromLocationSearch, parseNodeIndexFromLocationSearch);
   assert.equal(appPersistNodeIndexToLocation, persistNodeIndexToLocation);
+  assert.equal(appParseDepartureDatetimeFromLocationSearch, parseDepartureDatetimeFromLocationSearch);
+  assert.equal(appPersistDepartureDatetimeToLocation, persistDepartureDatetimeToLocation);
+  assert.equal(appParseWalkSpeedKphFromLocationSearch, parseWalkSpeedKphFromLocationSearch);
+  assert.equal(appPersistWalkSpeedKphToLocation, persistWalkSpeedKphToLocation);
+  assert.equal(appParseBikeSpeedKphFromLocationSearch, parseBikeSpeedKphFromLocationSearch);
+  assert.equal(appPersistBikeSpeedKphToLocation, persistBikeSpeedKphToLocation);
 });
 
 test('app re-exports colour module symbols', () => {
@@ -94,6 +113,7 @@ test('ui/input orchestration modules export expected entrypoints', async () => {
   assert.equal(typeof bindThemeControl, 'function');
   assert.equal(typeof getAllowedModeMaskFromShell, 'function');
   assert.equal(typeof getColourCycleMinutesFromShell, 'function');
+  assert.equal(typeof getSpeedOptionsFromShell, 'function');
   assert.equal(typeof bindCanvasClickRouting, 'function');
   assert.equal(typeof bindSvgExportControl, 'function');
   assert.equal(typeof buildRenderedIsochroneSvgDocument, 'function');
@@ -105,6 +125,7 @@ test('ui/input orchestration modules export expected entrypoints', async () => {
   assert.equal(typeof app.bindThemeControl, 'function');
   assert.equal(app.getAllowedModeMaskFromShell, getAllowedModeMaskFromShell);
   assert.equal(app.getColourCycleMinutesFromShell, getColourCycleMinutesFromShell);
+  assert.equal(app.getSpeedOptionsFromShell, getSpeedOptionsFromShell);
   assert.equal(typeof app.bindCanvasClickRouting, 'function');
   assert.equal(appBindSvgExportControl, bindSvgExportControl);
   assert.equal(appBuildRenderedIsochroneSvgDocument, buildRenderedIsochroneSvgDocument);

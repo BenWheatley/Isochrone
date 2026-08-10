@@ -8,9 +8,11 @@ from isochrone_pipeline.adjacency import (
     EDGE_FLAG_RESERVED_RESTRICTION_B,
     EDGE_FLAG_RESERVED_RESTRICTION_C,
     EDGE_FLAG_SIDEWALK_PRESENT,
+    FERRY_FALLBACK_SPEED_KPH,
     MODE_MASK_BIKE,
     MODE_MASK_CAR,
     MODE_MASK_WALK,
+    MODE_MASK_WATER,
     NODE_FLAG_BARRIER,
     NODE_FLAG_CROSSING,
     build_adjacency_graph,
@@ -471,3 +473,143 @@ def test_motorway_foot_yes_reenables_walk_mode() -> None:
     for edge in graph.edges:
         assert (edge.mode_mask & MODE_MASK_WALK) == MODE_MASK_WALK
         assert (edge.mode_mask & MODE_MASK_CAR) == MODE_MASK_CAR
+
+
+def test_ferry_way_mode_mask_is_composite_from_boarding_tags() -> None:
+    extracted = WalkableGraphExtract(
+        ways=(
+            WayCandidate(
+                osm_id=900,
+                highway="ferry",
+                node_ids=(1, 2),
+                constraints={"foot": "yes", "bicycle": "yes", "motor_vehicle": "no"},
+            ),
+        ),
+        node_coords={1: (52.5, 13.4), 2: (52.5001, 13.401)},
+        connector_nodes={},
+        dropped_way_count=0,
+    )
+    projected = _projection({1: (0, 0), 2: (10, 0)})
+
+    graph = build_adjacency_graph(extracted, projected)
+
+    assert len(graph.edges) == 2
+    for edge in graph.edges:
+        assert edge.mode_mask == (MODE_MASK_WALK | MODE_MASK_BIKE | MODE_MASK_WATER)
+        assert (edge.mode_mask & MODE_MASK_CAR) == 0
+
+
+def test_ferry_way_with_no_tags_gets_walk_bike_water_baseline() -> None:
+    extracted = WalkableGraphExtract(
+        ways=(
+            WayCandidate(
+                osm_id=901,
+                highway="ferry",
+                node_ids=(1, 2),
+                constraints={},
+            ),
+        ),
+        node_coords={1: (52.5, 13.4), 2: (52.5001, 13.401)},
+        connector_nodes={},
+        dropped_way_count=0,
+    )
+    projected = _projection({1: (0, 0), 2: (10, 0)})
+
+    graph = build_adjacency_graph(extracted, projected)
+
+    assert len(graph.edges) == 2
+    for edge in graph.edges:
+        assert edge.mode_mask == (MODE_MASK_WALK | MODE_MASK_BIKE | MODE_MASK_WATER)
+
+
+def test_ferry_way_with_foot_no_is_not_globally_disallowed() -> None:
+    extracted = WalkableGraphExtract(
+        ways=(
+            WayCandidate(
+                osm_id=902,
+                highway="ferry",
+                node_ids=(1, 2),
+                constraints={"foot": "no"},
+            ),
+        ),
+        node_coords={1: (52.5, 13.4), 2: (52.5001, 13.401)},
+        connector_nodes={},
+        dropped_way_count=0,
+    )
+    projected = _projection({1: (0, 0), 2: (10, 0)})
+
+    graph = build_adjacency_graph(extracted, projected)
+
+    assert len(graph.edges) == 2
+    for edge in graph.edges:
+        assert edge.mode_mask == (MODE_MASK_BIKE | MODE_MASK_WATER)
+
+
+def test_ferry_way_speed_prefers_duration_over_fallback() -> None:
+    # 12500 m over 00:25 (1500 s) is exactly 30 km/h.
+    extracted = WalkableGraphExtract(
+        ways=(
+            WayCandidate(
+                osm_id=903,
+                highway="ferry",
+                node_ids=(1, 2),
+                constraints={"duration": "00:25"},
+            ),
+        ),
+        node_coords={1: (52.5, 13.4), 2: (52.6, 13.4)},
+        connector_nodes={},
+        dropped_way_count=0,
+    )
+    projected = _projection({1: (0, 0), 2: (12500, 0)})
+
+    graph = build_adjacency_graph(extracted, projected)
+
+    assert len(graph.edges) == 2
+    for edge in graph.edges:
+        assert edge.maxspeed_kph == 30
+
+
+def test_ferry_way_speed_prefers_maxspeed_over_duration() -> None:
+    extracted = WalkableGraphExtract(
+        ways=(
+            WayCandidate(
+                osm_id=904,
+                highway="ferry",
+                node_ids=(1, 2),
+                constraints={"maxspeed": "40", "duration": "00:25"},
+            ),
+        ),
+        node_coords={1: (52.5, 13.4), 2: (52.6, 13.4)},
+        connector_nodes={},
+        dropped_way_count=0,
+    )
+    projected = _projection({1: (0, 0), 2: (12500, 0)})
+
+    graph = build_adjacency_graph(extracted, projected)
+
+    assert len(graph.edges) == 2
+    for edge in graph.edges:
+        assert edge.maxspeed_kph == 40
+
+
+def test_ferry_way_falls_back_to_flat_speed_without_maxspeed_or_duration() -> None:
+    extracted = WalkableGraphExtract(
+        ways=(
+            WayCandidate(
+                osm_id=905,
+                highway="ferry",
+                node_ids=(1, 2),
+                constraints={},
+            ),
+        ),
+        node_coords={1: (52.5, 13.4), 2: (52.5001, 13.401)},
+        connector_nodes={},
+        dropped_way_count=0,
+    )
+    projected = _projection({1: (0, 0), 2: (10, 0)})
+
+    graph = build_adjacency_graph(extracted, projected)
+
+    assert len(graph.edges) == 2
+    for edge in graph.edges:
+        assert edge.maxspeed_kph == FERRY_FALLBACK_SPEED_KPH

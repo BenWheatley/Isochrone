@@ -8,7 +8,11 @@
       "graphSummaryFileName": "graph-binary-summary.json",
       "locationRelation": "rel(62422)[\"name\"=\"Berlin\"][\"wikidata\"=\"Q64\"]",
       "subdivisionAdminLevel": "9",
-      "epsg": 25833
+      "epsg": 25833,
+      "transitFeed": {
+        "baseUrl": "https://vbb-gtfs.jannisr.de/latest",
+        "licence": "CC BY 4.0 — VBB (Verkehrsverbund Berlin-Brandenburg); mirrored via vbb-gtfs.jannisr.de because VBB's directly-served gtfs.zip has a reproducibly corrupted stop_times.txt entry"
+      }
     },
     {
       "id": "paris",
@@ -40,7 +44,7 @@
       },
       "graphFileName": "athens-graph.bin.gz",
       "boundaryFileName": "athens-district-boundaries-canvas.json",
-      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q1524\"]",
+      "locationRelation": "rel(1370736)[\"name\"=\"Athens\"][\"wikidata\"=\"Q1524\"]",
       "subdivisionAdminLevel": "10",
       "epsg": 2100
     },
@@ -61,14 +65,15 @@
       "boundaryFileName": "rome-district-boundaries-canvas.json",
       "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q220\"]",
       "subdivisionAdminLevel": "10",
-      "epsg": 32633
+      "epsg": 32633,
+      "coastal": true
     },
     {
       "id": "portsmouth",
       "name": "Portsmouth",
       "graphFileName": "portsmouth-graph.bin.gz",
       "boundaryFileName": "portsmouth-district-boundaries-canvas.json",
-      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q72259\"]",
+      "locationRelation": "rel(127167)[\"name\"=\"Portsmouth\"][\"wikidata\"=\"Q72259\"]",
       "subdivisionAdminLevel": "10",
       "epsg": 27700
     },
@@ -79,7 +84,8 @@
       "boundaryFileName": "rhode-island-district-boundaries-canvas.json",
       "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q1387\"]",
       "subdivisionAdminLevel": "6",
-      "epsg": 32130
+      "epsg": 32130,
+      "coastal": true
     },
     {
       "id": "luxembourg-country",
@@ -101,7 +107,8 @@
       "boundaryFileName": "singapore-district-boundaries-canvas.json",
       "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q334\"]",
       "subdivisionAdminLevel": "6",
-      "epsg": 3414
+      "epsg": 3414,
+      "coastal": true
     },
     {
       "id": "adelaide",
@@ -120,6 +127,55 @@
       "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q3335223\"]",
       "subdivisionAdminLevel": "7",
       "epsg": 32737
+    },
+    {
+      "id": "mexico-city",
+      "name": "Mexico City",
+      "localizedNames": {
+        "es": "Ciudad de México"
+      },
+      "graphFileName": "mexico-city-graph.bin.gz",
+      "boundaryFileName": "mexico-city-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q1489\"]",
+      "subdivisionAdminLevel": "8",
+      "epsg": 32614
+    },
+    {
+      "id": "ottawa",
+      "name": "Ottawa",
+      "graphFileName": "ottawa-graph.bin.gz",
+      "boundaryFileName": "ottawa-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q1930\"]",
+      "subdivisionAdminLevel": "9",
+      "epsg": 32618
+    },
+    {
+      "id": "zurich-canton",
+      "name": "Canton of Zurich",
+      "localizedNames": {
+        "de": "Kanton Zürich",
+        "fr": "Canton de Zurich",
+        "it": "Canton Zurigo"
+      },
+      "graphFileName": "zurich-canton-graph.bin.gz",
+      "boundaryFileName": "zurich-canton-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q11943\"]",
+      "subdivisionAdminLevel": "6",
+      "epsg": 2056
+    },
+    {
+      "id": "cyprus",
+      "name": "Cyprus",
+      "localizedNames": {
+        "el": "Κύπρος",
+        "tr": "Kıbrıs"
+      },
+      "graphFileName": "cyprus-graph.bin.gz",
+      "boundaryFileName": "cyprus-district-boundaries-canvas.json",
+      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q229\"]",
+      "subdivisionAdminLevel": "6",
+      "epsg": 32636,
+      "coastal": true
     }
   ]
 }

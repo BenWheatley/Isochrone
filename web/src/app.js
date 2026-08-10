@@ -1,24 +1,19 @@
 import {
-  BYTES_PER_MEBIBYTE,
   DEFAULT_BOUNDARY_BASEMAP_URL,
   DEFAULT_GRAPH_BINARY_URL,
   DEFAULT_LOCATION_ID,
   DEFAULT_LOCATION_NAME,
+  DEFAULT_TRANSIT_WALK_BUDGET_MINUTES,
   EDGE_INTERPOLATION_SLACK_SECONDS,
   EDGE_MODE_BIKE_BIT,
   EDGE_MODE_CAR_BIT,
   EDGE_MODE_WALK_BIT,
-  EDGE_RECORD_SIZE,
+  EDGE_MODE_WATER_BIT,
   FINAL_EDGE_INTERPOLATION_STEP_STRIDE,
-  GRAPH_MAGIC,
-  HEADER_SIZE,
   INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE,
-  LOADING_FADE_MS,
-  NODE_RECORD_SIZE,
-  SUPPORTED_GRAPH_VERSIONS,
+  TRANSIT_ONLY_ALLOWED_MODE_MASK,
 } from './config/constants.js';
 import {
-  getEdgeTraversalCostSeconds,
   getOrCreateEdgeTraversalCostSecondsCache,
   nodeHasAllowedModeOutgoingEdge,
   precomputeEdgeTraversalCostSecondsCache,
@@ -37,7 +32,13 @@ import {
   resolveViewportFrame,
 } from './core/viewport.js';
 import {
+  computeProjectedFeatureListBoundingBoxPx,
+  getAirportFillStyle,
   getBoundaryStrokeStyle,
+  getBoundaryWaterFillStyle,
+  getForestFillStyle,
+  getInlandWaterFillStyle,
+  getWaterwayStrokeStyle,
   isClosedPath,
   parseBoundaryBasemapPayload,
   projectBoundaryBasemapToGraphPaths,
@@ -53,33 +54,35 @@ import {
   bindHeaderMenuControl as bindHeaderMenuControlInternal,
   bindPointerButtonInversionControl as bindPointerButtonInversionControlInternal,
   bindThemeControl as bindThemeControlInternal,
+  bindUnitSystemControl,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
+  getSelectedTransportModeLabels,
+  getSpeedOptionsFromShell,
+  getTransitOptionsFromShell,
   initializeAppShell,
   bindModeSelectControl as bindModeSelectControlInternal,
   populateLocationSelect,
+  updateTransitControlAvailability,
 } from './ui/orchestration.js';
 import {
-  formatCommonMessage,
-  getCommonMessage,
   loadCommonLocaleBundle,
 } from './ui/localization.js';
 import {
-  formatLegendRange,
-  formatLegendRepeatNote,
 } from './ui/legend-format.js';
 import { bindCanvasClickRouting as bindCanvasClickRoutingInternal } from './interaction/canvas-routing.js';
 import {
   bindSvgExportControl,
   exportCurrentRenderedIsochroneSvg,
-  formatIsochroneExportTitle,
 } from './export/svg.js';
+import { collectRenderedIsochroneScene } from './export/scene.js';
 import {
-  CYCLE_COLOUR_MAP_GLSL,
+  bindPrintControl,
+  printCurrentRenderedIsochrone,
+} from './export/print.js';
+import {
   DEFAULT_COLOUR_CYCLE_MINUTES,
-  getIsochronePalette,
   normalizeIsochroneTheme,
-  timeToColour,
 } from './render/colour.js';
 import {
   validateGraphForNodePixels,
@@ -92,6 +95,113 @@ import {
   instantiateRoutingKernelWasm,
 } from './wasm/routing-kernel.js';
 
+import {
+  blitPixelGridToCanvas,
+  getOrCreateIsochroneRenderer,
+} from './render/isochrone-renderer.js';
+import {
+} from './core/graph-binary.js';
+import {
+  buildTransitConnectionEdgeVertexData,
+  runConnectionScanFromWalkingReachableStops,
+} from './core/transit-csa.js';
+import {
+  validateDistSeconds,
+  validateEdgeTraversalCostSecondsLookup,
+  validateNodePixels,
+  validateSearchState,
+} from './core/routing-validation.js';
+export {
+  buildTransitConnectionEdgeVertexData,
+  runConnectionScanFromWalkingReachableStops,
+} from './core/transit-csa.js';
+import {
+  fetchBinaryWithProgress,
+  maybeDecompressGzipBuffer,
+  parseGraphBinary,
+} from './core/graph-binary.js';
+import {
+  clampInt,
+} from './core/math.js';
+import {
+  resolveIsochroneTheme,
+} from './ui/theme.js';
+import {
+  WASM_REQUIRED_MESSAGE,
+  ensureWasmSupportOrShowError,
+  fadeOutLoadingOverlay,
+  formatInitialGraphLoadingText,
+  formatRoutingStatusCalculating,
+  formatRoutingStatusDone,
+  formatRoutingStatusNoReachable,
+  formatRoutingStatusPreview,
+  getLocalizedShellText,
+  getRoutingFailedStatusText,
+  getShellLocaleMessages,
+  setRoutingStatus,
+  showLoadingOverlay,
+  updateGraphLoadingText,
+  updateRenderBackendBadge,
+} from './ui/status.js';
+import {
+  renderIsochroneLegendIfNeeded,
+  updateDistanceScaleBar,
+} from './ui/legend-scale.js';
+import {
+  collectSettledBatchTravelTimeEdgeVertices,
+  createEdgeVertexBufferBuilder,
+  paintAllReachableEdgeInterpolationsToGrid,
+  paintAllReachableEdgeInterpolationsToTravelTimeGrid,
+  paintReachableNodesToGrid,
+  paintReachableNodesTravelTimesToGrid,
+  paintSettledBatchEdgeInterpolationsToGrid,
+  paintSettledBatchEdgeInterpolationsToTravelTimeGrid,
+  paintSettledBatchToGrid,
+  paintSettledBatchTravelTimesToGrid,
+} from './render/edge-painting.js';
+export {
+  collectAllReachableTravelTimeEdgeVertices,
+  collectSettledBatchTravelTimeEdgeVertices,
+  interpolateEdgeTravelSeconds,
+  paintAllReachableEdgeInterpolationsToGrid,
+  paintAllReachableEdgeInterpolationsToTravelTimeGrid,
+  paintInterpolatedEdgeToGrid,
+  paintInterpolatedEdgeTravelTimesToGrid,
+  paintReachableNodesToGrid,
+  paintReachableNodesTravelTimesToGrid,
+  paintSettledBatchEdgeInterpolationsToGrid,
+  paintSettledBatchEdgeInterpolationsToTravelTimeGrid,
+  paintSettledBatchToGrid,
+  paintSettledBatchTravelTimesToGrid,
+  rasterizeLinePixels,
+} from './render/edge-painting.js';
+export {
+  computeExportDistanceScaleBar,
+  renderIsochroneLegend,
+  renderIsochroneLegendIfNeeded,
+  updateDistanceScaleBar,
+} from './ui/legend-scale.js';
+export {
+  WASM_REQUIRED_MESSAGE,
+  ensureWasmSupportOrShowError,
+  formatRenderBackendBadgeText,
+  formatRoutingStatusCalculating,
+  formatRoutingStatusDone,
+  formatRoutingStatusNoReachable,
+  formatRoutingStatusPreview,
+  getRoutingFailedStatusText,
+} from './ui/status.js';
+export {
+  fetchBinaryWithProgress,
+  maybeDecompressGzipBuffer,
+  parseGraphBinary,
+} from './core/graph-binary.js';
+export {
+  blitPixelGridToCanvas,
+  createIsochroneRenderer,
+  createWebGlIsochroneRenderer,
+  shouldUploadEdgeGeometry,
+} from './render/isochrone-renderer.js';
 export {
   DEFAULT_BOUNDARY_BASEMAP_URL,
   DEFAULT_GRAPH_BINARY_URL,
@@ -103,21 +213,31 @@ export { createWalkingSearchState, computeEdgeTraversalCostSeconds } from './cor
 export {
   mapCanvasPixelToGraphMeters,
   mapClientPointToCanvasPixel,
+  parseBikeSpeedKphFromLocationSearch,
   parseColourCycleMinutesFromLocationSearch,
+  parseDepartureDatetimeFromLocationSearch,
   parseLocationIdFromLocationSearch,
   parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
+  parseWalkSpeedKphFromLocationSearch,
+  persistBikeSpeedKphToLocation,
   persistColourCycleMinutesToLocation,
+  persistDepartureDatetimeToLocation,
   persistLocationIdToLocation,
   persistModeValuesToLocation,
   persistNodeIndexToLocation,
+  persistWalkSpeedKphToLocation,
 } from './core/coords.js';
 export {
   initializeAppShell,
   bindLocationSelectControl,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
+  getSelectedTransportModeLabels,
+  getSpeedOptionsFromShell,
+  getTransitOptionsFromShell,
   populateLocationSelect,
+  updateTransitControlAvailability,
 } from './ui/orchestration.js';
 export {
   bindSvgExportControl,
@@ -126,10 +246,15 @@ export {
   exportCurrentRenderedIsochroneSvg,
   formatIsochroneExportTitle,
 } from './export/svg.js';
+export { collectRenderedIsochroneScene } from './export/scene.js';
+export {
+  bindPrintControl,
+  buildIsochronePrintDocument,
+  printCurrentRenderedIsochrone,
+} from './export/print.js';
 export { timeToColour } from './render/colour.js';
 
-export const WASM_REQUIRED_MESSAGE =
-  'Your browser does not support WASM, this app requires WASM for performance reasons';
+const TRANSIT_WALK_BUDGET_SCRATCH_PROPERTY = '__transitWalkBudgetDistSeconds';
 const WASM_EDGE_COST_TICK_SCALE = 1_000;
 const EDGE_TRAVERSAL_COST_TICK_CACHE_PROPERTY = '__edgeTraversalCostTicksByModeMask';
 const MODE_SPECIFIC_KERNEL_GRAPH_VIEWS_CACHE_PROPERTY = '__modeSpecificKernelGraphViewsByModeMask';
@@ -139,7 +264,8 @@ export function precomputeNodeModeMask(graph) {
   validateGraphForRouting(graph);
 
   const nodeModeMask = new Uint8Array(graph.header.nNodes);
-  const supportedModeMask = EDGE_MODE_WALK_BIT | EDGE_MODE_BIKE_BIT | EDGE_MODE_CAR_BIT;
+  const supportedModeMask =
+    EDGE_MODE_WALK_BIT | EDGE_MODE_BIKE_BIT | EDGE_MODE_CAR_BIT | EDGE_MODE_WATER_BIT;
 
   for (let nodeIndex = 0; nodeIndex < graph.header.nNodes; nodeIndex += 1) {
     const firstEdgeIndex = graph.nodeU32[nodeIndex * 4 + 2];
@@ -537,6 +663,8 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     getAllowedModeMaskFromShell,
     getColourCycleMinutesFromShell,
     getRoutingFailedStatusText,
+    getSpeedOptionsFromShell,
+    getTransitOptionsFromShell,
     mapClientPointToCanvasPixel,
     parseNodeIndexFromLocationSearch,
     persistNodeIndexToLocation,
@@ -553,6 +681,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
           {
             colourTheme: resolveIsochroneTheme(),
             viewport: currentMapData.viewport,
+            fitBoundingBoxPx: currentMapData.boundaryFitBoundingBoxPx,
           },
         );
       }
@@ -599,23 +728,47 @@ export async function runWalkingIsochroneFromSourceNode(
     throw new Error('WASM routing kernel is required and must expose precompute/search methods');
   }
 
+  const walkingSpeedMps = options.walkingSpeedMps;
+  const bikeCruiseSpeedKph = options.bikeCruiseSpeedKph;
+
+  // Public transit on its own still involves walking - to the first stop,
+  // between stops when changing, and away from the last one. That walking is
+  // ordinary pedestrian movement and must follow the walk graph, so it
+  // respects rivers, railways, private land and everything else the graph
+  // already encodes; what keeps "transit only" honest is that each walking
+  // leg is capped by the user's budget rather than being unlimited.
+  const isTransitOnlyRouting = allowedModeMask === TRANSIT_ONLY_ALLOWED_MODE_MASK;
+  const transitWalkBudgetSeconds =
+    Number.isFinite(options.transitWalkBudgetSeconds) && options.transitWalkBudgetSeconds >= 0
+      ? options.transitWalkBudgetSeconds
+      : DEFAULT_TRANSIT_WALK_BUDGET_MINUTES * 60;
+  // The sentinel mask is a UI-level signal, never a graph mask: the legs it
+  // describes are walked, so every cost/graph structure below is built for
+  // walking.
+  const legModeMask = isTransitOnlyRouting ? EDGE_MODE_WALK_BIT : allowedModeMask;
+  const firstLegTimeLimitSeconds = isTransitOnlyRouting
+    ? Math.min(timeLimitSeconds, transitWalkBudgetSeconds)
+    : timeLimitSeconds;
+
   const edgeTraversalCostSeconds = precomputeEdgeTraversalCostSecondsCache(
     mapData.graph,
-    allowedModeMask,
+    legModeMask,
     null,
     {
       edgeCostPrecomputeKernel,
       onKernelError: options.onKernelError ?? null,
+      walkingSpeedMps,
+      bikeCruiseSpeedKph,
     },
   );
   const edgeTraversalCostTicks = getOrBuildEdgeTraversalCostTicksForMode(
     mapData.graph,
-    allowedModeMask,
+    legModeMask,
     edgeTraversalCostSeconds,
   );
   const kernelGraphViews = getOrBuildModeSpecificKernelGraphViews(
     mapData,
-    allowedModeMask,
+    legModeMask,
     edgeTraversalCostTicks,
   );
   const distSeconds = getOrRotateRoutingDistScratchBuffer(
@@ -628,8 +781,8 @@ export async function runWalkingIsochroneFromSourceNode(
   const searchState = {
     graph: mapData.graph,
     sourceNodeIndex,
-    timeLimitSeconds,
-    allowedModeMask,
+    timeLimitSeconds: firstLegTimeLimitSeconds,
+    allowedModeMask: legModeMask,
     heapStrategy: 'wasm-kernel',
     edgeTraversalCostSeconds,
     distSeconds,
@@ -654,7 +807,7 @@ export async function runWalkingIsochroneFromSourceNode(
         outDistSeconds: distSeconds,
         sourceNodeIndex,
         returnSharedOutputView: true,
-        timeLimitSeconds,
+        timeLimitSeconds: firstLegTimeLimitSeconds,
       });
       if (
         kernelResult
@@ -683,19 +836,189 @@ export async function runWalkingIsochroneFromSourceNode(
 
   const runSummary = await runSearchTimeSlicedWithRendering(shell, mapData, searchState, options);
   if (!runSummary.cancelled) {
+    let finalDistSeconds = searchState.distSeconds;
+    let finalEdgeVertexData = runSummary.edgeVertexData ?? null;
+    let transitAugmented = false;
+    let transitEdgeVertexData = null;
+
+    const nStops = mapData.graph.header.nStops;
+    if (
+      Number.isInteger(nStops)
+      && nStops > 0
+      && options.transitEnabled
+      && Number.isFinite(options.departureSecondsOfDay)
+      && Number.isInteger(options.departureWeekdayIndex)
+    ) {
+      const csaResult = runConnectionScanFromWalkingReachableStops(
+        mapData.graph,
+        finalDistSeconds,
+        {
+          departureSecondsOfDay: options.departureSecondsOfDay,
+          departureWeekdayIndex: options.departureWeekdayIndex,
+          timeLimitSeconds,
+          walkingSpeedMps,
+        },
+      );
+      if (csaResult.renderableTedgeIndices.length > 0) {
+        transitEdgeVertexData = buildTransitConnectionEdgeVertexData(
+          mapData.graph,
+          mapData.nodePixels,
+          csaResult.renderableTedgeIndices,
+          csaResult.stopElapsedSeconds,
+        );
+        transitAugmented = transitEdgeVertexData.length > 0;
+      }
+      if (csaResult.seedNodeIndices.length > 0) {
+        const seedNodeIndices = new Uint32Array(csaResult.seedNodeIndices.length + 1);
+        const seedStartDistSeconds = new Float32Array(csaResult.seedStartDistSeconds.length + 1);
+        seedNodeIndices[0] = sourceNodeIndex;
+        seedStartDistSeconds[0] = 0;
+        seedNodeIndices.set(csaResult.seedNodeIndices, 1);
+        seedStartDistSeconds.set(csaResult.seedStartDistSeconds, 1);
+
+        const transitDistSeconds = getOrRotateRoutingDistScratchBuffer(
+          mapData,
+          mapData.graph.header.nNodes,
+        );
+        const multiSourceResult = edgeCostPrecomputeKernel.computeTravelTimeFieldMultiSourceForGraph({
+          nodeFirstEdgeIndex: kernelGraphViews.nodeFirstEdgeIndex,
+          nodeEdgeCount: kernelGraphViews.nodeEdgeCount,
+          edgeTargetNodeIndex: kernelGraphViews.edgeTargetNodeIndex,
+          edgeCostTicks: kernelGraphViews.edgeCostTicks,
+          outDistSeconds: transitDistSeconds,
+          seedNodeIndices,
+          seedStartDistSeconds,
+          // Not the shared view: the walk-budget run below is another kernel
+          // call, and each one reuses the same output region in WASM memory,
+          // so a view handed out here would be overwritten under our feet.
+          returnSharedOutputView: false,
+          timeLimitSeconds,
+        });
+        void multiSourceResult;
+        finalDistSeconds = transitDistSeconds;
+
+        if (isTransitOnlyRouting) {
+          // Pass 2 spreads outward from every stop the rider could reach, but
+          // a plain Dijkstra has no notion of "walking since I last got off",
+          // so left alone it would happily walk for hours from a stop reached
+          // early. Recompute how far a walker can get from *any* reached stop
+          // within one budget and drop everything beyond that, which is what
+          // bounds the final leg.
+          applyTransitWalkBudgetReachability(
+            mapData,
+            finalDistSeconds,
+            seedNodeIndices,
+            transitWalkBudgetSeconds,
+            { edgeCostPrecomputeKernel, kernelGraphViews },
+          );
+        }
+        // Edge-interpolation vertex buffers were built from the walk-only
+        // pass; invalidate so the next render lazily rebuilds them from
+        // the transit-augmented distances (getOrBuildSnapshotEdgeVertexData
+        // is a generic function of snapshot.distSeconds, no special-casing
+        // needed here beyond clearing the stale cache).
+        finalEdgeVertexData = null;
+        transitAugmented = true;
+      }
+    }
+
     mapData.lastRoutingSnapshot = {
       sourceNodeIndex,
-      distSeconds: searchState.distSeconds,
+      distSeconds: finalDistSeconds,
       allowedModeMask,
+      walkingSpeedMps,
+      bikeCruiseSpeedKph,
       edgeTraversalCostSeconds,
       colourCycleMinutes: options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
-      edgeVertexData: runSummary.edgeVertexData ?? null,
-      edgeVertexDataModeMask:
-        runSummary.edgeVertexData instanceof Float32Array ? allowedModeMask : null,
+      edgeVertexData: finalEdgeVertexData,
+      edgeVertexDataModeMask: finalEdgeVertexData instanceof Float32Array ? allowedModeMask : null,
+      transitEdgeVertexData,
     };
-    runPostMvpTransitStub(mapData.graph, searchState);
+
+    // runSearchTimeSlicedWithRendering already painted the canvas from the
+    // walk-only pass-1 distances (searchState.distSeconds) before this
+    // function ever runs CSA/pass-2 above — that paint call has no way to
+    // know a transit augmentation is coming. Without this, the canvas would
+    // silently keep showing the walk-only isochrone even though
+    // mapData.lastRoutingSnapshot (and any subsequent SVG export) reflects
+    // the correct transit-augmented times.
+    if (transitAugmented) {
+      rerenderIsochroneFromSnapshot(shell, mapData, {
+        allowedModeMask,
+        colourCycleMinutes: options.colourCycleMinutes,
+        colourTheme: options.colourTheme,
+      });
+      // The status text above was already set by
+      // runSearchTimeSlicedWithRendering from the walk-only pass-1 result
+      // (including a possible "no reachable network" verdict) before this
+      // function's CSA/pass-2 step ever ran - correct it now that
+      // finalDistSeconds reflects the transit-augmented reality.
+      if (shell.routingStatus) {
+        const transitReachedCount = countFiniteTravelTimes(finalDistSeconds);
+        setRoutingStatus(
+          shell,
+          transitReachedCount > 1
+            ? formatRoutingStatusDone(null, { messages: getShellLocaleMessages(shell) })
+            : formatRoutingStatusNoReachable(null, { messages: getShellLocaleMessages(shell) }),
+        );
+      }
+    }
   }
   return runSummary;
+}
+
+/**
+ * Restricts a transit-only field to nodes within one walking budget of
+ * somewhere the rider can actually be: the origin, or a stop transit got them
+ * to. `seedNodeIndices` is exactly that set (pass 2 seeds the origin at index
+ * 0 followed by every reached stop), so re-running the walk search from all of
+ * them at zero cost measures "how far from the nearest boarding/alighting
+ * point is this node", which is precisely what the budget caps.
+ *
+ * Applied as a mask afterwards rather than as a constraint inside the search,
+ * because "walking done since last alighting" is a second cost dimension and a
+ * label-setting Dijkstra settles on one. The resulting set of reachable nodes
+ * is exact; the times within it are pass 2's unconstrained optimum, which for
+ * a node whose quickest stop lies further than the budget away can be slightly
+ * optimistic - it reports that quicker-but-not-walkable journey instead of the
+ * legal slower one. Making that exact needs Pareto labels in the kernel.
+ */
+function applyTransitWalkBudgetReachability(
+  mapData,
+  distSeconds,
+  boardingNodeIndices,
+  walkBudgetSeconds,
+  { edgeCostPrecomputeKernel, kernelGraphViews },
+) {
+  const nodeCount = mapData.graph.header.nNodes;
+  let walkOnlyDistSeconds = mapData[TRANSIT_WALK_BUDGET_SCRATCH_PROPERTY];
+  if (!(walkOnlyDistSeconds instanceof Float32Array) || walkOnlyDistSeconds.length !== nodeCount) {
+    walkOnlyDistSeconds = new Float32Array(nodeCount);
+    mapData[TRANSIT_WALK_BUDGET_SCRATCH_PROPERTY] = walkOnlyDistSeconds;
+  }
+
+  edgeCostPrecomputeKernel.computeTravelTimeFieldMultiSourceForGraph({
+    nodeFirstEdgeIndex: kernelGraphViews.nodeFirstEdgeIndex,
+    nodeEdgeCount: kernelGraphViews.nodeEdgeCount,
+    edgeTargetNodeIndex: kernelGraphViews.edgeTargetNodeIndex,
+    edgeCostTicks: kernelGraphViews.edgeCostTicks,
+    outDistSeconds: walkOnlyDistSeconds,
+    seedNodeIndices: boardingNodeIndices,
+    // All zero: this run measures walking away from a boarding point, not
+    // total journey time.
+    seedStartDistSeconds: new Float32Array(boardingNodeIndices.length),
+    returnSharedOutputView: false,
+    timeLimitSeconds: walkBudgetSeconds,
+  });
+
+  for (let nodeIndex = 0; nodeIndex < nodeCount; nodeIndex += 1) {
+    if (!Number.isFinite(distSeconds[nodeIndex])) {
+      continue;
+    }
+    if (!(walkOnlyDistSeconds[nodeIndex] <= walkBudgetSeconds)) {
+      distSeconds[nodeIndex] = Number.POSITIVE_INFINITY;
+    }
+  }
 }
 
 async function loadEdgeCostPrecomputeKernel(options = {}) {
@@ -1156,6 +1479,25 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   const supportsGpuIndexedEdgeInterpolation =
     typeof renderer.drawTravelTimeEdgesFromNodeTimes === 'function';
   const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
+  // Under the transit-only sentinel mask no real road/ferry edge ever
+  // matches allowedModeMask, so the isochrone is carried entirely by the
+  // transit connections the CSA scan found. Those come with their own
+  // per-endpoint times and must go through the plain edge renderer, not the
+  // node-indexed one - see buildTransitConnectionEdgeVertexData for why.
+  const isTransitOnlyAllowedModeMask = allowedModeMask === TRANSIT_ONLY_ALLOWED_MODE_MASK;
+
+  if (supportsGpuEdgeInterpolation && isTransitOnlyAllowedModeMask) {
+    renderer.drawTravelTimeEdges(snapshot.transitEdgeVertexData ?? new Float32Array(0), {
+      cycleMinutes: colourCycleMinutes,
+      colourTheme,
+      append: false,
+      graphWidthPx: mapData.graph.header.gridWidthPx,
+      graphHeightPx: mapData.graph.header.gridHeightPx,
+      viewport,
+      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+    });
+    return true;
+  }
 
   if (supportsGpuEdgeInterpolation) {
     const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
@@ -1188,6 +1530,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
           graphHeightPx: mapData.graph.header.gridHeightPx,
           edgeSlackSeconds: EDGE_INTERPOLATION_SLACK_SECONDS,
           viewport,
+          fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
         },
       );
       return true;
@@ -1204,6 +1547,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
       graphWidthPx: mapData.graph.header.gridWidthPx,
       graphHeightPx: mapData.graph.header.gridHeightPx,
       viewport,
+      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
     });
     return true;
   }
@@ -1235,6 +1579,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
       cycleMinutes: colourCycleMinutes,
       colourTheme,
       viewport,
+      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
     });
     return true;
   }
@@ -1265,7 +1610,10 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
         colourTheme,
       },
     );
-    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, { viewport });
+    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
+      viewport,
+      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+    });
     return true;
   }
 
@@ -1296,35 +1644,45 @@ export function rerenderIsochroneFromSnapshotWithStatus(shell, mapData, options 
   return true;
 }
 
-export function runPostMvpTransitStub(graph, walkingSearchState) {
-  validateGraphForRouting(graph);
+/**
+ * Connection Scan Algorithm pass: given a completed walking search's
+ * distSeconds and a departure date/time, finds the earliest transit arrival
+ * at every stop reachable from the walking-reachable set, and returns seed
+ * arrays for a second multi-source Dijkstra pass (see
+ * runWalkingIsochroneFromSourceNode). The build-time pipeline
+ * (data_pipeline/gtfs_transit.py) now includes every weekday-recurring
+ * service across the feed's whole calendar window, not just one reference
+ * day, so this scan filters each connection against
+ * graph.tedgeServiceDayMask using the departure date's ISO weekday bit
+ * (0=Monday..6=Sunday) before accepting it. Connections are stored sorted
+ * by time-of-day departure regardless of which weekday(s) they run on, so
+ * the scan can still break out early once departures exceed the time
+ * budget. Besides the seed arrays, the returned usedTedgeIndices lists
+ * every connection whose boarding stop was reachable in time - not just
+ * the one that won each stop's earliest-arrival race - so rendering can
+ * draw the whole boardable transit network (see
+ * buildTransitConnectionEdgeVertexData) rather than a sparse spanning
+ * tree.
+ */
 
-  if (!walkingSearchState || typeof walkingSearchState !== 'object') {
-    throw new Error('walkingSearchState must be an object');
-  }
-  if (typeof walkingSearchState.isDone !== 'function' || !walkingSearchState.isDone()) {
-    throw new Error('walkingSearchState must be complete before transit integration');
-  }
-
-  const nStops = graph.header.nStops;
-  if (!Number.isInteger(nStops) || nStops < 0) {
-    throw new Error('graph.header.nStops must be a non-negative integer');
-  }
-  if (nStops === 0) {
-    return {
-      nStops,
-      ranCsa: false,
-      reranWalkingDijkstra: false,
-    };
-  }
-
-  // POST-MVP: run CSA here, then re-run Dijkstra from transit-reached stops
-  return {
-    nStops,
-    ranCsa: false,
-    reranWalkingDijkstra: false,
-  };
-}
+/**
+ * Builds edge vertex data for transit connections in the plain
+ * (x, y, seconds) x 2 layout that drawTravelTimeEdges and the SVG exporter
+ * both consume, colouring each end by the CSA's earliest arrival at that
+ * stop.
+ *
+ * Deliberately NOT the node-indexed layout used for road/ferry edges. That
+ * path looks each endpoint's time up from a per-node texture and keeps an
+ * edge only when `startSeconds + edgeCost <= targetSeconds + slack` - a
+ * shortest-path-tree test that is right for roads and wrong for transit
+ * three times over: per-node times can't represent stops that share an
+ * attachment node; a connection's in-vehicle time excludes the wait for the
+ * vehicle, so the inequality rejects every non-optimal connection; and
+ * under the transit-only mask most stop nodes have no finite time at all.
+ * Together those silently dropped most connections, which is what made
+ * consecutive hops of one route (A->B->C->D) render as disconnected
+ * fragments. Explicit per-endpoint times avoid all three.
+ */
 
 export function bindModeSelectControl(shell, options = {}) {
   return bindModeSelectControlInternal(shell, {
@@ -1405,23 +1763,36 @@ export function getOrBuildEdgeTraversalCostTicksForMode(
     graph[EDGE_TRAVERSAL_COST_TICK_CACHE_PROPERTY] = cacheByModeMask;
   }
 
-  let edgeTraversalCostTicks = cacheByModeMask[allowedModeMask];
+  // Keyed on reference identity of edgeTraversalCostSeconds (not just
+  // allowedModeMask) — precomputeEdgeTraversalCostSecondsCache hands back a
+  // freshly-keyed array whenever the effective walk/bike speed changes for
+  // the same mode mask, so a stale ticks array from a previous speed must
+  // not be reused just because the mask matches.
+  const cached = cacheByModeMask[allowedModeMask];
   if (
-    !(edgeTraversalCostTicks instanceof Uint32Array)
-    || edgeTraversalCostTicks.length < graph.header.nEdges
+    cached
+    && typeof cached === 'object'
+    && cached.sourceCostSecondsRef === edgeTraversalCostSeconds
+    && cached.ticks instanceof Uint32Array
+    && cached.ticks.length >= graph.header.nEdges
   ) {
-    edgeTraversalCostTicks = new Uint32Array(graph.header.nEdges);
-    for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
-      const costSeconds = edgeTraversalCostSeconds[edgeIndex];
-      if (!Number.isFinite(costSeconds) || costSeconds <= 0) {
-        edgeTraversalCostTicks[edgeIndex] = 0;
-        continue;
-      }
-      const ticks = Math.ceil(costSeconds * WASM_EDGE_COST_TICK_SCALE);
-      edgeTraversalCostTicks[edgeIndex] = ticks >= 0xffff_ffff ? 0xffff_ffff : ticks;
-    }
-    cacheByModeMask[allowedModeMask] = edgeTraversalCostTicks;
+    return cached.ticks;
   }
+
+  const edgeTraversalCostTicks = new Uint32Array(graph.header.nEdges);
+  for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
+    const costSeconds = edgeTraversalCostSeconds[edgeIndex];
+    if (!Number.isFinite(costSeconds) || costSeconds <= 0) {
+      edgeTraversalCostTicks[edgeIndex] = 0;
+      continue;
+    }
+    const ticks = Math.ceil(costSeconds * WASM_EDGE_COST_TICK_SCALE);
+    edgeTraversalCostTicks[edgeIndex] = ticks >= 0xffff_ffff ? 0xffff_ffff : ticks;
+  }
+  cacheByModeMask[allowedModeMask] = {
+    ticks: edgeTraversalCostTicks,
+    sourceCostSecondsRef: edgeTraversalCostSeconds,
+  };
 
   return edgeTraversalCostTicks;
 }
@@ -1446,6 +1817,35 @@ function syncCanvasToDisplaySize(canvas) {
   return sizeChanged;
 }
 
+function fillDrawableBoundaryFeatures(context, features) {
+  for (const feature of features) {
+    let hasDrawablePath = false;
+    context.beginPath();
+    for (const path of feature.paths) {
+      if (path.length < 3) {
+        continue;
+      }
+      hasDrawablePath = true;
+      for (let i = 0; i < path.length; i += 1) {
+        const point = path[i];
+        const xPx = point[0];
+        const yPx = point[1];
+        if (i === 0) {
+          context.moveTo(xPx, yPx);
+        } else {
+          context.lineTo(xPx, yPx);
+        }
+      }
+      if (isClosedPath(path)) {
+        context.closePath();
+      }
+    }
+    if (hasDrawablePath) {
+      context.fill();
+    }
+  }
+}
+
 export function drawBoundaryBasemapAlignedToGraphGrid(
   boundaryCanvas,
   payload,
@@ -1467,15 +1867,11 @@ export function drawBoundaryBasemapAlignedToGraphGrid(
   const viewportFrame = resolveViewportFrame(graphHeader, options.viewport, {
     frameWidthPx: boundaryCanvas.width,
     frameHeightPx: boundaryCanvas.height,
+    fitBoundingBoxPx: options.fitBoundingBoxPx,
   });
 
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, boundaryCanvas.width, boundaryCanvas.height);
-  context.fillStyle = 'rgba(0, 0, 0, 0)';
-  context.strokeStyle = getBoundaryStrokeStyle(options.colourTheme);
-  context.lineWidth = 1.2 / viewportFrame.effectiveScale;
-  context.lineJoin = 'round';
-  context.lineCap = 'round';
   context.setTransform(
     viewportFrame.effectiveScale,
     0,
@@ -1484,6 +1880,48 @@ export function drawBoundaryBasemapAlignedToGraphGrid(
     -viewportFrame.offsetXPx * viewportFrame.effectiveScale,
     -viewportFrame.offsetYPx * viewportFrame.effectiveScale,
   );
+
+  // Bottom-to-top: forest -> airports -> inland water -> coastal sea -> waterways -> admin boundary lines.
+  context.fillStyle = getForestFillStyle(options.colourTheme);
+  fillDrawableBoundaryFeatures(context, projectedBoundary.forestFeatures);
+
+  context.fillStyle = getAirportFillStyle(options.colourTheme);
+  fillDrawableBoundaryFeatures(context, projectedBoundary.airportFeatures);
+
+  context.fillStyle = getInlandWaterFillStyle(options.colourTheme);
+  fillDrawableBoundaryFeatures(context, projectedBoundary.inlandWaterFeatures);
+
+  context.fillStyle = getBoundaryWaterFillStyle(options.colourTheme);
+  fillDrawableBoundaryFeatures(context, projectedBoundary.waterFeatures);
+
+  context.lineJoin = 'round';
+  context.lineCap = 'round';
+  for (const feature of projectedBoundary.waterwayFeatures) {
+    const navigable = feature.navigable === true;
+    context.strokeStyle = getWaterwayStrokeStyle(options.colourTheme, navigable);
+    context.lineWidth = (navigable ? 1.6 : 1.0) / viewportFrame.effectiveScale;
+    for (const path of feature.paths) {
+      if (path.length < 2) {
+        continue;
+      }
+      context.beginPath();
+      for (let i = 0; i < path.length; i += 1) {
+        const point = path[i];
+        if (i === 0) {
+          context.moveTo(point[0], point[1]);
+        } else {
+          context.lineTo(point[0], point[1]);
+        }
+      }
+      context.stroke();
+    }
+  }
+
+  context.fillStyle = 'rgba(0, 0, 0, 0)';
+  context.strokeStyle = getBoundaryStrokeStyle(options.colourTheme);
+  context.lineWidth = 1.2 / viewportFrame.effectiveScale;
+  context.lineJoin = 'round';
+  context.lineCap = 'round';
 
   let renderedPathCount = 0;
 
@@ -1569,217 +2007,9 @@ export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
   }
 }
 
-export async function fetchBinaryWithProgress(url, options = {}) {
-  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
-  const onProgress = options.onProgress ?? (() => {});
 
-  if (typeof fetchImpl !== 'function') {
-    throw new Error('fetch is not available');
-  }
-  if (typeof onProgress !== 'function') {
-    throw new Error('onProgress must be a function');
-  }
 
-  const response = await fetchImpl(url);
-  if (!response.ok) {
-    throw new Error(`failed to fetch graph binary: HTTP ${response.status}`);
-  }
 
-  const totalBytes = parseContentLength(response.headers?.get('Content-Length'));
-
-  if (!response.body || typeof response.body.getReader !== 'function') {
-    const fallbackBuffer = await response.arrayBuffer();
-    onProgress(fallbackBuffer.byteLength, totalBytes);
-    return fallbackBuffer;
-  }
-
-  const reader = response.body.getReader();
-  const chunks = [];
-  let receivedBytes = 0;
-
-  onProgress(0, totalBytes);
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    if (!value || value.byteLength === 0) {
-      continue;
-    }
-
-    chunks.push(value);
-    receivedBytes += value.byteLength;
-    onProgress(receivedBytes, totalBytes);
-  }
-
-  const merged = new Uint8Array(receivedBytes);
-  let writeOffset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, writeOffset);
-    writeOffset += chunk.byteLength;
-  }
-
-  onProgress(receivedBytes, totalBytes);
-  return merged.buffer;
-}
-
-export async function maybeDecompressGzipBuffer(buffer) {
-  if (!(buffer instanceof ArrayBuffer)) {
-    throw new Error('maybeDecompressGzipBuffer expects an ArrayBuffer');
-  }
-
-  const bytes = new Uint8Array(buffer);
-  const isGzipMagic = bytes.length >= 3 && bytes[0] === 0x1f && bytes[1] === 0x8b && bytes[2] === 0x08;
-  if (!isGzipMagic) {
-    return buffer;
-  }
-
-  if (typeof DecompressionStream !== 'function') {
-    throw new Error(
-      'Browser does not support DecompressionStream for gzip graph payloads. ' +
-        'Use an uncompressed graph binary or a browser with gzip stream support.',
-    );
-  }
-
-  const compressedBlob = new Blob([buffer], { type: 'application/gzip' });
-  const decompressedStream = compressedBlob.stream().pipeThrough(new DecompressionStream('gzip'));
-  return new Response(decompressedStream).arrayBuffer();
-}
-
-export function parseGraphBinary(buffer) {
-  if (!(buffer instanceof ArrayBuffer)) {
-    throw new Error('graph binary parser expects an ArrayBuffer');
-  }
-  if (buffer.byteLength < HEADER_SIZE) {
-    throw new Error(`graph binary is too small for header: ${buffer.byteLength} bytes`);
-  }
-
-  const view = new DataView(buffer);
-  const magic = view.getUint32(0, true);
-  if (magic !== GRAPH_MAGIC) {
-    throw new Error(
-      `Invalid graph magic 0x${magic.toString(16).padStart(8, '0')}; expected 0x${GRAPH_MAGIC.toString(16)}`,
-    );
-  }
-  const version = view.getUint8(4);
-  if (!SUPPORTED_GRAPH_VERSIONS.has(version)) {
-    throw new Error(
-      `unsupported graph binary version ${version}; supported graph binary versions: ${[
-        ...SUPPORTED_GRAPH_VERSIONS,
-      ].join(', ')}`,
-    );
-  }
-
-  const nNodes = view.getUint32(8, true);
-  const nEdges = view.getUint32(12, true);
-  const nodeTableOffset = view.getUint32(52, true);
-  const edgeTableOffset = view.getUint32(56, true);
-  const stopTableOffset = view.getUint32(60, true);
-
-  const nodeTableEnd = nodeTableOffset + nNodes * NODE_RECORD_SIZE;
-  const edgeTableEnd = edgeTableOffset + nEdges * EDGE_RECORD_SIZE;
-
-  if (nodeTableOffset < HEADER_SIZE) {
-    throw new Error('graph binary node table offset points inside header');
-  }
-  if (edgeTableOffset < nodeTableEnd) {
-    throw new Error('graph binary edge table overlaps node table');
-  }
-  if (stopTableOffset < edgeTableEnd) {
-    throw new Error('graph binary stop table overlaps edge table');
-  }
-  if (nodeTableEnd > buffer.byteLength) {
-    throw new Error('graph binary node table exceeds file size');
-  }
-  if (edgeTableEnd > buffer.byteLength) {
-    throw new Error('graph binary edge table exceeds file size');
-  }
-  if (stopTableOffset > buffer.byteLength) {
-    throw new Error('graph binary stop table offset exceeds file size');
-  }
-  if (nodeTableOffset % 4 !== 0 || edgeTableOffset % 4 !== 0) {
-    throw new Error('graph binary table offsets must be 4-byte aligned');
-  }
-
-  const header = {
-    magic,
-    version,
-    flags: view.getUint8(5),
-    nNodes,
-    nEdges,
-    nStops: view.getUint32(16, true),
-    nTedges: view.getUint32(20, true),
-    originEasting: view.getFloat64(24, true),
-    originNorthing: view.getFloat64(32, true),
-    epsgCode: view.getUint16(40, true),
-    gridWidthPx: view.getUint16(42, true),
-    gridHeightPx: view.getUint16(44, true),
-    pixelSizeM: view.getFloat32(48, true),
-    nodeTableOffset,
-    edgeTableOffset,
-    stopTableOffset,
-  };
-
-  const nodeI32 = new Int32Array(buffer, nodeTableOffset, nNodes * 4);
-  const nodeU32 = new Uint32Array(buffer, nodeTableOffset, nNodes * 4);
-  const nodeU16 = new Uint16Array(buffer, nodeTableOffset, nNodes * 8);
-  const edgeU32 = new Uint32Array(buffer, edgeTableOffset, nEdges * 3);
-  const edgeU16 = new Uint16Array(buffer, edgeTableOffset, nEdges * 6);
-  const edgeModeMask = new Uint8Array(nEdges);
-  const edgeRoadClassId = new Uint8Array(nEdges);
-  const edgeMaxspeedKph = new Uint16Array(nEdges);
-
-  for (let edgeIndex = 0; edgeIndex < nEdges; edgeIndex += 1) {
-    const packedMetadata = edgeU32[edgeIndex * 3 + 2];
-    edgeModeMask[edgeIndex] = packedMetadata & 0xff;
-    edgeRoadClassId[edgeIndex] = (packedMetadata >>> 8) & 0xff;
-    edgeMaxspeedKph[edgeIndex] = (packedMetadata >>> 16) & 0xffff;
-  }
-
-  return {
-    header,
-    nodeI32,
-    nodeU32,
-    nodeU16,
-    edgeU32,
-    edgeU16,
-    edgeModeMask,
-    edgeRoadClassId,
-    edgeMaxspeedKph,
-  };
-}
-
-export async function loadGraphBinary(shell, options = {}) {
-  const url = options.url ?? DEFAULT_GRAPH_BINARY_URL;
-  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
-
-  showLoadingOverlay(shell, formatInitialGraphLoadingText(shell), 0);
-
-  try {
-    const buffer = await fetchBinaryWithProgress(url, {
-      fetchImpl,
-      onProgress(receivedBytes, totalBytes) {
-        updateGraphLoadingText(shell, receivedBytes, totalBytes);
-      },
-    });
-
-    const binaryBuffer = await maybeDecompressGzipBuffer(buffer);
-    const graph = parseGraphBinary(binaryBuffer);
-    shell.isochroneCanvas.style.pointerEvents = 'auto';
-    shell.isochroneCanvas.dataset.graphLoaded = 'true';
-    return graph;
-  } catch (error) {
-    shell.isochroneCanvas.style.pointerEvents = 'none';
-    shell.isochroneCanvas.dataset.graphLoaded = 'false';
-    showLoadingOverlay(
-      shell,
-      getLocalizedShellText(shell, 'error.graph.load', 'Failed to load graph binary.'),
-      0,
-    );
-    throw error;
-  }
-}
 
 export async function initializeMapData(shell, options = {}) {
   const boundaryOptions = options.boundaries ?? {};
@@ -1794,24 +2024,42 @@ export async function initializeMapData(shell, options = {}) {
     const edgeCostPrecomputeKernelPromise = loadEdgeCostPrecomputeKernel(wasmKernelOptions);
     const boundaryLoad = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
     const graph = await loadGraphBinary(shell, graphOptions);
+    updateTransitControlAvailability(shell, graph.header.nStops > 0, {
+      transitDateRange: options.transitDateRange,
+    });
     const edgeCostPrecomputeKernel = await edgeCostPrecomputeKernelPromise;
     const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
     updateRenderBackendBadge(shell, renderer);
     layoutMapViewportToContainGraph(shell, graph.header);
     syncCanvasToDisplaySize(shell.isochroneCanvas);
+    // Default/max-zoom-out framing fits the district boundary (+5%) rather
+    // than the full routing grid, which can be dominated by far-flung
+    // ferry endpoints (see osm_graph_extract.py's grid-size-budgeted ferry
+    // inclusion) — the boundary is what a user actually expects to see on
+    // load. Panning still reaches the wider grid at that same zoom level.
+    const boundaryFitBoundingBoxPx = computeProjectedFeatureListBoundingBoxPx(
+      projectBoundaryBasemapToGraphPaths(boundaryLoad.boundaryPayload, graph.header).features,
+    );
     const alignedBoundarySummary = drawBoundaryBasemapAlignedToGraphGrid(
       shell.boundaryCanvas,
       boundaryLoad.boundaryPayload,
       graph.header,
       {
         colourTheme: resolveIsochroneTheme(),
-        viewport: createDefaultMapViewport(),
+        viewport: createDefaultMapViewport({ fitBoundingBoxPx: boundaryFitBoundingBoxPx }),
+        fitBoundingBoxPx: boundaryFitBoundingBoxPx,
       },
     );
     renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));
-    updateDistanceScaleBar(shell, graph.header, { viewport: createDefaultMapViewport() });
+    updateDistanceScaleBar(shell, graph.header, {
+      viewport: createDefaultMapViewport({ fitBoundingBoxPx: boundaryFitBoundingBoxPx }),
+      fitBoundingBoxPx: boundaryFitBoundingBoxPx,
+    });
     if (shell.exportSvgButton) {
       shell.exportSvgButton.disabled = false;
+    }
+    if (shell.printButton) {
+      shell.printButton.disabled = false;
     }
     fadeOutLoadingOverlay(shell);
 
@@ -1827,13 +2075,14 @@ export async function initializeMapData(shell, options = {}) {
       boundarySummary: boundaryLoad.boundarySummary,
       alignedBoundarySummary,
       boundaryPayload: boundaryLoad.boundaryPayload,
+      boundaryFitBoundingBoxPx,
       graph,
       nodePixels,
       nodeModeMask,
       nodeSpatialIndex,
       pixelGrid,
       travelTimeGrid,
-      viewport: createDefaultMapViewport(),
+      viewport: createDefaultMapViewport({ fitBoundingBoxPx: boundaryFitBoundingBoxPx }),
       edgeCostPrecomputeKernel,
       lastRoutingSnapshot: null,
       locationName,
@@ -1841,6 +2090,9 @@ export async function initializeMapData(shell, options = {}) {
   } catch (error) {
     if (shell.exportSvgButton) {
       shell.exportSvgButton.disabled = true;
+    }
+    if (shell.printButton) {
+      shell.printButton.disabled = true;
     }
     const failureMessage =
       error && typeof error.message === 'string' && error.message.length > 0
@@ -1872,200 +2124,19 @@ export function layoutMapViewportToContainGraph(shell, graphHeader) {
   };
 }
 
-function resolveIsochroneTheme(rootElement = globalThis.document?.documentElement ?? null) {
-  const datasetTheme = rootElement?.dataset?.theme ?? null;
-  return normalizeIsochroneTheme(datasetTheme, 'dark');
-}
 
-function getIsochroneThemeVariant(theme) {
-  return normalizeIsochroneTheme(theme, 'dark') === 'light' ? 1 : 0;
-}
 
-function formatDistanceLabel(distanceMetres) {
-  if (distanceMetres >= 1000) {
-    const km = distanceMetres / 1000;
-    if (km >= 10) {
-      return `${Math.round(km)} km`;
-    }
-    return `${km.toFixed(1)} km`;
-  }
-  return `${Math.round(distanceMetres)} m`;
-}
 
-function pickScaleDistanceMetres(targetDistanceMetres) {
-  const safeTarget = Math.max(1, targetDistanceMetres);
-  const exponent = Math.floor(Math.log10(safeTarget));
-  const base = 10 ** exponent;
-  const multipliers = [1, 2, 5];
 
-  let chosen = base;
-  for (const multiplier of multipliers) {
-    const candidate = multiplier * base;
-    if (candidate <= safeTarget) {
-      chosen = candidate;
-    }
-  }
 
-  if (chosen > safeTarget) {
-    return chosen / 10;
-  }
-  return chosen;
-}
 
-function pickScaleBucketDistanceMetres(totalDistanceMetres) {
-  const safeTotal = Math.max(1, totalDistanceMetres);
-  const targetSegments = 5;
-  const minSegments = 3;
-  const maxSegments = 10;
-  const candidateRoots = [1, 2, 5];
-  const baseExponent = Math.floor(Math.log10(safeTotal / targetSegments));
-  const candidates = [];
+// The SVG export renders content in the unzoomed full-region graph pixel grid
+// (1 px = graphHeader.pixelSizeM metres), not the live zoomed screen viewport,
+// so the exported scale bar must be sized from that same fixed scale rather
+// than copied from the on-screen bar's CSS pixel width.
 
-  for (let exponentOffset = -1; exponentOffset <= 2; exponentOffset += 1) {
-    const exponent = baseExponent + exponentOffset;
-    const scale = 10 ** exponent;
-    for (const root of candidateRoots) {
-      const candidate = root * scale;
-      if (!(candidate > 0) || candidate > safeTotal) {
-        continue;
-      }
-      const segmentCount = safeTotal / candidate;
-      if (segmentCount < minSegments || segmentCount > maxSegments) {
-        continue;
-      }
-      const integerPenalty = Math.abs(segmentCount - Math.round(segmentCount));
-      const segmentPenalty = Math.abs(segmentCount - targetSegments);
-      const score = integerPenalty * 3 + segmentPenalty;
-      candidates.push({
-        candidate,
-        score,
-      });
-    }
-  }
 
-  if (candidates.length === 0) {
-    return safeTotal / targetSegments;
-  }
 
-  candidates.sort((a, b) => {
-    if (a.score !== b.score) {
-      return a.score - b.score;
-    }
-    return a.candidate - b.candidate;
-  });
-
-  return candidates[0].candidate;
-}
-
-export function renderIsochroneLegend(shell, cycleMinutes, options = {}) {
-  if (!shell || typeof shell !== 'object' || !shell.isochroneLegend) {
-    throw new Error('shell.isochroneLegend is required');
-  }
-  if (!Number.isFinite(cycleMinutes) || cycleMinutes <= 0) {
-    throw new Error('cycleMinutes must be a positive finite number');
-  }
-
-  const boundaries = [0, 1 / 5, 2 / 5, 3 / 5, 4 / 5, 1];
-  const theme = normalizeIsochroneTheme(
-    options.theme ?? resolveIsochroneTheme(options.rootElement),
-    'dark',
-  );
-  const messages = options.messages ?? getShellLocaleMessages(shell);
-  const colours = getIsochronePalette(theme);
-
-  const legendRows = [];
-  for (let index = 0; index < colours.length; index += 1) {
-    const colour = colours[index];
-    const rangeStartMinutes = boundaries[index] * cycleMinutes;
-    const rangeEndMinutes = boundaries[index + 1] * cycleMinutes;
-    const rangeLabel = formatLegendRange(rangeStartMinutes, rangeEndMinutes, { messages });
-    const colourCss = `rgb(${colour[0]}, ${colour[1]}, ${colour[2]})`;
-
-    legendRows.push(
-      `<div class="legend-row"><span class="legend-swatch" aria-hidden="true"><svg class="legend-swatch-svg" viewBox="0 0 16 16" focusable="false" aria-hidden="true"><rect x="1" y="1" width="14" height="14" rx="2" fill="${colourCss}" stroke="${colourCss}" stroke-width="1.5"></rect></svg></span><span>${rangeLabel}</span></div>`,
-    );
-  }
-  legendRows.push(
-    `<div class="legend-note">${formatLegendRepeatNote(cycleMinutes, { messages })}</div>`,
-  );
-
-  shell.isochroneLegend.innerHTML = legendRows.join('');
-}
-
-export function renderIsochroneLegendIfNeeded(shell, cycleMinutes, options = {}) {
-  if (!shell || typeof shell !== 'object' || !shell.isochroneLegend) {
-    throw new Error('shell.isochroneLegend is required');
-  }
-  if (!Number.isFinite(cycleMinutes) || cycleMinutes <= 0) {
-    throw new Error('cycleMinutes must be a positive finite number');
-  }
-  const theme = normalizeIsochroneTheme(
-    options.theme ?? resolveIsochroneTheme(options.rootElement),
-    'dark',
-  );
-  const locale = typeof options.locale === 'string' && options.locale.trim().length > 0
-    ? options.locale.trim()
-    : shell?.locale ?? 'en';
-
-  if (
-    shell.lastRenderedLegendCycleMinutes === cycleMinutes
-    && shell.lastRenderedLegendTheme === theme
-    && shell.lastRenderedLegendLocale === locale
-  ) {
-    return false;
-  }
-
-  renderIsochroneLegend(shell, cycleMinutes, {
-    theme,
-    messages: options.messages ?? getShellLocaleMessages(shell),
-  });
-  shell.lastRenderedLegendCycleMinutes = cycleMinutes;
-  shell.lastRenderedLegendTheme = theme;
-  shell.lastRenderedLegendLocale = locale;
-  return true;
-}
-
-export function updateDistanceScaleBar(shell, graphHeader, options = {}) {
-  if (
-    !shell ||
-    typeof shell !== 'object' ||
-    !shell.distanceScale ||
-    !shell.distanceScaleLine ||
-    !shell.distanceScaleLabel ||
-    !shell.isochroneCanvas
-  ) {
-    throw new Error('distance scale shell elements are required');
-  }
-
-  validateGraphHeaderForBoundaryAlignment(graphHeader);
-  const canvasRect = shell.isochroneCanvas.getBoundingClientRect();
-  if (!(canvasRect.width > 0)) {
-    return;
-  }
-  if (!(canvasRect.height > 0)) {
-    return;
-  }
-  const viewportFrame = resolveViewportFrame(graphHeader, options.viewport, {
-    frameWidthPx: canvasRect.width,
-    frameHeightPx: canvasRect.height,
-  });
-
-  const metresPerCssPixel = graphHeader.pixelSizeM / viewportFrame.effectiveScale;
-  const preferredWidthPx = 120;
-  const preferredDistanceMetres = preferredWidthPx * metresPerCssPixel;
-  const chosenDistanceMetres = pickScaleDistanceMetres(preferredDistanceMetres);
-  const lineWidthPx = Math.max(24, Math.round(chosenDistanceMetres / metresPerCssPixel));
-  const bucketDistanceMetres = pickScaleBucketDistanceMetres(chosenDistanceMetres);
-  const segmentWidthPx = Math.max(4, Math.round(bucketDistanceMetres / metresPerCssPixel));
-
-  shell.distanceScaleLine.style.width = `${lineWidthPx}px`;
-  if (typeof shell.distanceScaleLine.style.setProperty === 'function') {
-    shell.distanceScaleLine.style.setProperty('--scale-segment-width-px', `${segmentWidthPx}px`);
-  } else {
-    shell.distanceScaleLine.style['--scale-segment-width-px'] = `${segmentWidthPx}px`;
-  }
-  shell.distanceScaleLabel.textContent = formatDistanceLabel(chosenDistanceMetres);
-}
 
 export function precomputeNodePixelCoordinates(graph) {
   validateGraphForNodePixels(graph);
@@ -2174,1355 +2245,27 @@ export function setTravelTimePixelMin(travelTimeGrid, xPx, yPx, seconds) {
   return false;
 }
 
-export function rasterizeLinePixels(x0, y0, x1, y1, visitPixel) {
-  if (!Number.isFinite(x0) || !Number.isFinite(y0) || !Number.isFinite(x1) || !Number.isFinite(y1)) {
-    throw new Error('line endpoints must be finite numbers');
-  }
-  if (typeof visitPixel !== 'function') {
-    throw new Error('visitPixel must be a function');
-  }
 
-  const startX = Math.round(x0);
-  const startY = Math.round(y0);
-  const endX = Math.round(x1);
-  const endY = Math.round(y1);
 
-  let x = startX;
-  let y = startY;
-  const dx = Math.abs(endX - startX);
-  const sx = startX < endX ? 1 : -1;
-  const dy = -Math.abs(endY - startY);
-  const sy = startY < endY ? 1 : -1;
-  let err = dx + dy;
 
-  while (true) {
-    visitPixel(x, y);
-    if (x === endX && y === endY) {
-      break;
-    }
 
-    const twiceErr = err * 2;
-    if (twiceErr >= dy) {
-      err += dy;
-      x += sx;
-    }
-    if (twiceErr <= dx) {
-      err += dx;
-      y += sy;
-    }
-  }
-}
 
-export function interpolateEdgeTravelSeconds(startSeconds, endSeconds, stepIndex, totalSteps) {
-  if (!Number.isFinite(startSeconds) || startSeconds < 0) {
-    throw new Error('startSeconds must be a non-negative finite number');
-  }
-  if (!Number.isFinite(endSeconds) || endSeconds < 0) {
-    throw new Error('endSeconds must be a non-negative finite number');
-  }
-  if (!Number.isInteger(stepIndex) || stepIndex < 0) {
-    throw new Error('stepIndex must be a non-negative integer');
-  }
-  if (!Number.isInteger(totalSteps) || totalSteps < 0) {
-    throw new Error('totalSteps must be a non-negative integer');
-  }
-  if (stepIndex > totalSteps && totalSteps > 0) {
-    throw new Error('stepIndex must be <= totalSteps');
-  }
 
-  if (totalSteps === 0) {
-    return startSeconds;
-  }
 
-  const ratio = stepIndex / totalSteps;
-  return startSeconds + (endSeconds - startSeconds) * ratio;
-}
 
-export function paintInterpolatedEdgeToGrid(
-  pixelGrid,
-  x0,
-  y0,
-  startSeconds,
-  x1,
-  y1,
-  endSeconds,
-  options = {},
-) {
-  validatePixelGrid(pixelGrid);
 
-  const alpha = clampInt(Math.round(options.alpha ?? 255), 0, 255);
-  const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
-  const colourTheme = normalizeIsochroneTheme(options.colourTheme, 'dark');
-  const stepStride = options.stepStride ?? 1;
-  if (!Number.isInteger(stepStride) || stepStride <= 0) {
-    throw new Error('stepStride must be a positive integer');
-  }
-  const startX = Math.round(x0);
-  const startY = Math.round(y0);
-  const endX = Math.round(x1);
-  const endY = Math.round(y1);
-  const totalSteps = Math.max(Math.abs(endX - startX), Math.abs(endY - startY));
-  let paintedCount = 0;
-  let stepIndex = 0;
 
-  rasterizeLinePixels(x0, y0, x1, y1, (xPx, yPx) => {
-    if (stepIndex % stepStride !== 0 && stepIndex !== totalSteps) {
-      stepIndex += 1;
-      return;
-    }
-    const seconds = interpolateEdgeTravelSeconds(
-      startSeconds,
-      endSeconds,
-      stepIndex,
-      totalSteps,
-    );
-    const [r, g, b] = timeToColour(seconds, {
-      cycleMinutes: colourCycleMinutes,
-      theme: colourTheme,
-    });
-    if (setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)) {
-      paintedCount += 1;
-    }
-    stepIndex += 1;
-  });
 
-  return paintedCount;
-}
 
-export function paintInterpolatedEdgeTravelTimesToGrid(
-  travelTimeGrid,
-  x0,
-  y0,
-  startSeconds,
-  x1,
-  y1,
-  endSeconds,
-  options = {},
-) {
-  validateTravelTimeGrid(travelTimeGrid);
 
-  const stepStride = options.stepStride ?? 1;
-  if (!Number.isInteger(stepStride) || stepStride <= 0) {
-    throw new Error('stepStride must be a positive integer');
-  }
-  const startX = Math.round(x0);
-  const startY = Math.round(y0);
-  const endX = Math.round(x1);
-  const endY = Math.round(y1);
-  const totalSteps = Math.max(Math.abs(endX - startX), Math.abs(endY - startY));
-  let paintedCount = 0;
-  let stepIndex = 0;
 
-  rasterizeLinePixels(x0, y0, x1, y1, (xPx, yPx) => {
-    if (stepIndex % stepStride !== 0 && stepIndex !== totalSteps) {
-      stepIndex += 1;
-      return;
-    }
-    const seconds = interpolateEdgeTravelSeconds(
-      startSeconds,
-      endSeconds,
-      stepIndex,
-      totalSteps,
-    );
-    if (setTravelTimePixelMin(travelTimeGrid, xPx, yPx, seconds)) {
-      paintedCount += 1;
-    }
-    stepIndex += 1;
-  });
 
-  return paintedCount;
-}
 
-export function paintReachableNodesToGrid(pixelGrid, nodePixels, distSeconds, options = {}) {
-  validatePixelGrid(pixelGrid);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
 
-  const alpha = options.alpha ?? 255;
-  const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
-  const colourTheme = normalizeIsochroneTheme(options.colourTheme, 'dark');
-  let paintedCount = 0;
 
-  for (let nodeIndex = 0; nodeIndex < nodePixels.nodePixelX.length; nodeIndex += 1) {
-    if (distSeconds[nodeIndex] < Infinity) {
-      const [r, g, b] = timeToColour(distSeconds[nodeIndex], {
-        cycleMinutes: colourCycleMinutes,
-        theme: colourTheme,
-      });
-      const xPx = nodePixels.nodePixelX[nodeIndex];
-      const yPx = nodePixels.nodePixelY[nodeIndex];
-      if (setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)) {
-        paintedCount += 1;
-      }
-    }
-  }
 
-  return paintedCount;
-}
 
-export function paintReachableNodesTravelTimesToGrid(travelTimeGrid, nodePixels, distSeconds) {
-  validateTravelTimeGrid(travelTimeGrid);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
 
-  let paintedCount = 0;
-  for (let nodeIndex = 0; nodeIndex < nodePixels.nodePixelX.length; nodeIndex += 1) {
-    if (distSeconds[nodeIndex] < Infinity) {
-      const xPx = nodePixels.nodePixelX[nodeIndex];
-      const yPx = nodePixels.nodePixelY[nodeIndex];
-      if (setTravelTimePixelMin(travelTimeGrid, xPx, yPx, distSeconds[nodeIndex])) {
-        paintedCount += 1;
-      }
-    }
-  }
-
-  return paintedCount;
-}
-
-function createCanvas2dIsochroneRenderer(canvas) {
-  const context = canvas.getContext('2d');
-  if (!context) {
-    throw new Error('Unable to get 2D context for isochrone canvas');
-  }
-  const scratchCanvas =
-    globalThis.document && typeof globalThis.document.createElement === 'function'
-      ? globalThis.document.createElement('canvas')
-      : null;
-  const scratchContext = scratchCanvas?.getContext?.('2d') ?? null;
-
-  return {
-    mode: '2d',
-    clear(options = {}) {
-      syncCanvasToDisplaySize(canvas);
-      const targetWidthPx = options.widthPx ?? canvas.width;
-      const targetHeightPx = options.heightPx ?? canvas.height;
-      if (!Number.isFinite(targetWidthPx) || targetWidthPx <= 0) {
-        throw new Error('options.widthPx (or canvas.width) must be positive');
-      }
-      if (!Number.isFinite(targetHeightPx) || targetHeightPx <= 0) {
-        throw new Error('options.heightPx (or canvas.height) must be positive');
-      }
-
-      const widthPx = Math.floor(targetWidthPx);
-      const heightPx = Math.floor(targetHeightPx);
-      if (canvas.width !== widthPx) {
-        canvas.width = widthPx;
-      }
-      if (canvas.height !== heightPx) {
-        canvas.height = heightPx;
-      }
-      context.clearRect(0, 0, canvas.width, canvas.height);
-    },
-    draw(pixelGrid, options = {}) {
-      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
-        canvas.width = pixelGrid.widthPx;
-        canvas.height = pixelGrid.heightPx;
-      }
-
-      const imageData = new ImageData(pixelGrid.rgba, pixelGrid.widthPx, pixelGrid.heightPx);
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      const viewportFrame = resolveViewportFrame(
-        { gridWidthPx: pixelGrid.widthPx, gridHeightPx: pixelGrid.heightPx },
-        options.viewport,
-        {
-          frameWidthPx: canvas.width,
-          frameHeightPx: canvas.height,
-        },
-      );
-      if (
-        scratchCanvas
-        && scratchContext
-        && (
-          viewportFrame.effectiveScale !== 1
-          || viewportFrame.offsetXPx !== 0
-          || viewportFrame.offsetYPx !== 0
-          || canvas.width !== pixelGrid.widthPx
-          || canvas.height !== pixelGrid.heightPx
-        )
-      ) {
-        scratchCanvas.width = pixelGrid.widthPx;
-        scratchCanvas.height = pixelGrid.heightPx;
-        scratchContext.putImageData(imageData, 0, 0);
-        context.imageSmoothingEnabled = false;
-        context.drawImage(
-          scratchCanvas,
-          viewportFrame.offsetXPx,
-          viewportFrame.offsetYPx,
-          viewportFrame.visibleWidthPx,
-          viewportFrame.visibleHeightPx,
-          0,
-          0,
-          canvas.width,
-          canvas.height,
-        );
-      } else {
-        context.putImageData(imageData, 0, 0);
-      }
-      return imageData;
-    },
-  };
-}
-
-export function shouldUploadEdgeGeometry(
-  previousEdgeVertexDataRef,
-  previousEdgeVertexDataLength,
-  edgeVertexData,
-  options = {},
-) {
-  if (!(edgeVertexData instanceof Float32Array)) {
-    throw new Error('edgeVertexData must be a Float32Array');
-  }
-  const append = options.append === true;
-  const reuseUploadedGeometry = options.reuseUploadedGeometry === true;
-  if (append || !reuseUploadedGeometry) {
-    return true;
-  }
-  if (previousEdgeVertexDataRef !== edgeVertexData) {
-    return true;
-  }
-  return previousEdgeVertexDataLength !== edgeVertexData.length;
-}
-
-function computeNodeTimeTextureDimensions(nodeCount, maxTextureSize) {
-  if (!Number.isInteger(nodeCount) || nodeCount <= 0) {
-    throw new Error('nodeCount must be a positive integer');
-  }
-  if (!Number.isInteger(maxTextureSize) || maxTextureSize <= 0) {
-    throw new Error('maxTextureSize must be a positive integer');
-  }
-  const width = Math.min(maxTextureSize, nodeCount);
-  const height = Math.ceil(nodeCount / width);
-  if (height > maxTextureSize) {
-    throw new Error('nodeCount exceeds representable node-time texture capacity');
-  }
-  return { width, height, size: width * height };
-}
-
-function createWebGlShader(gl, type, source) {
-  const shader = gl.createShader(type);
-  if (!shader) {
-    throw new Error('failed to allocate WebGL shader');
-  }
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    const infoLog = gl.getShaderInfoLog(shader) ?? 'unknown shader compile error';
-    gl.deleteShader(shader);
-    throw new Error(`WebGL shader compile failed: ${infoLog}`);
-  }
-  return shader;
-}
-
-function createWebGlProgram(gl, vertexShaderSource, fragmentShaderSource) {
-  const vertexShader = createWebGlShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
-  const fragmentShader = createWebGlShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
-  const program = gl.createProgram();
-  if (!program) {
-    gl.deleteShader(vertexShader);
-    gl.deleteShader(fragmentShader);
-    throw new Error('failed to allocate WebGL program');
-  }
-
-  gl.attachShader(program, vertexShader);
-  gl.attachShader(program, fragmentShader);
-  gl.linkProgram(program);
-  gl.deleteShader(vertexShader);
-  gl.deleteShader(fragmentShader);
-
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    const infoLog = gl.getProgramInfoLog(program) ?? 'unknown program link error';
-    gl.deleteProgram(program);
-    throw new Error(`WebGL program link failed: ${infoLog}`);
-  }
-
-  return program;
-}
-
-export function createWebGlIsochroneRenderer(canvas, options = {}) {
-  if (!canvas || typeof canvas.getContext !== 'function') {
-    throw new Error('canvas must provide getContext("webgl")');
-  }
-
-  const contextAttributes = {
-    alpha: true,
-    antialias: true,
-    depth: false,
-    stencil: false,
-    premultipliedAlpha: false,
-    preserveDrawingBuffer: false,
-    ...options.contextAttributes,
-  };
-  const contextWebGl2 = canvas.getContext('webgl2', contextAttributes);
-  const contextWebGl = canvas.getContext('webgl', contextAttributes);
-  const gl = contextWebGl2 ?? contextWebGl;
-  if (!gl) {
-    return null;
-  }
-
-  const isWebGl2 =
-    typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext;
-  const vertexShaderSource = isWebGl2
-    ? `#version 300 es
-in vec2 a_position;
-out vec2 v_uv;
-void main(void) {
-  v_uv = (a_position + 1.0) * 0.5;
-  gl_Position = vec4(a_position, 0.0, 1.0);
-}`
-    : `attribute vec2 a_position;
-varying vec2 v_uv;
-void main(void) {
-  v_uv = (a_position + 1.0) * 0.5;
-  gl_Position = vec4(a_position, 0.0, 1.0);
-}`;
-  const fragmentShaderSource = isWebGl2
-    ? `#version 300 es
-precision mediump float;
-uniform sampler2D u_texture;
-uniform vec2 u_texture_size_px;
-uniform vec2 u_viewport_px;
-uniform vec2 u_view_offset_px;
-uniform float u_view_scale;
-in vec2 v_uv;
-out vec4 outColor;
-void main(void) {
-  vec2 screenPx = vec2(v_uv.x * u_viewport_px.x, (1.0 - v_uv.y) * u_viewport_px.y);
-  vec2 samplePx = u_view_offset_px + screenPx / max(u_view_scale, 1.0);
-  vec2 sampleUv = samplePx / u_texture_size_px;
-  if (sampleUv.x < 0.0 || sampleUv.y < 0.0 || sampleUv.x > 1.0 || sampleUv.y > 1.0) {
-    outColor = vec4(0.0, 0.0, 0.0, 0.0);
-    return;
-  }
-  outColor = texture(u_texture, sampleUv);
-}`
-    : `precision mediump float;
-uniform sampler2D u_texture;
-uniform vec2 u_texture_size_px;
-uniform vec2 u_viewport_px;
-uniform vec2 u_view_offset_px;
-uniform float u_view_scale;
-varying vec2 v_uv;
-void main(void) {
-  vec2 screenPx = vec2(v_uv.x * u_viewport_px.x, (1.0 - v_uv.y) * u_viewport_px.y);
-  vec2 samplePx = u_view_offset_px + screenPx / max(u_view_scale, 1.0);
-  vec2 sampleUv = samplePx / u_texture_size_px;
-  if (sampleUv.x < 0.0 || sampleUv.y < 0.0 || sampleUv.x > 1.0 || sampleUv.y > 1.0) {
-    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
-    return;
-  }
-  gl_FragColor = texture2D(u_texture, sampleUv);
-}`;
-
-  const program = createWebGlProgram(gl, vertexShaderSource, fragmentShaderSource);
-  const positionLocation = gl.getAttribLocation(program, 'a_position');
-  if (positionLocation < 0) {
-    gl.deleteProgram(program);
-    throw new Error('WebGL program is missing a_position attribute');
-  }
-
-  const quadBuffer = gl.createBuffer();
-  if (!quadBuffer) {
-    gl.deleteProgram(program);
-    throw new Error('failed to allocate WebGL quad buffer');
-  }
-  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-
-  const texture = gl.createTexture();
-  if (!texture) {
-    gl.deleteBuffer(quadBuffer);
-    gl.deleteProgram(program);
-    throw new Error('failed to allocate WebGL texture');
-  }
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-
-  const textureLocation = gl.getUniformLocation(program, 'u_texture');
-  const textureSizeLocation = gl.getUniformLocation(program, 'u_texture_size_px');
-  const viewportSizeLocation = gl.getUniformLocation(program, 'u_viewport_px');
-  const textureViewOffsetLocation = gl.getUniformLocation(program, 'u_view_offset_px');
-  const textureViewScaleLocation = gl.getUniformLocation(program, 'u_view_scale');
-  const bindQuadToProgram = (programToBind, positionLocationToBind) => {
-    gl.useProgram(programToBind);
-    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-    gl.enableVertexAttribArray(positionLocationToBind);
-    gl.vertexAttribPointer(positionLocationToBind, 2, gl.FLOAT, false, 0, 0);
-  };
-
-  let travelTimeProgram = null;
-  let travelTimePositionLocation = -1;
-  let travelTimeTexture = null;
-  let travelTimeTextureLocation = null;
-  let travelTimeCycleMinutesLocation = null;
-  let travelTimeThemeVariantLocation = null;
-  let travelTimeTextureSizeLocation = null;
-  let travelTimeViewportSizeLocation = null;
-  let travelTimeViewOffsetLocation = null;
-  let travelTimeViewScaleLocation = null;
-
-  if (isWebGl2) {
-    const travelTimeFragmentSource = `#version 300 es
-precision highp float;
-uniform sampler2D u_time_texture;
-uniform float u_cycle_minutes;
-uniform float u_theme_variant;
-uniform vec2 u_texture_size_px;
-uniform vec2 u_viewport_px;
-uniform vec2 u_view_offset_px;
-uniform float u_view_scale;
-in vec2 v_uv;
-out vec4 outColor;
-
-${CYCLE_COLOUR_MAP_GLSL}
-
-void main(void) {
-  vec2 screenPx = vec2(v_uv.x * u_viewport_px.x, (1.0 - v_uv.y) * u_viewport_px.y);
-  vec2 samplePx = u_view_offset_px + screenPx / max(u_view_scale, 1.0);
-  vec2 sampleUv = samplePx / u_texture_size_px;
-  if (sampleUv.x < 0.0 || sampleUv.y < 0.0 || sampleUv.x > 1.0 || sampleUv.y > 1.0) {
-    outColor = vec4(0.0, 0.0, 0.0, 0.0);
-    return;
-  }
-  float seconds = texture(u_time_texture, sampleUv).r;
-  if (seconds < 0.0) {
-    outColor = vec4(0.0, 0.0, 0.0, 0.0);
-    return;
-  }
-  float cycleMinutes = max(u_cycle_minutes, 1.0);
-  float cyclePositionMinutes = mod(seconds / 60.0, cycleMinutes);
-  float cycleRatio = cyclePositionMinutes / cycleMinutes;
-  vec3 rgb = mapCycleColour(cycleRatio, u_theme_variant) / 255.0;
-  outColor = vec4(rgb, 1.0);
-}`;
-
-    travelTimeProgram = createWebGlProgram(gl, vertexShaderSource, travelTimeFragmentSource);
-    travelTimePositionLocation = gl.getAttribLocation(travelTimeProgram, 'a_position');
-    if (travelTimePositionLocation < 0) {
-      gl.deleteProgram(travelTimeProgram);
-      travelTimeProgram = null;
-    } else {
-      travelTimeTexture = gl.createTexture();
-      if (!travelTimeTexture) {
-        gl.deleteProgram(travelTimeProgram);
-        travelTimeProgram = null;
-      } else {
-        gl.bindTexture(gl.TEXTURE_2D, travelTimeTexture);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-        travelTimeTextureLocation = gl.getUniformLocation(travelTimeProgram, 'u_time_texture');
-        travelTimeCycleMinutesLocation = gl.getUniformLocation(travelTimeProgram, 'u_cycle_minutes');
-        travelTimeThemeVariantLocation = gl.getUniformLocation(travelTimeProgram, 'u_theme_variant');
-        travelTimeTextureSizeLocation = gl.getUniformLocation(travelTimeProgram, 'u_texture_size_px');
-        travelTimeViewportSizeLocation = gl.getUniformLocation(travelTimeProgram, 'u_viewport_px');
-        travelTimeViewOffsetLocation = gl.getUniformLocation(travelTimeProgram, 'u_view_offset_px');
-        travelTimeViewScaleLocation = gl.getUniformLocation(travelTimeProgram, 'u_view_scale');
-      }
-    }
-  }
-
-  const edgeVertexShaderSource = isWebGl2
-    ? `#version 300 es
-in vec2 a_position_px;
-in float a_seconds;
-uniform vec2 u_viewport_px;
-uniform vec2 u_view_offset_px;
-uniform float u_view_scale;
-out float v_seconds;
-void main(void) {
-  vec2 viewPositionPx = (a_position_px - u_view_offset_px) * u_view_scale;
-  vec2 clip = vec2(
-    (viewPositionPx.x / u_viewport_px.x) * 2.0 - 1.0,
-    1.0 - (viewPositionPx.y / u_viewport_px.y) * 2.0
-  );
-  v_seconds = a_seconds;
-  gl_Position = vec4(clip, 0.0, 1.0);
-}`
-    : `attribute vec2 a_position_px;
-attribute float a_seconds;
-uniform vec2 u_viewport_px;
-uniform vec2 u_view_offset_px;
-uniform float u_view_scale;
-varying float v_seconds;
-void main(void) {
-  vec2 viewPositionPx = (a_position_px - u_view_offset_px) * u_view_scale;
-  vec2 clip = vec2(
-    (viewPositionPx.x / u_viewport_px.x) * 2.0 - 1.0,
-    1.0 - (viewPositionPx.y / u_viewport_px.y) * 2.0
-  );
-  v_seconds = a_seconds;
-  gl_Position = vec4(clip, 0.0, 1.0);
-}`;
-  const edgeFragmentShaderSource = isWebGl2
-    ? `#version 300 es
-precision highp float;
-uniform float u_cycle_minutes;
-uniform float u_alpha;
-uniform float u_theme_variant;
-in float v_seconds;
-out vec4 outColor;
-
-${CYCLE_COLOUR_MAP_GLSL}
-
-void main(void) {
-  if (v_seconds < 0.0) {
-    outColor = vec4(0.0, 0.0, 0.0, 0.0);
-    return;
-  }
-  float cycleMinutes = max(u_cycle_minutes, 1.0);
-  float cyclePositionMinutes = mod(v_seconds / 60.0, cycleMinutes);
-  float cycleRatio = cyclePositionMinutes / cycleMinutes;
-  vec3 rgb = mapCycleColour(cycleRatio, u_theme_variant) / 255.0;
-  outColor = vec4(rgb, u_alpha);
-}`
-    : `precision highp float;
-uniform float u_cycle_minutes;
-uniform float u_alpha;
-uniform float u_theme_variant;
-varying float v_seconds;
-
-${CYCLE_COLOUR_MAP_GLSL}
-
-void main(void) {
-  if (v_seconds < 0.0) {
-    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
-    return;
-  }
-  float cycleMinutes = max(u_cycle_minutes, 1.0);
-  float cyclePositionMinutes = mod(v_seconds / 60.0, cycleMinutes);
-  float cycleRatio = cyclePositionMinutes / cycleMinutes;
-  vec3 rgb = mapCycleColour(cycleRatio, u_theme_variant) / 255.0;
-  gl_FragColor = vec4(rgb, u_alpha);
-}`;
-  const edgeProgram = createWebGlProgram(gl, edgeVertexShaderSource, edgeFragmentShaderSource);
-  const edgePositionLocation = gl.getAttribLocation(edgeProgram, 'a_position_px');
-  const edgeSecondsLocation = gl.getAttribLocation(edgeProgram, 'a_seconds');
-  if (edgePositionLocation < 0 || edgeSecondsLocation < 0) {
-    gl.deleteProgram(edgeProgram);
-    throw new Error('WebGL edge program is missing required attributes');
-  }
-  const edgeViewportLocation = gl.getUniformLocation(edgeProgram, 'u_viewport_px');
-  const edgeViewOffsetLocation = gl.getUniformLocation(edgeProgram, 'u_view_offset_px');
-  const edgeViewScaleLocation = gl.getUniformLocation(edgeProgram, 'u_view_scale');
-  const edgeCycleMinutesLocation = gl.getUniformLocation(edgeProgram, 'u_cycle_minutes');
-  const edgeAlphaLocation = gl.getUniformLocation(edgeProgram, 'u_alpha');
-  const edgeThemeVariantLocation = gl.getUniformLocation(edgeProgram, 'u_theme_variant');
-  const edgeVertexBuffer = gl.createBuffer();
-  if (!edgeVertexBuffer) {
-    gl.deleteProgram(edgeProgram);
-    throw new Error('failed to allocate WebGL edge vertex buffer');
-  }
-  let edgeVertexBufferCapacityFloats = 0;
-  let lastUploadedEdgeVertexDataRef = null;
-  let lastUploadedEdgeVertexDataLength = 0;
-  const ensureEdgeVertexBufferCapacity = (requiredFloats) => {
-    if (!Number.isInteger(requiredFloats) || requiredFloats <= 0) {
-      throw new Error('requiredFloats must be a positive integer');
-    }
-    if (edgeVertexBufferCapacityFloats >= requiredFloats) {
-      return;
-    }
-    let nextCapacityFloats = Math.max(1024, edgeVertexBufferCapacityFloats || 1024);
-    while (nextCapacityFloats < requiredFloats) {
-      nextCapacityFloats *= 2;
-    }
-    gl.bindBuffer(gl.ARRAY_BUFFER, edgeVertexBuffer);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      nextCapacityFloats * Float32Array.BYTES_PER_ELEMENT,
-      gl.DYNAMIC_DRAW,
-    );
-    edgeVertexBufferCapacityFloats = nextCapacityFloats;
-  };
-
-  let indexedEdgeProgram = null;
-  let indexedEdgePositionLocation = -1;
-  let indexedEdgeSourceNodeLocation = -1;
-  let indexedEdgeTargetNodeLocation = -1;
-  let indexedEdgeCostLocation = -1;
-  let indexedEdgeEndpointLocation = -1;
-  let indexedEdgeViewportLocation = null;
-  let indexedEdgeViewOffsetLocation = null;
-  let indexedEdgeViewScaleLocation = null;
-  let indexedEdgeCycleMinutesLocation = null;
-  let indexedEdgeAlphaLocation = null;
-  let indexedEdgeThemeVariantLocation = null;
-  let indexedEdgeSlackSecondsLocation = null;
-  let indexedEdgeNodeTimeTextureLocation = null;
-  let indexedEdgeNodeTimeTextureSizeLocation = null;
-  let indexedEdgeNodeTimeTexture = null;
-  let indexedEdgeNodeTimeTextureWidth = 0;
-  let indexedEdgeNodeTimeTextureHeight = 0;
-  let indexedEdgeNodeTimeTextureUploadBuffer = null;
-  let indexedEdgeNodeTimeTextureFloat64Bridge = null;
-  let indexedEdgeMaxTextureSize = 0;
-  let lastUploadedIndexedEdgeVertexDataRef = null;
-  let lastUploadedIndexedEdgeVertexDataLength = 0;
-
-  if (isWebGl2) {
-    const indexedEdgeVertexShaderSource = `#version 300 es
-precision highp float;
-in vec2 a_position_px;
-in float a_source_node_index;
-in float a_target_node_index;
-in float a_edge_cost_seconds;
-in float a_endpoint_t;
-uniform vec2 u_viewport_px;
-uniform vec2 u_view_offset_px;
-uniform float u_view_scale;
-uniform sampler2D u_node_time_texture;
-uniform ivec2 u_node_time_texture_size;
-uniform float u_edge_slack_seconds;
-out float v_seconds;
-out float v_visible;
-
-float readNodeSeconds(float nodeIndexFloat) {
-  int nodeIndex = int(nodeIndexFloat + 0.5);
-  int textureWidth = u_node_time_texture_size.x;
-  int x = nodeIndex % textureWidth;
-  int y = nodeIndex / textureWidth;
-  return texelFetch(u_node_time_texture, ivec2(x, y), 0).r;
-}
-
-bool isFiniteSeconds(float value) {
-  return !(isnan(value) || isinf(value));
-}
-
-void main(void) {
-  vec2 viewPositionPx = (a_position_px - u_view_offset_px) * u_view_scale;
-  vec2 clip = vec2(
-    (viewPositionPx.x / u_viewport_px.x) * 2.0 - 1.0,
-    1.0 - (viewPositionPx.y / u_viewport_px.y) * 2.0
-  );
-  gl_Position = vec4(clip, 0.0, 1.0);
-
-  float startSeconds = readNodeSeconds(a_source_node_index);
-  float targetSeconds = readNodeSeconds(a_target_node_index);
-  float expectedTargetSeconds = startSeconds + a_edge_cost_seconds;
-  bool visible = isFiniteSeconds(startSeconds)
-    && isFiniteSeconds(targetSeconds)
-    && isFiniteSeconds(a_edge_cost_seconds)
-    && a_edge_cost_seconds > 0.0
-    && expectedTargetSeconds <= targetSeconds + u_edge_slack_seconds;
-  v_visible = visible ? 1.0 : 0.0;
-  if (!visible) {
-    v_seconds = -1.0;
-    return;
-  }
-  v_seconds = mix(startSeconds, expectedTargetSeconds, a_endpoint_t);
-}`;
-    const indexedEdgeFragmentShaderSource = `#version 300 es
-precision highp float;
-uniform float u_cycle_minutes;
-uniform float u_alpha;
-uniform float u_theme_variant;
-in float v_seconds;
-in float v_visible;
-out vec4 outColor;
-
-${CYCLE_COLOUR_MAP_GLSL}
-
-void main(void) {
-  if (v_visible < 0.5 || v_seconds < 0.0) {
-    outColor = vec4(0.0, 0.0, 0.0, 0.0);
-    return;
-  }
-  float cycleMinutes = max(u_cycle_minutes, 1.0);
-  float cyclePositionMinutes = mod(v_seconds / 60.0, cycleMinutes);
-  float cycleRatio = cyclePositionMinutes / cycleMinutes;
-  vec3 rgb = mapCycleColour(cycleRatio, u_theme_variant) / 255.0;
-  outColor = vec4(rgb, u_alpha);
-}`;
-    try {
-      indexedEdgeProgram = createWebGlProgram(
-        gl,
-        indexedEdgeVertexShaderSource,
-        indexedEdgeFragmentShaderSource,
-      );
-      indexedEdgePositionLocation = gl.getAttribLocation(indexedEdgeProgram, 'a_position_px');
-      indexedEdgeSourceNodeLocation = gl.getAttribLocation(indexedEdgeProgram, 'a_source_node_index');
-      indexedEdgeTargetNodeLocation = gl.getAttribLocation(indexedEdgeProgram, 'a_target_node_index');
-      indexedEdgeCostLocation = gl.getAttribLocation(indexedEdgeProgram, 'a_edge_cost_seconds');
-      indexedEdgeEndpointLocation = gl.getAttribLocation(indexedEdgeProgram, 'a_endpoint_t');
-      if (
-        indexedEdgePositionLocation < 0
-        || indexedEdgeSourceNodeLocation < 0
-        || indexedEdgeTargetNodeLocation < 0
-        || indexedEdgeCostLocation < 0
-        || indexedEdgeEndpointLocation < 0
-      ) {
-        gl.deleteProgram(indexedEdgeProgram);
-        indexedEdgeProgram = null;
-      } else {
-        indexedEdgeViewportLocation = gl.getUniformLocation(indexedEdgeProgram, 'u_viewport_px');
-        indexedEdgeViewOffsetLocation = gl.getUniformLocation(indexedEdgeProgram, 'u_view_offset_px');
-        indexedEdgeViewScaleLocation = gl.getUniformLocation(indexedEdgeProgram, 'u_view_scale');
-        indexedEdgeCycleMinutesLocation = gl.getUniformLocation(indexedEdgeProgram, 'u_cycle_minutes');
-        indexedEdgeAlphaLocation = gl.getUniformLocation(indexedEdgeProgram, 'u_alpha');
-        indexedEdgeThemeVariantLocation = gl.getUniformLocation(indexedEdgeProgram, 'u_theme_variant');
-        indexedEdgeSlackSecondsLocation = gl.getUniformLocation(indexedEdgeProgram, 'u_edge_slack_seconds');
-        indexedEdgeNodeTimeTextureLocation = gl.getUniformLocation(
-          indexedEdgeProgram,
-          'u_node_time_texture',
-        );
-        indexedEdgeNodeTimeTextureSizeLocation = gl.getUniformLocation(
-          indexedEdgeProgram,
-          'u_node_time_texture_size',
-        );
-        indexedEdgeNodeTimeTexture = gl.createTexture();
-        if (!indexedEdgeNodeTimeTexture) {
-          gl.deleteProgram(indexedEdgeProgram);
-          indexedEdgeProgram = null;
-        } else {
-          gl.bindTexture(gl.TEXTURE_2D, indexedEdgeNodeTimeTexture);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-          gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-          indexedEdgeMaxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
-        }
-      }
-    } catch (error) {
-      console.warn(
-        'Indexed WebGL edge renderer initialization failed; falling back to packed edge-time buffers.',
-        error,
-      );
-      if (indexedEdgeProgram) {
-        gl.deleteProgram(indexedEdgeProgram);
-      }
-      indexedEdgeProgram = null;
-      indexedEdgeNodeTimeTexture = null;
-    }
-  }
-
-  const uploadIndexedEdgeNodeTimesTexture = (distSeconds) => {
-    if (!(distSeconds instanceof Float32Array) && !(distSeconds instanceof Float64Array)) {
-      throw new Error('distSeconds must be a Float32Array or Float64Array');
-    }
-    if (!indexedEdgeNodeTimeTexture || indexedEdgeMaxTextureSize <= 0) {
-      throw new Error('indexed edge node-time texture is unavailable');
-    }
-    const { width, height, size } = computeNodeTimeTextureDimensions(
-      distSeconds.length,
-      indexedEdgeMaxTextureSize,
-    );
-    if (width !== indexedEdgeNodeTimeTextureWidth || height !== indexedEdgeNodeTimeTextureHeight) {
-      indexedEdgeNodeTimeTextureWidth = width;
-      indexedEdgeNodeTimeTextureHeight = height;
-      gl.bindTexture(gl.TEXTURE_2D, indexedEdgeNodeTimeTexture);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.R32F,
-        width,
-        height,
-        0,
-        gl.RED,
-        gl.FLOAT,
-        null,
-      );
-    }
-
-    let uploadData = distSeconds;
-    if (distSeconds instanceof Float64Array) {
-      if (
-        !(indexedEdgeNodeTimeTextureFloat64Bridge instanceof Float32Array)
-        || indexedEdgeNodeTimeTextureFloat64Bridge.length !== distSeconds.length
-      ) {
-        indexedEdgeNodeTimeTextureFloat64Bridge = new Float32Array(distSeconds.length);
-      }
-      indexedEdgeNodeTimeTextureFloat64Bridge.set(distSeconds);
-      uploadData = indexedEdgeNodeTimeTextureFloat64Bridge;
-    }
-    if (size !== uploadData.length) {
-      if (
-        !(indexedEdgeNodeTimeTextureUploadBuffer instanceof Float32Array)
-        || indexedEdgeNodeTimeTextureUploadBuffer.length !== size
-      ) {
-        indexedEdgeNodeTimeTextureUploadBuffer = new Float32Array(size);
-      }
-      indexedEdgeNodeTimeTextureUploadBuffer.fill(Number.POSITIVE_INFINITY);
-      indexedEdgeNodeTimeTextureUploadBuffer.set(uploadData);
-      uploadData = indexedEdgeNodeTimeTextureUploadBuffer;
-    }
-
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, indexedEdgeNodeTimeTexture);
-    gl.texSubImage2D(
-      gl.TEXTURE_2D,
-      0,
-      0,
-      0,
-      width,
-      height,
-      gl.RED,
-      gl.FLOAT,
-      uploadData,
-    );
-    return { width, height };
-  };
-
-  const resolveRendererViewport = (graphWidthPx, graphHeightPx, viewport) =>
-    resolveViewportFrame(
-      {
-        gridWidthPx: graphWidthPx,
-        gridHeightPx: graphHeightPx,
-      },
-      viewport,
-      {
-        frameWidthPx: canvas.width,
-        frameHeightPx: canvas.height,
-      },
-    );
-
-  const renderer = {
-    mode: 'webgl',
-    clear(options = {}) {
-      syncCanvasToDisplaySize(canvas);
-      const targetWidthPx = options.widthPx ?? canvas.width;
-      const targetHeightPx = options.heightPx ?? canvas.height;
-      if (!Number.isFinite(targetWidthPx) || targetWidthPx <= 0) {
-        throw new Error('options.widthPx (or canvas.width) must be positive');
-      }
-      if (!Number.isFinite(targetHeightPx) || targetHeightPx <= 0) {
-        throw new Error('options.heightPx (or canvas.height) must be positive');
-      }
-
-      const widthPx = Math.floor(targetWidthPx);
-      const heightPx = Math.floor(targetHeightPx);
-      if (canvas.width !== widthPx) {
-        canvas.width = widthPx;
-      }
-      if (canvas.height !== heightPx) {
-        canvas.height = heightPx;
-      }
-
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-    },
-    draw(pixelGrid, options = {}) {
-      validatePixelGrid(pixelGrid);
-      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
-        canvas.width = pixelGrid.widthPx;
-        canvas.height = pixelGrid.heightPx;
-      }
-
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      const viewport = resolveRendererViewport(pixelGrid.widthPx, pixelGrid.heightPx, options.viewport);
-      bindQuadToProgram(program, positionLocation);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA,
-        pixelGrid.widthPx,
-        pixelGrid.heightPx,
-        0,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        pixelGrid.rgba,
-      );
-      if (textureLocation !== null) {
-        gl.uniform1i(textureLocation, 0);
-      }
-      if (textureSizeLocation !== null) {
-        gl.uniform2f(textureSizeLocation, pixelGrid.widthPx, pixelGrid.heightPx);
-      }
-      if (viewportSizeLocation !== null) {
-        gl.uniform2f(viewportSizeLocation, canvas.width, canvas.height);
-      }
-      if (textureViewOffsetLocation !== null) {
-        gl.uniform2f(textureViewOffsetLocation, viewport.offsetXPx, viewport.offsetYPx);
-      }
-      if (textureViewScaleLocation !== null) {
-        gl.uniform1f(textureViewScaleLocation, viewport.effectiveScale);
-      }
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      return null;
-    },
-    drawTravelTimeEdges(edgeVertexData, options = {}) {
-      if (!(edgeVertexData instanceof Float32Array)) {
-        throw new Error('edgeVertexData must be a Float32Array');
-      }
-      if (edgeVertexData.length % 6 !== 0) {
-        throw new Error('edgeVertexData length must be a multiple of 6 (x0,y0,t0,x1,y1,t1)');
-      }
-      const append = options.append ?? false;
-      if (edgeVertexData.length === 0) {
-        if (!append) {
-          lastUploadedEdgeVertexDataRef = null;
-          lastUploadedEdgeVertexDataLength = 0;
-        }
-        return 0;
-      }
-
-      const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
-      const themeVariant = getIsochroneThemeVariant(options.colourTheme ?? 'dark');
-      const alpha = Number.isFinite(options.alpha) ? options.alpha : 1;
-      const clampedAlpha = Math.max(0, Math.min(1, alpha));
-      const reuseUploadedGeometry = options.reuseUploadedGeometry === true;
-      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
-        const fallbackWidthPx = options.graphWidthPx ?? canvas.width;
-        const fallbackHeightPx = options.graphHeightPx ?? canvas.height;
-        canvas.width = Math.max(1, Math.floor(fallbackWidthPx));
-        canvas.height = Math.max(1, Math.floor(fallbackHeightPx));
-      }
-      const graphWidthPx = options.graphWidthPx ?? canvas.width;
-      const graphHeightPx = options.graphHeightPx ?? canvas.height;
-      const viewport = resolveRendererViewport(graphWidthPx, graphHeightPx, options.viewport);
-
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      if (!append) {
-        gl.clearColor(0, 0, 0, 0);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-      }
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-      gl.useProgram(edgeProgram);
-      gl.bindBuffer(gl.ARRAY_BUFFER, edgeVertexBuffer);
-      ensureEdgeVertexBufferCapacity(edgeVertexData.length);
-      const shouldUploadGeometry = shouldUploadEdgeGeometry(
-        lastUploadedEdgeVertexDataRef,
-        lastUploadedEdgeVertexDataLength,
-        edgeVertexData,
-        {
-          append,
-          reuseUploadedGeometry,
-        },
-      );
-      if (shouldUploadGeometry) {
-        gl.bufferSubData(gl.ARRAY_BUFFER, 0, edgeVertexData);
-      }
-      gl.enableVertexAttribArray(edgePositionLocation);
-      gl.vertexAttribPointer(edgePositionLocation, 2, gl.FLOAT, false, 12, 0);
-      gl.enableVertexAttribArray(edgeSecondsLocation);
-      gl.vertexAttribPointer(edgeSecondsLocation, 1, gl.FLOAT, false, 12, 8);
-      if (edgeViewportLocation !== null) {
-        gl.uniform2f(edgeViewportLocation, canvas.width, canvas.height);
-      }
-      if (edgeViewOffsetLocation !== null) {
-        gl.uniform2f(edgeViewOffsetLocation, viewport.offsetXPx, viewport.offsetYPx);
-      }
-      if (edgeViewScaleLocation !== null) {
-        gl.uniform1f(edgeViewScaleLocation, viewport.effectiveScale);
-      }
-      if (edgeCycleMinutesLocation !== null) {
-        gl.uniform1f(edgeCycleMinutesLocation, cycleMinutes);
-      }
-      if (edgeAlphaLocation !== null) {
-        gl.uniform1f(edgeAlphaLocation, clampedAlpha);
-      }
-      if (edgeThemeVariantLocation !== null) {
-        gl.uniform1f(edgeThemeVariantLocation, themeVariant);
-      }
-      gl.drawArrays(gl.LINES, 0, edgeVertexData.length / 3);
-      if (!append) {
-        lastUploadedEdgeVertexDataRef = edgeVertexData;
-        lastUploadedEdgeVertexDataLength = edgeVertexData.length;
-      } else {
-        lastUploadedEdgeVertexDataRef = null;
-        lastUploadedEdgeVertexDataLength = 0;
-      }
-      return edgeVertexData.length / 6;
-    },
-    drawTravelTimeEdgesFromNodeTimes(edgeVertexData, distSeconds, options = {}) {
-      if (!indexedEdgeProgram || !indexedEdgeNodeTimeTexture) {
-        throw new Error('indexed WebGL edge renderer is unavailable');
-      }
-      if (!(edgeVertexData instanceof Float32Array)) {
-        throw new Error('edgeVertexData must be a Float32Array');
-      }
-      if (edgeVertexData.length % 12 !== 0) {
-        throw new Error(
-          'edgeVertexData length must be a multiple of 12 (two vertices of six floats per edge)',
-        );
-      }
-      if (!(distSeconds instanceof Float32Array) && !(distSeconds instanceof Float64Array)) {
-        throw new Error('distSeconds must be a Float32Array or Float64Array');
-      }
-      const append = options.append ?? false;
-      if (edgeVertexData.length === 0 || distSeconds.length === 0) {
-        if (!append) {
-          lastUploadedIndexedEdgeVertexDataRef = null;
-          lastUploadedIndexedEdgeVertexDataLength = 0;
-        }
-        return 0;
-      }
-
-      const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
-      const themeVariant = getIsochroneThemeVariant(options.colourTheme ?? 'dark');
-      const alpha = Number.isFinite(options.alpha) ? options.alpha : 1;
-      const clampedAlpha = Math.max(0, Math.min(1, alpha));
-      const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
-      if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
-        throw new Error('options.edgeSlackSeconds must be a non-negative finite number');
-      }
-      const reuseUploadedGeometry = options.reuseUploadedGeometry === true;
-      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
-        const fallbackWidthPx = options.graphWidthPx ?? canvas.width;
-        const fallbackHeightPx = options.graphHeightPx ?? canvas.height;
-        canvas.width = Math.max(1, Math.floor(fallbackWidthPx));
-        canvas.height = Math.max(1, Math.floor(fallbackHeightPx));
-      }
-      const graphWidthPx = options.graphWidthPx ?? canvas.width;
-      const graphHeightPx = options.graphHeightPx ?? canvas.height;
-      const viewport = resolveRendererViewport(graphWidthPx, graphHeightPx, options.viewport);
-
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      if (!append) {
-        gl.clearColor(0, 0, 0, 0);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-      }
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-      gl.useProgram(indexedEdgeProgram);
-
-      const textureDimensions = uploadIndexedEdgeNodeTimesTexture(distSeconds);
-      if (indexedEdgeNodeTimeTextureLocation !== null) {
-        gl.uniform1i(indexedEdgeNodeTimeTextureLocation, 0);
-      }
-      if (indexedEdgeNodeTimeTextureSizeLocation !== null) {
-        gl.uniform2i(
-          indexedEdgeNodeTimeTextureSizeLocation,
-          textureDimensions.width,
-          textureDimensions.height,
-        );
-      }
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, edgeVertexBuffer);
-      ensureEdgeVertexBufferCapacity(edgeVertexData.length);
-      const shouldUploadGeometry = shouldUploadEdgeGeometry(
-        lastUploadedIndexedEdgeVertexDataRef,
-        lastUploadedIndexedEdgeVertexDataLength,
-        edgeVertexData,
-        {
-          append,
-          reuseUploadedGeometry,
-        },
-      );
-      if (shouldUploadGeometry) {
-        gl.bufferSubData(gl.ARRAY_BUFFER, 0, edgeVertexData);
-      }
-      gl.enableVertexAttribArray(indexedEdgePositionLocation);
-      gl.vertexAttribPointer(indexedEdgePositionLocation, 2, gl.FLOAT, false, 24, 0);
-      gl.enableVertexAttribArray(indexedEdgeSourceNodeLocation);
-      gl.vertexAttribPointer(indexedEdgeSourceNodeLocation, 1, gl.FLOAT, false, 24, 8);
-      gl.enableVertexAttribArray(indexedEdgeTargetNodeLocation);
-      gl.vertexAttribPointer(indexedEdgeTargetNodeLocation, 1, gl.FLOAT, false, 24, 12);
-      gl.enableVertexAttribArray(indexedEdgeCostLocation);
-      gl.vertexAttribPointer(indexedEdgeCostLocation, 1, gl.FLOAT, false, 24, 16);
-      gl.enableVertexAttribArray(indexedEdgeEndpointLocation);
-      gl.vertexAttribPointer(indexedEdgeEndpointLocation, 1, gl.FLOAT, false, 24, 20);
-      if (indexedEdgeViewportLocation !== null) {
-        gl.uniform2f(indexedEdgeViewportLocation, canvas.width, canvas.height);
-      }
-      if (indexedEdgeViewOffsetLocation !== null) {
-        gl.uniform2f(indexedEdgeViewOffsetLocation, viewport.offsetXPx, viewport.offsetYPx);
-      }
-      if (indexedEdgeViewScaleLocation !== null) {
-        gl.uniform1f(indexedEdgeViewScaleLocation, viewport.effectiveScale);
-      }
-      if (indexedEdgeCycleMinutesLocation !== null) {
-        gl.uniform1f(indexedEdgeCycleMinutesLocation, cycleMinutes);
-      }
-      if (indexedEdgeAlphaLocation !== null) {
-        gl.uniform1f(indexedEdgeAlphaLocation, clampedAlpha);
-      }
-      if (indexedEdgeThemeVariantLocation !== null) {
-        gl.uniform1f(indexedEdgeThemeVariantLocation, themeVariant);
-      }
-      if (indexedEdgeSlackSecondsLocation !== null) {
-        gl.uniform1f(indexedEdgeSlackSecondsLocation, edgeSlackSeconds);
-      }
-      gl.drawArrays(gl.LINES, 0, edgeVertexData.length / 6);
-      if (!append) {
-        lastUploadedIndexedEdgeVertexDataRef = edgeVertexData;
-        lastUploadedIndexedEdgeVertexDataLength = edgeVertexData.length;
-      } else {
-        lastUploadedIndexedEdgeVertexDataRef = null;
-        lastUploadedIndexedEdgeVertexDataLength = 0;
-      }
-      return edgeVertexData.length / 12;
-    },
-    readPixelsRgba(samplePixels) {
-      if (!Array.isArray(samplePixels)) {
-        throw new Error('samplePixels must be an array of [x, y] pairs');
-      }
-
-      const sampledRgba = new Uint8Array(samplePixels.length * 4);
-      const onePixel = new Uint8Array(4);
-      for (let sampleIndex = 0; sampleIndex < samplePixels.length; sampleIndex += 1) {
-        const sample = samplePixels[sampleIndex];
-        if (!Array.isArray(sample) || sample.length < 2) {
-          throw new Error('samplePixels must contain [x, y] pairs');
-        }
-        const xPx = clampInt(Math.round(sample[0]), 0, canvas.width - 1);
-        const yPx = clampInt(Math.round(sample[1]), 0, canvas.height - 1);
-        const yReadPx = canvas.height - 1 - yPx;
-        gl.readPixels(xPx, yReadPx, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, onePixel);
-        sampledRgba[sampleIndex * 4] = onePixel[0];
-        sampledRgba[sampleIndex * 4 + 1] = onePixel[1];
-        sampledRgba[sampleIndex * 4 + 2] = onePixel[2];
-        sampledRgba[sampleIndex * 4 + 3] = onePixel[3];
-      }
-
-      return sampledRgba;
-    },
-  };
-
-  if (!indexedEdgeProgram || !indexedEdgeNodeTimeTexture) {
-    delete renderer.drawTravelTimeEdgesFromNodeTimes;
-  }
-
-  if (travelTimeProgram && travelTimeTexture && isWebGl2) {
-    renderer.drawTravelTimeGrid = function drawTravelTimeGrid(travelTimeGrid, options = {}) {
-      validateTravelTimeGrid(travelTimeGrid);
-
-      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
-        canvas.width = travelTimeGrid.widthPx;
-        canvas.height = travelTimeGrid.heightPx;
-      }
-
-      const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
-      const themeVariant = getIsochroneThemeVariant(options.colourTheme ?? 'dark');
-      const viewport = resolveRendererViewport(
-        travelTimeGrid.widthPx,
-        travelTimeGrid.heightPx,
-        options.viewport,
-      );
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      bindQuadToProgram(travelTimeProgram, travelTimePositionLocation);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, travelTimeTexture);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.R32F,
-        travelTimeGrid.widthPx,
-        travelTimeGrid.heightPx,
-        0,
-        gl.RED,
-        gl.FLOAT,
-        travelTimeGrid.seconds,
-      );
-      if (travelTimeTextureLocation !== null) {
-        gl.uniform1i(travelTimeTextureLocation, 0);
-      }
-      if (travelTimeTextureSizeLocation !== null) {
-        gl.uniform2f(travelTimeTextureSizeLocation, travelTimeGrid.widthPx, travelTimeGrid.heightPx);
-      }
-      if (travelTimeViewportSizeLocation !== null) {
-        gl.uniform2f(travelTimeViewportSizeLocation, canvas.width, canvas.height);
-      }
-      if (travelTimeViewOffsetLocation !== null) {
-        gl.uniform2f(travelTimeViewOffsetLocation, viewport.offsetXPx, viewport.offsetYPx);
-      }
-      if (travelTimeViewScaleLocation !== null) {
-        gl.uniform1f(travelTimeViewScaleLocation, viewport.effectiveScale);
-      }
-      if (travelTimeCycleMinutesLocation !== null) {
-        gl.uniform1f(travelTimeCycleMinutesLocation, cycleMinutes);
-      }
-      if (travelTimeThemeVariantLocation !== null) {
-        gl.uniform1f(travelTimeThemeVariantLocation, themeVariant);
-      }
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      return null;
-    };
-  }
-
-  return renderer;
-}
-
-export function createIsochroneRenderer(canvas, options = {}) {
-  try {
-    const webglRenderer = createWebGlIsochroneRenderer(canvas, options);
-    return webglRenderer ?? createCanvas2dIsochroneRenderer(canvas);
-  } catch (error) {
-    console.warn('WebGL renderer initialization failed; falling back to 2D canvas renderer.', error);
-    return createCanvas2dIsochroneRenderer(canvas);
-  }
-}
-
-function getShellLocaleMessages(shell) {
-  return shell?.localeMessages && typeof shell.localeMessages === 'object' ? shell.localeMessages : null;
-}
-
-function getLocalizedShellText(shell, key, fallbackValue, values = {}) {
-  return formatCommonMessage(getShellLocaleMessages(shell), key, values, fallbackValue);
-}
-
-function getWasmRequiredMessage(shell) {
-  return getCommonMessage(
-    getShellLocaleMessages(shell),
-    'error.wasm.required',
-    WASM_REQUIRED_MESSAGE,
-  );
-}
-
-function formatInitialGraphLoadingText(shell) {
-  return getLocalizedShellText(shell, 'loading.graph.initial', 'Loading graph: 0.00 MB');
-}
-
-export function getRoutingFailedStatusText(shell) {
-  return getLocalizedShellText(shell, 'error.routing.failed', 'Routing failed.');
-}
-
-export function formatRenderBackendBadgeText(rendererMode, options = {}) {
-  const messages = options.messages ?? null;
-  if (rendererMode === 'webgl') {
-    return formatCommonMessage(messages, 'status.renderer.webgl', {}, 'Renderer: WebGL');
-  }
-  return formatCommonMessage(messages, 'status.renderer.cpu', {}, 'Renderer: CPU');
-}
-
-function updateRenderBackendBadge(shell, renderer) {
-  if (!shell || typeof shell !== 'object' || !shell.renderBackendBadge) {
-    return;
-  }
-
-  const rendererMode = renderer?.mode === 'webgl' ? 'webgl' : 'cpu';
-  const nextText = formatRenderBackendBadgeText(rendererMode, {
-    messages: getShellLocaleMessages(shell),
-  });
-  if (shell.renderBackendBadge.textContent !== nextText) {
-    shell.renderBackendBadge.textContent = nextText;
-  }
-  shell.renderBackendBadge.dataset.backend = rendererMode;
-}
-
-function getOrCreateIsochroneRenderer(canvas) {
-  const cached = canvas.__isochroneRenderer;
-  if (cached && typeof cached.draw === 'function') {
-    return cached;
-  }
-
-  const renderer = createIsochroneRenderer(canvas);
-  canvas.__isochroneRenderer = renderer;
-  return renderer;
-}
-
-export function blitPixelGridToCanvas(canvas, pixelGrid, options = {}) {
-  if (!canvas || typeof canvas.getContext !== 'function') {
-    throw new Error('canvas must provide getContext("2d")');
-  }
-  validatePixelGrid(pixelGrid);
-  const renderer = getOrCreateIsochroneRenderer(canvas);
-  return renderer.draw(pixelGrid, { viewport: options.viewport });
-}
 
 export function clearRenderedIsochrone(shell, mapData = null) {
   if (!shell || typeof shell !== 'object' || !shell.isochroneCanvas) {
@@ -3559,595 +2302,28 @@ export function renderReachableNodes(shell, mapData, distSeconds, options = {}) 
   );
   blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
     viewport: mapData.viewport,
+    fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
   });
   return paintedNodeCount;
 }
 
-export function paintSettledBatchToGrid(pixelGrid, nodePixels, distSeconds, settledBatch, options = {}) {
-  validatePixelGrid(pixelGrid);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  validateSettledBatch(settledBatch);
 
-  const alpha = options.alpha ?? 255;
-  const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
-  const colourTheme = normalizeIsochroneTheme(options.colourTheme, 'dark');
-  let paintedCount = 0;
 
-  for (const nodeIndex of settledBatch) {
-    if (nodeIndex < 0 || nodeIndex >= nodePixels.nodePixelX.length) {
-      continue;
-    }
-    if (!(distSeconds[nodeIndex] < Infinity)) {
-      continue;
-    }
 
-    const [r, g, b] = timeToColour(distSeconds[nodeIndex], {
-      cycleMinutes: colourCycleMinutes,
-      theme: colourTheme,
-    });
-    const xPx = nodePixels.nodePixelX[nodeIndex];
-    const yPx = nodePixels.nodePixelY[nodeIndex];
-    if (setPixel(pixelGrid, xPx, yPx, r, g, b, alpha)) {
-      paintedCount += 1;
-    }
-  }
 
-  return paintedCount;
-}
 
-function forEachEligibleOutgoingEdgeFromSourceNode(
-  graph,
-  nodePixels,
-  distSeconds,
-  sourceNodeIndex,
-  allowedModeMask,
-  edgeSlackSeconds,
-  edgeTraversalCostSeconds,
-  onEligibleEdge,
-) {
-  if (typeof onEligibleEdge !== 'function') {
-    throw new Error('onEligibleEdge must be a function');
-  }
-  if (sourceNodeIndex < 0 || sourceNodeIndex >= graph.header.nNodes) {
-    return 0;
-  }
 
-  const startSeconds = distSeconds[sourceNodeIndex];
-  if (!Number.isFinite(startSeconds)) {
-    return 0;
-  }
 
-  let totalContribution = 0;
-  const x0 = nodePixels.nodePixelX[sourceNodeIndex];
-  const y0 = nodePixels.nodePixelY[sourceNodeIndex];
-  const firstEdgeIndex = graph.nodeU32[sourceNodeIndex * 4 + 2];
-  const edgeCount = graph.nodeU16[sourceNodeIndex * 8 + 6];
-  const endEdgeIndex = firstEdgeIndex + edgeCount;
 
-  for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
-    if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
-      continue;
-    }
 
-    const edgeCostSeconds = getEdgeTraversalCostSeconds(
-      graph,
-      edgeIndex,
-      allowedModeMask,
-      edgeTraversalCostSeconds,
-    );
-    if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
-      continue;
-    }
 
-    const targetNodeIndex = graph.edgeU32[edgeIndex * 3];
-    if (targetNodeIndex < 0 || targetNodeIndex >= graph.header.nNodes) {
-      continue;
-    }
 
-    const targetSeconds = distSeconds[targetNodeIndex];
-    if (!Number.isFinite(targetSeconds)) {
-      continue;
-    }
 
-    const expectedTargetSeconds = startSeconds + edgeCostSeconds;
-    if (expectedTargetSeconds > targetSeconds + edgeSlackSeconds) {
-      continue;
-    }
 
-    const x1 = nodePixels.nodePixelX[targetNodeIndex];
-    const y1 = nodePixels.nodePixelY[targetNodeIndex];
-    const callbackContribution = onEligibleEdge(
-      x0,
-      y0,
-      startSeconds,
-      x1,
-      y1,
-      expectedTargetSeconds,
-      targetNodeIndex,
-      edgeIndex,
-    );
-    if (Number.isFinite(callbackContribution)) {
-      totalContribution += callbackContribution;
-    }
-  }
 
-  return totalContribution;
-}
 
-function paintEligibleOutgoingEdgesFromSourceNode(
-  pixelGrid,
-  graph,
-  nodePixels,
-  distSeconds,
-  sourceNodeIndex,
-  allowedModeMask,
-  alpha,
-  colourCycleMinutes,
-  colourTheme,
-  edgeSlackSeconds,
-  stepStride,
-  edgeTraversalCostSeconds,
-) {
-  return forEachEligibleOutgoingEdgeFromSourceNode(
-    graph,
-    nodePixels,
-    distSeconds,
-    sourceNodeIndex,
-    allowedModeMask,
-    edgeSlackSeconds,
-    edgeTraversalCostSeconds,
-    (x0, y0, startSeconds, x1, y1, expectedTargetSeconds) =>
-      paintInterpolatedEdgeToGrid(
-        pixelGrid,
-        x0,
-        y0,
-        startSeconds,
-        x1,
-        y1,
-        expectedTargetSeconds,
-        { alpha, colourCycleMinutes, colourTheme, stepStride },
-      ),
-  );
-}
 
-export function paintSettledBatchEdgeInterpolationsToGrid(
-  pixelGrid,
-  graph,
-  nodePixels,
-  distSeconds,
-  settledBatch,
-  allowedModeMask,
-  options = {},
-) {
-  validatePixelGrid(pixelGrid);
-  validateGraphForRouting(graph);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  validateSettledBatch(settledBatch);
-  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
-    throw new Error('allowedModeMask must be a positive 8-bit integer');
-  }
 
-  const alpha = options.alpha ?? 255;
-  const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
-  const colourTheme = normalizeIsochroneTheme(options.colourTheme, 'dark');
-  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
-  const stepStride = options.stepStride ?? 1;
-  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
-    options.edgeTraversalCostSeconds,
-    graph.header.nEdges,
-  );
-  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
-    throw new Error('edgeSlackSeconds must be a non-negative finite number');
-  }
-  if (!Number.isInteger(stepStride) || stepStride <= 0) {
-    throw new Error('stepStride must be a positive integer');
-  }
-
-  let paintedCount = 0;
-
-  for (const sourceNodeIndex of settledBatch) {
-    paintedCount += paintEligibleOutgoingEdgesFromSourceNode(
-      pixelGrid,
-      graph,
-      nodePixels,
-      distSeconds,
-      sourceNodeIndex,
-      allowedModeMask,
-      alpha,
-      colourCycleMinutes,
-      colourTheme,
-      edgeSlackSeconds,
-      stepStride,
-      edgeTraversalCostSeconds,
-    );
-  }
-
-  return paintedCount;
-}
-
-export function paintAllReachableEdgeInterpolationsToGrid(
-  pixelGrid,
-  graph,
-  nodePixels,
-  distSeconds,
-  allowedModeMask,
-  options = {},
-) {
-  validatePixelGrid(pixelGrid);
-  validateGraphForRouting(graph);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
-    throw new Error('allowedModeMask must be a positive 8-bit integer');
-  }
-
-  const alpha = options.alpha ?? 255;
-  const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
-  const colourTheme = normalizeIsochroneTheme(options.colourTheme, 'dark');
-  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
-  const stepStride = options.stepStride ?? 1;
-  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
-    options.edgeTraversalCostSeconds,
-    graph.header.nEdges,
-  );
-  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
-    throw new Error('edgeSlackSeconds must be a non-negative finite number');
-  }
-  if (!Number.isInteger(stepStride) || stepStride <= 0) {
-    throw new Error('stepStride must be a positive integer');
-  }
-
-  let paintedCount = 0;
-  for (let sourceNodeIndex = 0; sourceNodeIndex < graph.header.nNodes; sourceNodeIndex += 1) {
-    paintedCount += paintEligibleOutgoingEdgesFromSourceNode(
-      pixelGrid,
-      graph,
-      nodePixels,
-      distSeconds,
-      sourceNodeIndex,
-      allowedModeMask,
-      alpha,
-      colourCycleMinutes,
-      colourTheme,
-      edgeSlackSeconds,
-      stepStride,
-      edgeTraversalCostSeconds,
-    );
-  }
-
-  return paintedCount;
-}
-
-export function paintSettledBatchTravelTimesToGrid(
-  travelTimeGrid,
-  nodePixels,
-  distSeconds,
-  settledBatch,
-) {
-  validateTravelTimeGrid(travelTimeGrid);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  validateSettledBatch(settledBatch);
-
-  let paintedCount = 0;
-  for (const nodeIndex of settledBatch) {
-    if (nodeIndex < 0 || nodeIndex >= nodePixels.nodePixelX.length) {
-      continue;
-    }
-    if (!(distSeconds[nodeIndex] < Infinity)) {
-      continue;
-    }
-    const xPx = nodePixels.nodePixelX[nodeIndex];
-    const yPx = nodePixels.nodePixelY[nodeIndex];
-    if (setTravelTimePixelMin(travelTimeGrid, xPx, yPx, distSeconds[nodeIndex])) {
-      paintedCount += 1;
-    }
-  }
-  return paintedCount;
-}
-
-function paintEligibleOutgoingEdgesFromSourceNodeToTravelTimeGrid(
-  travelTimeGrid,
-  graph,
-  nodePixels,
-  distSeconds,
-  sourceNodeIndex,
-  allowedModeMask,
-  edgeSlackSeconds,
-  stepStride,
-  edgeTraversalCostSeconds,
-) {
-  return forEachEligibleOutgoingEdgeFromSourceNode(
-    graph,
-    nodePixels,
-    distSeconds,
-    sourceNodeIndex,
-    allowedModeMask,
-    edgeSlackSeconds,
-    edgeTraversalCostSeconds,
-    (x0, y0, startSeconds, x1, y1, expectedTargetSeconds) =>
-      paintInterpolatedEdgeTravelTimesToGrid(
-        travelTimeGrid,
-        x0,
-        y0,
-        startSeconds,
-        x1,
-        y1,
-        expectedTargetSeconds,
-        { stepStride },
-      ),
-  );
-}
-
-export function paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
-  travelTimeGrid,
-  graph,
-  nodePixels,
-  distSeconds,
-  settledBatch,
-  allowedModeMask,
-  options = {},
-) {
-  validateTravelTimeGrid(travelTimeGrid);
-  validateGraphForRouting(graph);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  validateSettledBatch(settledBatch);
-  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
-    throw new Error('allowedModeMask must be a positive 8-bit integer');
-  }
-
-  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
-  const stepStride = options.stepStride ?? 1;
-  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
-    options.edgeTraversalCostSeconds,
-    graph.header.nEdges,
-  );
-  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
-    throw new Error('edgeSlackSeconds must be a non-negative finite number');
-  }
-  if (!Number.isInteger(stepStride) || stepStride <= 0) {
-    throw new Error('stepStride must be a positive integer');
-  }
-
-  let paintedCount = 0;
-  for (const sourceNodeIndex of settledBatch) {
-    paintedCount += paintEligibleOutgoingEdgesFromSourceNodeToTravelTimeGrid(
-      travelTimeGrid,
-      graph,
-      nodePixels,
-      distSeconds,
-      sourceNodeIndex,
-      allowedModeMask,
-      edgeSlackSeconds,
-      stepStride,
-      edgeTraversalCostSeconds,
-    );
-  }
-  return paintedCount;
-}
-
-export function paintAllReachableEdgeInterpolationsToTravelTimeGrid(
-  travelTimeGrid,
-  graph,
-  nodePixels,
-  distSeconds,
-  allowedModeMask,
-  options = {},
-) {
-  validateTravelTimeGrid(travelTimeGrid);
-  validateGraphForRouting(graph);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
-    throw new Error('allowedModeMask must be a positive 8-bit integer');
-  }
-
-  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
-  const stepStride = options.stepStride ?? 1;
-  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
-    options.edgeTraversalCostSeconds,
-    graph.header.nEdges,
-  );
-  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
-    throw new Error('edgeSlackSeconds must be a non-negative finite number');
-  }
-  if (!Number.isInteger(stepStride) || stepStride <= 0) {
-    throw new Error('stepStride must be a positive integer');
-  }
-
-  let paintedCount = 0;
-  for (let sourceNodeIndex = 0; sourceNodeIndex < graph.header.nNodes; sourceNodeIndex += 1) {
-    paintedCount += paintEligibleOutgoingEdgesFromSourceNodeToTravelTimeGrid(
-      travelTimeGrid,
-      graph,
-      nodePixels,
-      distSeconds,
-      sourceNodeIndex,
-      allowedModeMask,
-      edgeSlackSeconds,
-      stepStride,
-      edgeTraversalCostSeconds,
-    );
-  }
-  return paintedCount;
-}
-
-function createEdgeVertexBufferBuilder(initialCapacityFloats = 32768) {
-  if (!Number.isInteger(initialCapacityFloats) || initialCapacityFloats <= 0) {
-    throw new Error('initialCapacityFloats must be a positive integer');
-  }
-  return {
-    data: new Float32Array(initialCapacityFloats),
-    length: 0,
-  };
-}
-
-function validateEdgeVertexBufferBuilder(builder) {
-  if (!builder || typeof builder !== 'object') {
-    throw new Error('builder must be an object');
-  }
-  if (!(builder.data instanceof Float32Array)) {
-    throw new Error('builder.data must be a Float32Array');
-  }
-  if (!Number.isInteger(builder.length) || builder.length < 0 || builder.length > builder.data.length) {
-    throw new Error('builder.length must be a valid index within builder.data');
-  }
-}
-
-function resetEdgeVertexBufferBuilder(builder) {
-  validateEdgeVertexBufferBuilder(builder);
-  builder.length = 0;
-  return builder;
-}
-
-function ensureEdgeVertexBufferBuilderCapacity(builder, requiredLength) {
-  validateEdgeVertexBufferBuilder(builder);
-  if (builder.data.length >= requiredLength) {
-    return;
-  }
-  let nextLength = builder.data.length;
-  while (nextLength < requiredLength) {
-    nextLength *= 2;
-  }
-  const nextData = new Float32Array(nextLength);
-  nextData.set(builder.data.subarray(0, builder.length));
-  builder.data = nextData;
-}
-
-function appendEdgeVertexSegment(builder, x0, y0, t0, x1, y1, t1) {
-  ensureEdgeVertexBufferBuilderCapacity(builder, builder.length + 6);
-  const offset = builder.length;
-  builder.data[offset] = x0;
-  builder.data[offset + 1] = y0;
-  builder.data[offset + 2] = t0;
-  builder.data[offset + 3] = x1;
-  builder.data[offset + 4] = y1;
-  builder.data[offset + 5] = t1;
-  builder.length += 6;
-}
-
-function finalizeEdgeVertexBufferBuilder(builder) {
-  validateEdgeVertexBufferBuilder(builder);
-  return builder.data.subarray(0, builder.length);
-}
-
-function collectEligibleOutgoingTravelTimeEdgeVerticesFromSourceNode(
-  graph,
-  nodePixels,
-  distSeconds,
-  sourceNodeIndex,
-  allowedModeMask,
-  edgeSlackSeconds,
-  edgeVertexBuilder,
-  edgeTraversalCostSeconds,
-) {
-  return forEachEligibleOutgoingEdgeFromSourceNode(
-    graph,
-    nodePixels,
-    distSeconds,
-    sourceNodeIndex,
-    allowedModeMask,
-    edgeSlackSeconds,
-    edgeTraversalCostSeconds,
-    (x0, y0, startSeconds, x1, y1, expectedTargetSeconds) => {
-      appendEdgeVertexSegment(
-        edgeVertexBuilder,
-        x0,
-        y0,
-        startSeconds,
-        x1,
-        y1,
-        expectedTargetSeconds,
-      );
-      return 1;
-    },
-  );
-}
-
-export function collectSettledBatchTravelTimeEdgeVertices(
-  graph,
-  nodePixels,
-  distSeconds,
-  settledBatch,
-  allowedModeMask,
-  options = {},
-) {
-  validateGraphForRouting(graph);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  validateSettledBatch(settledBatch);
-  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
-    throw new Error('allowedModeMask must be a positive 8-bit integer');
-  }
-
-  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
-  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
-    options.edgeTraversalCostSeconds,
-    graph.header.nEdges,
-  );
-  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
-    throw new Error('edgeSlackSeconds must be a non-negative finite number');
-  }
-
-  const builder = resetEdgeVertexBufferBuilder(options.builder ?? createEdgeVertexBufferBuilder());
-  for (const sourceNodeIndex of settledBatch) {
-    collectEligibleOutgoingTravelTimeEdgeVerticesFromSourceNode(
-      graph,
-      nodePixels,
-      distSeconds,
-      sourceNodeIndex,
-      allowedModeMask,
-      edgeSlackSeconds,
-      builder,
-      edgeTraversalCostSeconds,
-    );
-  }
-
-  return finalizeEdgeVertexBufferBuilder(builder);
-}
-
-export function collectAllReachableTravelTimeEdgeVertices(
-  graph,
-  nodePixels,
-  distSeconds,
-  allowedModeMask,
-  options = {},
-) {
-  validateGraphForRouting(graph);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
-    throw new Error('allowedModeMask must be a positive 8-bit integer');
-  }
-
-  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
-  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
-    options.edgeTraversalCostSeconds,
-    graph.header.nEdges,
-  );
-  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
-    throw new Error('edgeSlackSeconds must be a non-negative finite number');
-  }
-
-  const builder = resetEdgeVertexBufferBuilder(options.builder ?? createEdgeVertexBufferBuilder());
-  for (let sourceNodeIndex = 0; sourceNodeIndex < graph.header.nNodes; sourceNodeIndex += 1) {
-    collectEligibleOutgoingTravelTimeEdgeVerticesFromSourceNode(
-      graph,
-      nodePixels,
-      distSeconds,
-      sourceNodeIndex,
-      allowedModeMask,
-      edgeSlackSeconds,
-      builder,
-      edgeTraversalCostSeconds,
-    );
-  }
-
-  return finalizeEdgeVertexBufferBuilder(builder);
-}
 
 export async function runSearchTimeSliced(searchState, options = {}) {
   validateSearchState(searchState);
@@ -4269,10 +2445,14 @@ function renderInitialPassByBackend(renderContext) {
       cycleMinutes: getColourCycleMinutesFromShell(shell),
       colourTheme: renderContext.colourTheme,
       viewport,
+      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
     });
   } else {
     clearGrid(mapData.pixelGrid);
-    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, { viewport });
+    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
+      viewport,
+      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+    });
   }
 }
 
@@ -4322,6 +2502,7 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
         graphWidthPx: searchState.graph.header.gridWidthPx,
         graphHeightPx: searchState.graph.header.gridHeightPx,
         viewport,
+        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
       }),
     );
     paintedNodeCount = settledNodeCount;
@@ -4353,6 +2534,7 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
         cycleMinutes: colourCycleMinutes,
         colourTheme,
         viewport,
+        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
       }),
     );
   } else {
@@ -4383,7 +2565,10 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
       ),
     );
     profileMs('onSliceDrawMs', () =>
-      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, { viewport }),
+      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
+        viewport,
+        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+      }),
     );
   }
 
@@ -4434,6 +2619,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
             graphHeightPx: searchState.graph.header.gridHeightPx,
             edgeSlackSeconds: EDGE_INTERPOLATION_SLACK_SECONDS,
             viewport,
+            fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
           },
         ),
       );
@@ -4465,6 +2651,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
           graphWidthPx: searchState.graph.header.gridWidthPx,
           graphHeightPx: searchState.graph.header.gridHeightPx,
           viewport,
+          fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
         }),
       );
     }
@@ -4505,6 +2692,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
         cycleMinutes: colourCycleMinutes,
         colourTheme,
         viewport,
+        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
       }),
     );
   } else {
@@ -4536,7 +2724,10 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
       ),
     );
     profileMs('finalDrawMs', () =>
-      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, { viewport }),
+      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
+        viewport,
+        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+      }),
     );
   }
 
@@ -4556,6 +2747,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
 
   const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
   updateRenderBackendBadge(shell, renderer);
+  const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;
   const supportsGpuEdgeInterpolation = typeof renderer.drawTravelTimeEdges === 'function';
   const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
   if (supportsGpuTravelTimeRendering && !mapData.travelTimeGrid) {
@@ -4568,7 +2760,6 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
     options.colourTheme ?? resolveIsochroneTheme(),
     'dark',
   );
-  const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;
   const edgeTraversalCostSeconds = searchState.edgeTraversalCostSeconds;
   const nowImpl = options.nowImpl ?? defaultNowMs;
   const statusUpdateIntervalMs = options.statusUpdateIntervalMs ?? 120;
@@ -4978,165 +3169,19 @@ export function runGpuCpuParityDiagnostic(renderer, mapData, searchState, option
   };
 }
 
-export function formatRoutingStatusCalculating(settledCount, options = {}) {
-  const safeCount = Math.max(0, Math.floor(settledCount));
-  return formatCommonMessage(
-    options.messages ?? null,
-    'routing.calculating',
-    { settledCount: safeCount },
-    `Calculating... (${safeCount} nodes settled)`,
-  );
-}
 
-function formatRoutingDurationSuffix(durationMs, options = {}) {
-  if (!Number.isFinite(durationMs) || durationMs < 0) {
-    return '';
-  }
-  const roundedDurationMs = Math.max(0, Math.round(durationMs));
-  return formatCommonMessage(
-    options.messages ?? null,
-    'routing.durationSuffix',
-    { durationMs: roundedDurationMs },
-    ` (${roundedDurationMs} ms)`,
-  );
-}
 
-export function formatRoutingStatusDone(durationMs = null, options = {}) {
-  return formatCommonMessage(
-    options.messages ?? null,
-    'routing.done',
-    { durationSuffix: formatRoutingDurationSuffix(durationMs, options) },
-    `Done - full travel-time field ready${formatRoutingDurationSuffix(durationMs, options)}`,
-  );
-}
 
-export function formatRoutingStatusPreview(durationMs = null, options = {}) {
-  return formatCommonMessage(
-    options.messages ?? null,
-    'routing.preview',
-    { durationSuffix: formatRoutingDurationSuffix(durationMs, options) },
-    `Done - preview updated${formatRoutingDurationSuffix(durationMs, options)}`,
-  );
-}
 
-export function formatRoutingStatusNoReachable(durationMs = null, options = {}) {
-  return formatCommonMessage(
-    options.messages ?? null,
-    'routing.none',
-    { durationSuffix: formatRoutingDurationSuffix(durationMs, options) },
-    `Done - no reachable network for selected mode at this start point${formatRoutingDurationSuffix(durationMs, options)}`,
-  );
-}
 
-function getSelectedTransportModeLabels(shell) {
-  if (!shell || typeof shell !== 'object' || !shell.modeSelect) {
-    return [];
-  }
-  const labels = [];
-  for (const option of shell.modeSelect.selectedOptions ?? []) {
-    const label =
-      typeof option?.label === 'string' && option.label.trim().length > 0
-        ? option.label.trim()
-        : typeof option?.textContent === 'string' && option.textContent.trim().length > 0
-          ? option.textContent.trim()
-          : null;
-    if (label) {
-      labels.push(label);
-    }
-  }
-  return labels;
-}
 
-function setRoutingStatus(shell, text) {
-  shell.routingStatus.textContent = text;
-}
 
-export function ensureWasmSupportOrShowError(shell, options = {}) {
-  if (!shell || typeof shell !== 'object' || !shell.isochroneCanvas) {
-    throw new Error('shell.isochroneCanvas is required');
-  }
-  const runtimeGlobal = options.runtimeGlobal ?? globalThis;
-  if (hasWebAssemblySupport(runtimeGlobal)) {
-    return true;
-  }
 
-  shell.isochroneCanvas.style.pointerEvents = 'none';
-  shell.isochroneCanvas.dataset.graphLoaded = 'false';
-  const wasmRequiredMessage = getWasmRequiredMessage(shell);
-  showLoadingOverlay(shell, wasmRequiredMessage, 0);
-  setRoutingStatus(shell, wasmRequiredMessage);
-  return false;
-}
 
-function updateGraphLoadingText(shell, receivedBytes, totalBytes) {
-  const receivedText = formatMebibytes(receivedBytes);
-  if (totalBytes === null || totalBytes <= 0) {
-    shell.loadingText.textContent = getLocalizedShellText(
-      shell,
-      'loading.graph.received',
-      `Loading graph: ${receivedText}`,
-      { received: receivedText },
-    );
-    return;
-  }
 
-  const totalText = formatMebibytes(totalBytes);
-  const percent = Math.min(100, Math.round((receivedBytes / totalBytes) * 100));
-  shell.loadingText.textContent = getLocalizedShellText(
-    shell,
-    'loading.graph.progress',
-    `Loading graph: ${receivedText} / ${totalText} (${percent}%)`,
-    { received: receivedText, total: totalText, percent },
-  );
-  setLoadingProgressBar(shell.loadingProgressBar, percent);
-}
 
-function showLoadingOverlay(shell, text, progressPercent) {
-  if (shell.loadingFadeTimeoutId !== null) {
-    clearTimeout(shell.loadingFadeTimeoutId);
-    shell.loadingFadeTimeoutId = null;
-  }
 
-  shell.loadingOverlay.hidden = false;
-  shell.loadingOverlay.classList.remove('is-fading');
-  shell.loadingText.textContent = text;
-  setLoadingProgressBar(shell.loadingProgressBar, progressPercent);
-}
 
-function fadeOutLoadingOverlay(shell) {
-  if (shell.loadingFadeTimeoutId !== null) {
-    clearTimeout(shell.loadingFadeTimeoutId);
-  }
-
-  shell.loadingOverlay.classList.add('is-fading');
-  shell.loadingFadeTimeoutId = setTimeout(() => {
-    shell.loadingOverlay.hidden = true;
-    shell.loadingOverlay.classList.remove('is-fading');
-    shell.loadingFadeTimeoutId = null;
-  }, LOADING_FADE_MS);
-}
-
-function setLoadingProgressBar(progressBar, progressPercent) {
-  const clamped = clampInt(Math.round(progressPercent), 0, 100);
-  progressBar.style.width = `${clamped}%`;
-}
-
-function parseContentLength(value) {
-  if (typeof value !== 'string') {
-    return null;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return null;
-  }
-  return parsed;
-}
-
-function formatMebibytes(bytes) {
-  const safeBytes = Math.max(0, bytes);
-  return `${(safeBytes / BYTES_PER_MEBIBYTE).toFixed(2)} MB`;
-}
 
 function validatePixelGrid(pixelGrid) {
   if (!pixelGrid || typeof pixelGrid !== 'object') {
@@ -5180,60 +3225,10 @@ function validateTravelTimeGrid(travelTimeGrid) {
   }
 }
 
-function validateEdgeTraversalCostSecondsLookup(edgeTraversalCostSeconds, expectedLength) {
-  if (edgeTraversalCostSeconds === null || edgeTraversalCostSeconds === undefined) {
-    return null;
-  }
-  if (!(edgeTraversalCostSeconds instanceof Float32Array)) {
-    throw new Error('edgeTraversalCostSeconds must be a Float32Array when provided');
-  }
-  if (edgeTraversalCostSeconds.length < expectedLength) {
-    throw new Error('edgeTraversalCostSeconds is too short for edge records');
-  }
-  return edgeTraversalCostSeconds;
-}
 
-function validateNodePixels(nodePixels) {
-  if (!nodePixels || typeof nodePixels !== 'object') {
-    throw new Error('nodePixels must be an object');
-  }
-  if (!(nodePixels.nodePixelX instanceof Uint16Array)) {
-    throw new Error('nodePixels.nodePixelX must be a Uint16Array');
-  }
-  if (!(nodePixels.nodePixelY instanceof Uint16Array)) {
-    throw new Error('nodePixels.nodePixelY must be a Uint16Array');
-  }
-  if (nodePixels.nodePixelX.length !== nodePixels.nodePixelY.length) {
-    throw new Error('node pixel arrays must have equal lengths');
-  }
-}
 
-function validateDistSeconds(distSeconds, expectedLength) {
-  if (!distSeconds || typeof distSeconds.length !== 'number') {
-    throw new Error('distSeconds must be an array-like sequence');
-  }
-  if (distSeconds.length < expectedLength) {
-    throw new Error('distSeconds is shorter than node pixel arrays');
-  }
-}
 
-function validateSettledBatch(settledBatch) {
-  if (!settledBatch || typeof settledBatch[Symbol.iterator] !== 'function') {
-    throw new Error('settledBatch must be iterable');
-  }
-}
 
-function validateSearchState(searchState) {
-  if (!searchState || typeof searchState !== 'object') {
-    throw new Error('searchState must be an object');
-  }
-  if (typeof searchState.expandOne !== 'function') {
-    throw new Error('searchState.expandOne must be a function');
-  }
-  if (typeof searchState.isDone !== 'function' && typeof searchState.done !== 'boolean') {
-    throw new Error('searchState must expose isDone() or done boolean');
-  }
-}
 
 function isDone(searchState) {
   if (typeof searchState.isDone === 'function') {
@@ -5301,15 +3296,6 @@ function buildRoutingProfileSummary(profile, metadata = {}) {
 }
 
 
-function clampInt(value, minValue, maxValue) {
-  if (value < minValue) {
-    return minValue;
-  }
-  if (value > maxValue) {
-    return maxValue;
-  }
-  return value;
-}
 
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', async () => {
@@ -5359,6 +3345,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           {
             colourTheme: resolveIsochroneTheme(),
             viewport: mapData.viewport,
+            fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
           },
         );
       }
@@ -5367,7 +3354,10 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         colourCycleMinutes: getColourCycleMinutesFromShell(shell),
         viewport: mapData.viewport,
       });
-      updateDistanceScaleBar(shell, mapData.graph.header, { viewport: mapData.viewport });
+      updateDistanceScaleBar(shell, mapData.graph.header, {
+        viewport: mapData.viewport,
+        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+      });
     };
     const handleWindowResize = () => {
       if (!initializedMapData) {
@@ -5410,6 +3400,9 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
       if (shell.exportSvgButton) {
         shell.exportSvgButton.disabled = true;
       }
+      if (shell.printButton) {
+        shell.printButton.disabled = true;
+      }
 
       const { boundaryUrl, graphUrl } = buildLocationAssetUrls(nextLocation);
       try {
@@ -5417,6 +3410,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           locationName: nextLocation.name,
           boundaries: { url: boundaryUrl },
           graph: { url: graphUrl },
+          transitDateRange: nextLocation.transitDateRange,
         });
         initializedMapData = mapData;
         currentLocationId = nextLocation.id;
@@ -5437,6 +3431,9 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           if (shell.exportSvgButton) {
             shell.exportSvgButton.disabled = false;
           }
+          if (shell.printButton) {
+            shell.printButton.disabled = false;
+          }
         }
         shell.locationSelect.value =
           previousLocationId ?? nextLocation.id;
@@ -5453,27 +3450,46 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
       },
     });
     const themeBinding = bindThemeControl(shell, {
-      onThemeChange(themeValue) {
+      // themeValue may be the raw radio selection ('auto' included, not
+      // just 'light'/'dark') - resolveIsochroneTheme() re-reads
+      // rootElement.dataset.theme (which bindThemeControl already updated)
+      // and turns 'auto'/unset into the actual OS-preference-driven colour
+      // so canvas/legend rendering always gets a concrete theme.
+      onThemeChange() {
+        const resolvedTheme = resolveIsochroneTheme();
         if (initializedMapData?.boundaryPayload && initializedMapData?.graph?.header) {
           drawBoundaryBasemapAlignedToGraphGrid(
             shell.boundaryCanvas,
             initializedMapData.boundaryPayload,
             initializedMapData.graph.header,
             {
-              colourTheme: themeValue,
+              colourTheme: resolvedTheme,
               viewport: initializedMapData.viewport,
+              fitBoundingBoxPx: initializedMapData.boundaryFitBoundingBoxPx,
             },
           );
         }
         const cycleMinutes = getColourCycleMinutesFromShell(shell);
-        renderIsochroneLegendIfNeeded(shell, cycleMinutes, { theme: themeValue });
+        renderIsochroneLegendIfNeeded(shell, cycleMinutes, { theme: resolvedTheme });
         const rerendered = rerenderIsochroneFromSnapshotWithStatus(shell, initializedMapData, {
-          colourTheme: themeValue,
+          colourTheme: resolvedTheme,
           colourCycleMinutes: cycleMinutes,
           viewport: initializedMapData?.viewport,
         });
         if (!rerendered) {
           routingBinding?.requestIsochroneRedraw();
+        }
+      },
+    });
+    bindUnitSystemControl(shell, {
+      onUnitSystemChange() {
+        // Distances are the only thing on the map itself expressed in units;
+        // the speed inputs restate themselves inside the control.
+        if (initializedMapData?.graph?.header) {
+          updateDistanceScaleBar(shell, initializedMapData.graph.header, {
+            viewport: initializedMapData.viewport,
+            fitBoundingBoxPx: initializedMapData.boundaryFitBoundingBoxPx,
+          });
         }
       },
     });
@@ -5521,47 +3537,21 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         printMediaQuery.addListener(handlePrintMediaChange);
       }
     }
+    // SVG download and print describe the same picture; they differ only in
+    // where the finished document goes.
+    const collectCurrentIsochroneScene = () =>
+      collectRenderedIsochroneScene(shell, initializedMapData, {
+        modeLabels: getSelectedTransportModeLabels(shell),
+        getSnapshotEdgeVertexData: getOrBuildSnapshotEdgeVertexData,
+      });
+
     bindSvgExportControl(shell, {
       async exportCurrentRenderedIsochroneSvg() {
         if (routingBinding && typeof routingBinding.waitForIdle === 'function') {
           await routingBinding.waitForIdle();
         }
 
-        const locationName = initializedMapData?.locationName ?? DEFAULT_LOCATION_NAME;
-        const modeLabels = getSelectedTransportModeLabels(shell);
-        const title = formatIsochroneExportTitle(locationName, modeLabels);
-        const scaleBarLabel = shell.distanceScaleLabel?.textContent?.trim() ?? '';
-        const parsedScaleBarWidthPx = Number.parseFloat(shell.distanceScaleLine?.style?.width ?? '');
-        const scaleBarWidthPx =
-          Number.isFinite(parsedScaleBarWidthPx) && parsedScaleBarWidthPx > 0
-            ? parsedScaleBarWidthPx
-            : 96;
-        const copyrightNotice =
-          shell.routingDisclaimer?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-
-        let edgeVertexData = new Float32Array(0);
-        let cycleMinutes = getColourCycleMinutesFromShell(shell);
-        const routingSnapshot = initializedMapData?.lastRoutingSnapshot ?? null;
-        if (initializedMapData && routingSnapshot) {
-          edgeVertexData = getOrBuildSnapshotEdgeVertexData(initializedMapData, routingSnapshot, {
-            allowedModeMask: routingSnapshot.allowedModeMask,
-          });
-          cycleMinutes = routingSnapshot.colourCycleMinutes;
-        }
-
-        const currentTheme = resolveIsochroneTheme();
-        return exportCurrentRenderedIsochroneSvg(shell, {
-          graphHeader: initializedMapData?.graph.header ?? null,
-          boundaryPayload: initializedMapData?.boundaryPayload ?? null,
-          edgeVertexData,
-          cycleMinutes,
-          theme: currentTheme,
-          title,
-          messages: getShellLocaleMessages(shell),
-          scaleBarLabel,
-          scaleBarWidthPx,
-          copyrightNotice,
-        });
+        return exportCurrentRenderedIsochroneSvg(shell, collectCurrentIsochroneScene());
       },
       onExportSuccess(result) {
         setRoutingStatus(
@@ -5575,6 +3565,27 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         setRoutingStatus(
           shell,
           getLocalizedShellText(shell, 'routing.exportFailed', 'SVG export failed.'),
+        );
+      },
+    });
+    bindPrintControl(shell, {
+      async printCurrentRenderedIsochrone() {
+        if (routingBinding && typeof routingBinding.waitForIdle === 'function') {
+          await routingBinding.waitForIdle();
+        }
+
+        return printCurrentRenderedIsochrone(shell, collectCurrentIsochroneScene());
+      },
+      onPrintSuccess() {
+        setRoutingStatus(
+          shell,
+          getLocalizedShellText(shell, 'routing.printed', 'Sent to printer.'),
+        );
+      },
+      onPrintError() {
+        setRoutingStatus(
+          shell,
+          getLocalizedShellText(shell, 'routing.printFailed', 'Printing failed.'),
         );
       },
     });
@@ -5596,4 +3607,35 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
     });
     void loadLocationById(initialLocation?.id ?? DEFAULT_LOCATION_ID);
   });
+}
+
+export async function loadGraphBinary(shell, options = {}) {
+  const url = options.url ?? DEFAULT_GRAPH_BINARY_URL;
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+
+  showLoadingOverlay(shell, formatInitialGraphLoadingText(shell), 0);
+
+  try {
+    const buffer = await fetchBinaryWithProgress(url, {
+      fetchImpl,
+      onProgress(receivedBytes, totalBytes) {
+        updateGraphLoadingText(shell, receivedBytes, totalBytes);
+      },
+    });
+
+    const binaryBuffer = await maybeDecompressGzipBuffer(buffer);
+    const graph = parseGraphBinary(binaryBuffer);
+    shell.isochroneCanvas.style.pointerEvents = 'auto';
+    shell.isochroneCanvas.dataset.graphLoaded = 'true';
+    return graph;
+  } catch (error) {
+    shell.isochroneCanvas.style.pointerEvents = 'none';
+    shell.isochroneCanvas.dataset.graphLoaded = 'false';
+    showLoadingOverlay(
+      shell,
+      getLocalizedShellText(shell, 'error.graph.load', 'Failed to load graph binary.'),
+      0,
+    );
+    throw error;
+  }
 }

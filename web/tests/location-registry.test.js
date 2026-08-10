@@ -57,6 +57,33 @@ test('parseLocationRegistry normalizes entries and preserves optional localized 
   assert.equal(berlin.localizedNames, undefined);
 });
 
+test('parseLocationRegistry preserves an optional transitDateRange and omits it when absent', () => {
+  const fixture = createRegistryFixture();
+  fixture.locations[1].transitDateRange = { min: '2026-01-01', max: '2026-12-31' };
+
+  const registry = parseLocationRegistry(fixture);
+
+  const berlin = findLocationById(registry, 'berlin');
+  assert.deepEqual(berlin.transitDateRange, { min: '2026-01-01', max: '2026-12-31' });
+
+  const paris = findLocationById(registry, 'paris');
+  assert.equal(paris.transitDateRange, undefined);
+});
+
+test('parseLocationRegistry rejects a malformed transitDateRange date', () => {
+  const fixture = createRegistryFixture();
+  fixture.locations[1].transitDateRange = { min: '12 August 2026', max: '2026-12-31' };
+
+  assert.throws(() => parseLocationRegistry(fixture), /transitDateRange.*ISO date/i);
+});
+
+test('parseLocationRegistry rejects a transitDateRange where min is after max', () => {
+  const fixture = createRegistryFixture();
+  fixture.locations[1].transitDateRange = { min: '2026-12-31', max: '2026-01-01' };
+
+  assert.throws(() => parseLocationRegistry(fixture), /min must not be after/i);
+});
+
 test('parseLocationRegistry rejects malformed entries instead of accepting partial data', () => {
   assert.throws(
     () =>

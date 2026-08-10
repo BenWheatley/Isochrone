@@ -66,7 +66,7 @@ This stage only downloads raw Overpass API responses.
 Operational debugging behavior:
 - before each request, the pipeline prints the fully rendered Overpass QL to stderr
 - it also prints request metadata: Overpass URL, output path, timeout, and query byte size
-- if the request fails, the pipeline writes sidecar debug files next to the intended output:
+- if the request fails, or if Overpass returns HTTP 200 with an empty `elements` list, the pipeline treats that as a failed fetch and writes sidecar debug files next to the intended output:
   - `<output>.failed-query.ql`
   - `<output>.failed-curl-stderr.txt`
   - `<output>.failed-response-body.txt`
@@ -84,6 +84,7 @@ Boundary extracts are written in a download-friendly shape:
 
 The build step reconstructs boundary polylines from those refs, so fetch does not depend on inline way geometry being present in the Overpass response.
 The boundary query supports both area containment and explicit `subarea` membership so it can adapt to regions whose administrative relations are modeled differently.
+It always includes the selected place relation itself in the output, so the build step can fall back to an outer-boundary basemap when no matching child subdivisions exist for that region.
 
 To avoid fetching every configured region, filter by id:
 
@@ -123,6 +124,36 @@ To build only one artifact class:
 ./data_pipeline/region-data.py build --only luxembourg-country --components graph
 ./data_pipeline/region-data.py build --only luxembourg-country --components boundary
 ```
+
+Optional coast/water context:
+
+The low-level boundary simplifier can also attach a clipped water-polygon layer to the same output JSON as the administrative boundaries:
+
+```bash
+./data_pipeline/scripts/simplify_boundary_json.py \
+  --input data_pipeline/input/rhode-island-district-boundaries.osm.json \
+  --output data_pipeline/output/rhode-island-district-boundaries-canvas.json \
+  --resolution 25 \
+  --units meters \
+  --include-coast
+```
+
+Notes:
+- `--include-coast` is opt-in; normal boundary builds do not fetch or attach water polygons
+- by default it downloads the WGS84 split water-polygon archive from [osmdata.openstreetmap.de water polygons](https://osmdata.openstreetmap.de/data/water-polygons.html)
+- the water polygons are clipped to the boundary bbox and written into the same boundary canvas JSON under `water_features`
+- `--coast-source <local.zip|local.shp>` overrides the default download source for offline or debug runs
+
+Forest, inland-water, waterway, and airport context:
+
+Unlike coastal water, this context is **always fetched and rendered — there is no opt-in flag**. It comes from the same Overpass request as admin boundaries (see `docs/overpass_boundary_query.sh`'s `.naturalArea` block), not an external download, so every region gets it automatically once the boundary input is (re)fetched with the current query.
+
+- way-tagged `natural=wood`/`landuse=forest` → `forest_features`, `natural=water` → `inland_water_features`, `aeroway=aerodrome` → `airport_features` (all written into the boundary canvas JSON; polygons under ~1 hectare are dropped as digitizing noise)
+- way-tagged `waterway=river|canal|stream` → `waterway_features`, each with a `navigable` flag derived from the `boat` tag (`boat=yes/permissive/designated` → navigable, `boat=no` → not navigable, otherwise canals default navigable and rivers/streams default not)
+- `natural=water` and `aeroway=aerodrome` **multipolygon relations** are also included (unlike forest/landuse, which stay ways-only) — large real-world features like a tidal river or a major airport are frequently mapped as relations, not a single way. Relation member ways are stitched into closed ring(s) (`_stitch_ways_into_rings` in `boundary_canvas.py`), with `outer`/`inner` member roles wound in opposite directions so islands/holes render correctly under the nonzero-winding fill rule. This is deliberately narrower than a full generic multipolygon implementation: only these two specific tags get relation support, because a relation-typed area scan over a *broad* tag (`boundary=administrative`) is the exact query shape that was previously found too expensive for some regions (see the `subdivisionDiscoveryModes` note above) — `natural=water`/`aeroway=aerodrome` relations are rare/localized enough by comparison that the scan is cheap (measured ~7s for all of Greater London).
+- inputs fetched before this was added won't have these elements; rerun `fetch --components boundary` for a region to pick them up
+
+If the boundary input file exists but contains zero Overpass elements, the build step fails explicitly and tells you to rerun fetch for that region. That usually means an older fetch silently produced an empty payload before the stricter fetch validation was added.
 
 The combined command also supports partial selection:
 

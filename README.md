@@ -37,7 +37,7 @@ make review
   - `berlin-district-boundaries.osm.json`
   - `luxembourg-country-routing.osm.json`
 - Each fetch prints the rendered Overpass QL plus request metadata before `curl` runs.
-- If a fetch fails, the pipeline writes debug artifacts next to the intended output path:
+- If a fetch fails, or if Overpass returns HTTP 200 with an empty `elements` list, the pipeline treats that as a failed fetch and writes debug artifacts next to the intended output path:
   - `<output>.failed-query.ql`
   - `<output>.failed-curl-stderr.txt`
   - `<output>.failed-response-body.txt`
@@ -47,6 +47,7 @@ make review
   - `docs/overpass_routing_query.sh`
   - `docs/overpass_boundary_query.sh`
 - Boundary extracts are intentionally download-friendly: relation members, way node refs, and node coordinates. The build step reconstructs polylines from those refs instead of relying on inline way geometry.
+- Boundary fetches always include the selected place relation itself as well as any discovered subdivisions, so regions without matching child districts can still build a fallback outer-boundary basemap.
 - To avoid hitting every configured region, filter with `--only`, for example:
 
 ```bash
@@ -82,6 +83,22 @@ make review
 ```bash
 ./data_pipeline/region-data.py build --only luxembourg-country --components boundary
 ```
+
+- For an opt-in coast/water context layer in the same boundary output JSON, use the lower-level boundary simplifier directly:
+
+```bash
+./data_pipeline/scripts/simplify_boundary_json.py \
+  --input data_pipeline/input/rhode-island-district-boundaries.osm.json \
+  --output data_pipeline/output/rhode-island-district-boundaries-canvas.json \
+  --resolution 25 \
+  --units meters \
+  --include-coast
+```
+
+- `--include-coast` downloads and clips the OSM-derived water polygons dataset from [osmdata.openstreetmap.de water polygons](https://osmdata.openstreetmap.de/data/water-polygons.html) and stores the resulting water polygons in the same output JSON as the administrative boundaries.
+- Use `--coast-source <local.zip|local.shp>` to override the default source for debugging or offline runs.
+
+- If a boundary input file exists but contains zero Overpass elements, `build` now fails explicitly and tells you to rerun the fetch step for that region.
 
 - Or fetch and build in one run with:
 
@@ -145,12 +162,17 @@ make wasm-build
 - Top-bar location selector is populated from `web/src/data/locations.json`, where each entry defines a stable location id, canonical display name, optional localized display-name overrides, plus the graph and boundary asset filenames to load.
 - `data_pipeline/regions.json` is the source of truth for region display names and localized variants; `web/src/data/locations.json` is generated from it by `./data_pipeline/region-data.py build` or `./data_pipeline/region-data.py all` and should not be hand-maintained for naming changes.
 - The graph payload is gzip-compressed and decompressed in-browser before parsing.
+- When present in the boundary payload, clipped water polygons render behind the administrative boundaries in the basemap layer.
 - Clicking the map computes a full travel-time field across all reachable graph nodes (no walk-time cap).
 - Desktop controls:
   - Primary click selects a new origin.
   - Primary drag pans the map.
   - Mouse wheel zooms at the pointer.
   - Secondary drag moves the selection point.
+- Touch controls:
+  - Single tap selects a new origin.
+  - Two-finger pinch zooms.
+  - Two-finger drag pans the map.
 - Zoom/pan redraw the current routing snapshot; camera movement does not start a new route solve.
 - Selected region is persisted in URL query params as `region=<locationId>`.
 - Last selected start node is persisted in URL query params as `node=<graphNodeId>` and restored on reload; switching region clears `node` while preserving the other URL params.
@@ -180,6 +202,12 @@ make wasm-build
 - `web/`: Browser app source (vanilla JS modules, no bundler)
 - `docs/`: Design and process documentation
 - `PLAN.md`: Delivery plan and architecture roadmap
+- `THIRD_PARTY_NOTICES.md`: Licences for redistributed assets and data
+
+## Third-party licences
+Map data © OpenStreetMap contributors (ODbL); Berlin transit data © VBB
+(CC BY 4.0); transport-mode icons from Google's Material Symbols (Apache-2.0,
+subset and self-hosted). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Agentic coding baseline
 This repo is configured for autonomous-agent workflows with:

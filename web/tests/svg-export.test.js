@@ -61,6 +61,34 @@ function createBoundaryPayload() {
         paths: [[[10, 10], [20, 20], [30, 30]]],
       },
     ],
+    water_features: [
+      {
+        name: 'Sea',
+        paths: [[[0, 0], [40, 0], [40, 40], [0, 40], [0, 0]]],
+      },
+    ],
+    forest_features: [
+      {
+        name: 'Forest',
+        paths: [[[50, 50], [60, 50], [60, 60], [50, 60], [50, 50]]],
+      },
+    ],
+    airport_features: [
+      {
+        name: 'Airport',
+        paths: [[[45, 5], [48, 5], [48, 8], [45, 8], [45, 5]]],
+      },
+    ],
+    inland_water_features: [
+      {
+        name: 'Lake',
+        paths: [[[70, 70], [80, 70], [80, 80], [70, 80], [70, 70]]],
+      },
+    ],
+    waterway_features: [
+      { name: 'River', category: 'river', navigable: true, paths: [[[5, 90], [15, 90]]] },
+      { name: 'Stream', category: 'stream', navigable: false, paths: [[[25, 90], [35, 90]]] },
+    ],
   };
 }
 
@@ -139,6 +167,91 @@ test('buildRenderedIsochroneSvgDocument uses full-region graph coordinates and i
   assert.ok(svg.includes('y1="10"'));
   assert.ok(svg.includes('x2="20"'));
   assert.ok(svg.includes('y2="20"'));
+});
+
+test('buildRenderedIsochroneSvgDocument exports sea, forest, airport, inland-water, and waterway layers', () => {
+  const svg = buildRenderedIsochroneSvgDocument({
+    widthPx: 100,
+    heightPx: 100,
+    backgroundColour: '#111820',
+    graphHeader: createGraphHeader(),
+    boundaryPayload: createBoundaryPayload(),
+    edgeVertexData: new Float32Array(0),
+  });
+
+  // Gap fix: coastal sea water_features were previously drawn on canvas but
+  // never exported to SVG at all.
+  assert.ok(svg.includes('id="isochrone-sea"'));
+  assert.ok(svg.includes('id="isochrone-forest"'));
+  assert.ok(svg.includes('id="isochrone-airports"'));
+  assert.ok(svg.includes('id="isochrone-inland-water"'));
+  assert.ok(svg.includes('id="isochrone-waterways"'));
+
+  assert.equal(svg.match(/<g id="isochrone-sea">[\s\S]*?<\/g>/)?.[0].match(/<path/g)?.length, 1);
+  assert.ok(/<g id="isochrone-forest">[\s\S]*?fill="[^"]+"[\s\S]*?<\/g>/.test(svg));
+  assert.ok(/<g id="isochrone-airports">[\s\S]*?fill="[^"]+"[\s\S]*?<\/g>/.test(svg));
+
+  const waterwayGroup = svg.match(/<g id="isochrone-waterways">[\s\S]*?<\/g>/)?.[0];
+  assert.equal(waterwayGroup.match(/<path/g)?.length, 2);
+  assert.ok(waterwayGroup.includes('fill="none"'));
+
+  // Bottom-to-top draw order: forest, airports, inland water, sea, waterways,
+  // boundaries.
+  const forestIndex = svg.indexOf('id="isochrone-forest"');
+  const airportsIndex = svg.indexOf('id="isochrone-airports"');
+  const inlandWaterIndex = svg.indexOf('id="isochrone-inland-water"');
+  const seaIndex = svg.indexOf('id="isochrone-sea"');
+  const waterwaysIndex = svg.indexOf('id="isochrone-waterways"');
+  const boundariesIndex = svg.indexOf('id="isochrone-boundaries"');
+  assert.ok(forestIndex < airportsIndex);
+  assert.ok(airportsIndex < inlandWaterIndex);
+  assert.ok(inlandWaterIndex < seaIndex);
+  assert.ok(seaIndex < waterwaysIndex);
+  assert.ok(waterwaysIndex < boundariesIndex);
+});
+
+test('buildRenderedIsochroneSvgDocument distinguishes navigable from non-navigable waterway strokes', () => {
+  const svg = buildRenderedIsochroneSvgDocument({
+    widthPx: 100,
+    heightPx: 100,
+    backgroundColour: '#111820',
+    graphHeader: createGraphHeader(),
+    boundaryPayload: createBoundaryPayload(),
+    edgeVertexData: new Float32Array(0),
+    theme: 'light',
+  });
+
+  const waterwayGroup = svg.match(/<g id="isochrone-waterways">[\s\S]*?<\/g>/)?.[0];
+  const strokeColours = [...waterwayGroup.matchAll(/stroke="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(strokeColours.length, 2);
+  assert.notEqual(strokeColours[0], strokeColours[1]);
+});
+
+test('buildRenderedIsochroneSvgDocument omits natural-feature groups when the boundary payload has none', () => {
+  const svg = buildRenderedIsochroneSvgDocument({
+    widthPx: 100,
+    heightPx: 100,
+    backgroundColour: '#111820',
+    graphHeader: createGraphHeader(),
+    boundaryPayload: {
+      coordinate_space: {
+        x_origin: 0,
+        y_origin: 99,
+        width: 100,
+        height: 100,
+        axis: 'x-right-y-down',
+      },
+      features: [{ name: 'Test boundary', paths: [[[10, 10], [20, 20], [30, 30]]] }],
+    },
+    edgeVertexData: new Float32Array(0),
+  });
+
+  assert.ok(!svg.includes('id="isochrone-sea"'));
+  assert.ok(!svg.includes('id="isochrone-forest"'));
+  assert.ok(!svg.includes('id="isochrone-airports"'));
+  assert.ok(!svg.includes('id="isochrone-inland-water"'));
+  assert.ok(!svg.includes('id="isochrone-waterways"'));
+  assert.ok(svg.includes('id="isochrone-boundaries"'));
 });
 
 test('exportCurrentRenderedIsochroneSvg uses graph extent instead of current canvas viewport size', () => {
@@ -251,14 +364,56 @@ test('buildRenderedIsochroneSvgDocument uses theme-derived overlay colours and p
     },
   });
 
-  assert.ok(svg.includes('fill="rgba(251, 253, 255, 0.92)"'));
-  assert.ok(svg.includes('stroke="rgba(97, 130, 159, 0.62)"'));
+  assert.ok(!svg.includes('fill="rgba(251, 253, 255, 0.92)"'));
+  assert.ok(!svg.includes('stroke="rgba(97, 130, 159, 0.62)"'));
   assert.ok(svg.includes('fill="#173750"'));
   assert.ok(svg.includes('fill="#365772"'));
   assert.ok(svg.includes('stroke="rgb(0, 110, 210)"'));
   assert.ok(svg.includes('id="isochrone-scale-pattern"'));
   assert.ok(svg.includes('fill="#21435d"'));
   assert.ok(svg.includes('fill="#eef5fb"'));
+});
+
+test('buildRenderedIsochroneSvgDocument omits outer overlay boxes and keeps full copyright text', () => {
+  const copyrightNotice =
+    'Map data © OpenStreetMap contributors, available under the Open Database License (ODbL): '
+    + 'https://www.openstreetmap.org/copyright Additional disclaimer text should remain fully visible '
+    + 'in the SVG export without truncation.';
+  const svg = buildRenderedIsochroneSvgDocument({
+    widthPx: 600,
+    heightPx: 400,
+    backgroundColour: '#111820',
+    graphHeader: createGraphHeader(),
+    boundaryPayload: createBoundaryPayload(),
+    edgeVertexData: new Float32Array([10, 10, 0, 20, 20, 60]),
+    title: 'Isochrone of Test, by Car',
+    scaleBarLabel: '1 km',
+    scaleBarWidthPx: 96,
+    scaleBarSegmentWidthPx: 24,
+    copyrightNotice,
+    overlayColours: {
+      overlayBackground: 'rgba(4, 12, 18, 0.88)',
+      overlayBorder: 'rgba(130, 170, 210, 0.55)',
+      overlayText: '#dceaf8',
+      overlayNote: '#c0d4e8',
+      scaleLineBackground: '#f6fbff',
+      scaleLineAlternate: '#31577a',
+      scaleLineBorder: '#c1d6e9',
+      boundaryStroke: 'rgba(125, 175, 220, 0.55)',
+    },
+  });
+
+  assert.ok(svg.includes('id="isochrone-title"'));
+  assert.ok(svg.includes('id="isochrone-legend"'));
+  assert.ok(svg.includes('id="isochrone-scale"'));
+  assert.ok(svg.includes('id="isochrone-copyright"'));
+  assert.ok(!svg.includes('fill="rgba(4, 12, 18, 0.88)"'));
+  assert.ok(!svg.includes('stroke="rgba(130, 170, 210, 0.55)"'));
+  assert.ok(!svg.includes('...'));
+  assert.ok(svg.includes('Additional'));
+  assert.ok(svg.includes('disclaimer'));
+  assert.ok(svg.includes('fully'));
+  assert.ok(svg.includes('without truncation.'));
 });
 
 test('buildRenderedIsochroneSvgDocument escapes title text', () => {
@@ -427,7 +582,8 @@ test('exportCurrentRenderedIsochroneSvg emits downloadable vector SVG with curre
 
   assert.equal(result.filename.endsWith('.svg'), true);
   assert.ok(result.svgDocument.includes('fill="#ffffff"'));
-  assert.ok(result.svgDocument.includes('fill="rgba(251, 253, 255, 0.92)"'));
+  assert.ok(!result.svgDocument.includes('fill="rgba(251, 253, 255, 0.92)"'));
+  assert.ok(!result.svgDocument.includes('stroke="rgba(97, 130, 159, 0.62)"'));
   assert.ok(result.svgDocument.includes('stroke="rgb(0, 110, 210)"'));
   assert.ok(result.svgDocument.includes('id="isochrone-boundaries"'));
   assert.equal(appendedNode, anchor);

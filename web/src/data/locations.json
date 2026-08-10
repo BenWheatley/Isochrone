@@ -4,7 +4,11 @@
       "id": "berlin",
       "name": "Berlin",
       "graphFileName": "graph-walk.bin.gz",
-      "boundaryFileName": "berlin-district-boundaries-canvas.json"
+      "boundaryFileName": "berlin-district-boundaries-canvas.json",
+      "transitDateRange": {
+        "min": "2026-08-04",
+        "max": "2026-12-12"
+      }
     },
     {
       "id": "paris",
@@ -36,7 +40,59 @@
       "graphFileName": "cologne-graph.bin.gz",
       "boundaryFileName": "cologne-district-boundaries-canvas.json",
       "localizedNames": {
-        "de": "K\u00f6ln"
+        "de": "Köln"
+      }
+    },
+    {
+      "id": "rhode-island",
+      "name": "Rhode Island",
+      "graphFileName": "rhode-island-graph.bin.gz",
+      "boundaryFileName": "rhode-island-district-boundaries-canvas.json"
+    },
+    {
+      "id": "singapore",
+      "name": "Singapore",
+      "graphFileName": "singapore-graph.bin.gz",
+      "boundaryFileName": "singapore-district-boundaries-canvas.json",
+      "localizedNames": {
+        "de": "Singapur",
+        "fr": "Singapour"
+      }
+    },
+    {
+      "id": "mexico-city",
+      "name": "Mexico City",
+      "graphFileName": "mexico-city-graph.bin.gz",
+      "boundaryFileName": "mexico-city-district-boundaries-canvas.json",
+      "localizedNames": {
+        "es": "Ciudad de México"
+      }
+    },
+    {
+      "id": "ottawa",
+      "name": "Ottawa",
+      "graphFileName": "ottawa-graph.bin.gz",
+      "boundaryFileName": "ottawa-district-boundaries-canvas.json"
+    },
+    {
+      "id": "zurich-canton",
+      "name": "Canton of Zurich",
+      "graphFileName": "zurich-canton-graph.bin.gz",
+      "boundaryFileName": "zurich-canton-district-boundaries-canvas.json",
+      "localizedNames": {
+        "de": "Kanton Zürich",
+        "fr": "Canton de Zurich",
+        "it": "Canton Zurigo"
+      }
+    },
+    {
+      "id": "cyprus",
+      "name": "Cyprus",
+      "graphFileName": "cyprus-graph.bin.gz",
+      "boundaryFileName": "cyprus-district-boundaries-canvas.json",
+      "localizedNames": {
+        "el": "Κύπρος",
+        "tr": "Kıbrıs"
       }
     }
   ]
