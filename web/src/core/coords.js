@@ -1,5 +1,6 @@
 import {
   BIKE_SPEED_QUERY_PARAM,
+  TRANSIT_WALK_BUDGET_QUERY_PARAM,
   COLOUR_CYCLE_QUERY_PARAM,
   DEPARTURE_DATETIME_QUERY_PARAM,
   LANGUAGE_QUERY_PARAM,
@@ -359,6 +360,14 @@ export function parseWalkSpeedKphFromLocationSearch(locationSearch, options = {}
 
 export function persistWalkSpeedKphToLocation(speedKph, options = {}) {
   return persistSpeedKphToLocation(speedKph, WALK_SPEED_QUERY_PARAM, options);
+}
+
+export function parseTransitWalkBudgetMinutesFromLocationSearch(locationSearch, options = {}) {
+  return parseSpeedKphFromLocationSearch(locationSearch, TRANSIT_WALK_BUDGET_QUERY_PARAM, options);
+}
+
+export function persistTransitWalkBudgetMinutesToLocation(minutes, options = {}) {
+  return persistSpeedKphToLocation(minutes, TRANSIT_WALK_BUDGET_QUERY_PARAM, options);
 }
 
 export function parseBikeSpeedKphFromLocationSearch(locationSearch, options = {}) {

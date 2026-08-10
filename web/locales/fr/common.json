@@ -19,6 +19,8 @@
   "body.options.speedSettings": "Paramètres de vitesse",
   "body.options.walkSpeed": "Vitesse de marche",
   "body.options.bikeSpeed": "Vitesse à vélo",
+  "body.options.transitWalkBudget": "Marche maximale par trajet",
+  "body.options.minutesUnit": "min",
   "body.options.exportSvg": "Exporter en SVG",
   "body.map.aria": "Vue de la carte",
   "body.loading.boundaries": "Chargement des limites des districts...",

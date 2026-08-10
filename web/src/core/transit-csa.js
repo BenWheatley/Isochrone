@@ -40,17 +40,6 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
       ? options.walkingSpeedMps
       : WALKING_SPEED_M_S;
 
-  // When routing with strictly no real travel mode (Public transit alone -
-  // see TRANSIT_ONLY_ALLOWED_MODE_MASK in constants.js), pass 1 cannot move
-  // at all, so walkDistSeconds is only finite at the origin node itself and
-  // the loop below would never find a boardable stop. originXM/originYM let
-  // the caller supply the origin's own raw coordinates so it can attach
-  // directly to nearby stops with the same small, fixed geometric connector
-  // already used for each stop's own node attachment - not a general walking
-  // search, just "you walked from where you clicked to the platform".
-  const hasOriginDirectAttach =
-    Number.isFinite(options.originXM) && Number.isFinite(options.originYM);
-
   const earliestArrivalSeconds = new Float64Array(nStops).fill(Number.POSITIVE_INFINITY);
   const walkAttachCostSeconds = new Float64Array(nStops);
   const improvedByTransit = new Uint8Array(nStops);
@@ -62,19 +51,14 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
     const attachCostSeconds = Math.sqrt(dx * dx + dy * dy) / walkingSpeedMps;
     walkAttachCostSeconds[stopIndex] = attachCostSeconds;
 
+    // Reaching a stop means walking to it on the walk graph - walkDistSeconds
+    // comes from a pedestrian search the caller already bounded by the walk
+    // budget - and then covering the short fixed offset between the graph
+    // node the stop is pinned to and the platform itself.
     let bestArrivalSeconds = Number.POSITIVE_INFINITY;
     const walkElapsedSeconds = walkDistSeconds[nodeIndex];
     if (Number.isFinite(walkElapsedSeconds)) {
       bestArrivalSeconds = departureSecondsOfDay + walkElapsedSeconds + attachCostSeconds;
-    }
-    if (hasOriginDirectAttach) {
-      const originDx = graph.stopX[stopIndex] - options.originXM;
-      const originDy = graph.stopY[stopIndex] - options.originYM;
-      const directWalkSeconds = Math.sqrt(originDx * originDx + originDy * originDy) / walkingSpeedMps;
-      const directArrivalSeconds = departureSecondsOfDay + directWalkSeconds;
-      if (directArrivalSeconds < bestArrivalSeconds) {
-        bestArrivalSeconds = directArrivalSeconds;
-      }
     }
     if (bestArrivalSeconds <= budgetEndSeconds) {
       earliestArrivalSeconds[stopIndex] = bestArrivalSeconds;

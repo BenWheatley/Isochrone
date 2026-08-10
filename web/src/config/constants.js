@@ -45,6 +45,11 @@ export const BIKE_CRUISE_SPEED_KPH = 18;
 // whereas this is just the speed we assume for a person until they say
 // otherwise, and is free to change.
 export const DEFAULT_WALK_SPEED_KPH = 4;
+// How long a rider may walk on each leg of a transit journey - to the first
+// stop, between stops when changing, and away from the last one. Bounds the
+// walking that public-transit routing is allowed to add on top of the
+// vehicle legs themselves.
+export const DEFAULT_TRANSIT_WALK_BUDGET_MINUTES = 5;
 export const CAR_FALLBACK_SPEED_KPH = 30;
 // Kept numerically identical to FERRY_FALLBACK_SPEED_KPH in
 // data_pipeline/src/isochrone_pipeline/adjacency.py.
@@ -60,6 +65,7 @@ export const COLOUR_CYCLE_QUERY_PARAM = 'cycle';
 export const DEPARTURE_DATETIME_QUERY_PARAM = 'departure';
 export const WALK_SPEED_QUERY_PARAM = 'walkKph';
 export const BIKE_SPEED_QUERY_PARAM = 'bikeKph';
+export const TRANSIT_WALK_BUDGET_QUERY_PARAM = 'walkMin';
 export const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;
 export const INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE = 3;
 export const FINAL_EDGE_INTERPOLATION_STEP_STRIDE = 1;

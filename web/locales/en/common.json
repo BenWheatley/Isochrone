@@ -19,6 +19,8 @@
   "body.options.speedSettings": "Speed settings",
   "body.options.walkSpeed": "Walking speed",
   "body.options.bikeSpeed": "Cycling speed",
+  "body.options.transitWalkBudget": "Most walking per transit leg",
+  "body.options.minutesUnit": "min",
   "body.options.exportSvg": "Export SVG",
   "body.map.aria": "Map viewport",
   "body.loading.boundaries": "Loading district boundaries...",

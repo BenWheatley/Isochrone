@@ -19,6 +19,8 @@
   "body.options.speedSettings": "Geschwindigkeitseinstellungen",
   "body.options.walkSpeed": "Gehgeschwindigkeit",
   "body.options.bikeSpeed": "Fahrradgeschwindigkeit",
+  "body.options.transitWalkBudget": "Maximaler Fußweg je Teilstrecke",
+  "body.options.minutesUnit": "Min.",
   "body.options.exportSvg": "SVG exportieren",
   "body.map.aria": "Kartenansicht",
   "body.loading.boundaries": "Bezirksgrenzen werden geladen...",

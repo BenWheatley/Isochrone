@@ -1,6 +1,7 @@
 import {
   BIKE_CRUISE_SPEED_KPH,
   DEFAULT_COLOUR_CYCLE_MINUTES,
+  DEFAULT_TRANSIT_WALK_BUDGET_MINUTES,
   DEFAULT_WALK_SPEED_KPH,
   EDGE_MODE_BIKE_BIT,
   EDGE_MODE_CAR_BIT,
@@ -13,11 +14,13 @@ import {
   parseColourCycleMinutesFromLocationSearch,
   parseDepartureDatetimeFromLocationSearch,
   parseModeValuesFromLocationSearch,
+  parseTransitWalkBudgetMinutesFromLocationSearch,
   parseWalkSpeedKphFromLocationSearch,
   persistBikeSpeedKphToLocation,
   persistColourCycleMinutesToLocation,
   persistDepartureDatetimeToLocation,
   persistModeValuesToLocation,
+  persistTransitWalkBudgetMinutesToLocation,
   persistWalkSpeedKphToLocation,
 } from '../core/coords.js';
 import {
@@ -59,6 +62,8 @@ export function initializeAppShell(doc, options = {}) {
   const colourCycleMinutesInput = resolvedDocument.getElementById('colour-cycle-minutes');
   const walkSpeedInput = resolvedDocument.getElementById('walk-speed-kph');
   const bikeSpeedInput = resolvedDocument.getElementById('bike-speed-kph');
+  const transitWalkBudgetRow = resolvedDocument.getElementById('transit-walk-budget-row');
+  const transitWalkBudgetInput = resolvedDocument.getElementById('transit-walk-budget-minutes');
   const departureDatetimeRow = resolvedDocument.getElementById('departure-datetime-row');
   const departureDatetimeInput = resolvedDocument.getElementById('departure-datetime');
   const transitEnabledRow = resolvedDocument.getElementById('transit-enabled-row');
@@ -135,6 +140,12 @@ export function initializeAppShell(doc, options = {}) {
   if (!bikeSpeedInput || bikeSpeedInput.tagName !== 'INPUT') {
     throw new Error('index.html is missing <input id="bike-speed-kph">');
   }
+  if (!transitWalkBudgetRow || transitWalkBudgetRow.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="transit-walk-budget-row">');
+  }
+  if (!transitWalkBudgetInput || transitWalkBudgetInput.tagName !== 'INPUT') {
+    throw new Error('index.html is missing <input id="transit-walk-budget-minutes">');
+  }
   if (!departureDatetimeRow || departureDatetimeRow.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="departure-datetime-row">');
   }
@@ -206,6 +217,12 @@ export function initializeAppShell(doc, options = {}) {
   const persistedBikeSpeedKph = parseBikeSpeedKphFromLocationSearch(locationSearch);
   bikeSpeedInput.value = String(persistedBikeSpeedKph ?? BIKE_CRUISE_SPEED_KPH);
 
+  const persistedTransitWalkBudgetMinutes =
+    parseTransitWalkBudgetMinutesFromLocationSearch(locationSearch);
+  transitWalkBudgetInput.value = String(
+    persistedTransitWalkBudgetMinutes ?? DEFAULT_TRANSIT_WALK_BUDGET_MINUTES,
+  );
+
   const persistedDepartureDatetime = parseDepartureDatetimeFromLocationSearch(locationSearch);
   if (persistedDepartureDatetime !== null) {
     departureDatetimeInput.value = persistedDepartureDatetime;
@@ -235,6 +252,8 @@ export function initializeAppShell(doc, options = {}) {
     colourCycleMinutesInput,
     walkSpeedInput,
     bikeSpeedInput,
+    transitWalkBudgetRow,
+    transitWalkBudgetInput,
     departureDatetimeRow,
     departureDatetimeInput,
     transitEnabledRow,
@@ -683,7 +702,20 @@ export function getTransitOptionsFromShell(shell) {
     departureWeekdayIndex = isoWeekdayIndexForDateString(datePart);
   }
 
-  return { transitEnabled, departureSecondsOfDay, departureWeekdayIndex };
+  // A 0 budget is meaningful (ride only what you can board without walking),
+  // so this parses non-negative rather than positive.
+  const rawWalkBudget = Number.parseFloat(shell.transitWalkBudgetInput?.value ?? '');
+  const transitWalkBudgetMinutes =
+    Number.isFinite(rawWalkBudget) && rawWalkBudget >= 0
+      ? rawWalkBudget
+      : DEFAULT_TRANSIT_WALK_BUDGET_MINUTES;
+
+  return {
+    transitEnabled,
+    departureSecondsOfDay,
+    departureWeekdayIndex,
+    transitWalkBudgetSeconds: transitWalkBudgetMinutes * 60,
+  };
 }
 
 export function getSpeedOptionsFromShell(shell) {
@@ -744,6 +776,9 @@ export function updateTransitControlAvailability(shell, hasTransitData, options 
   }
   if (shell.departureDatetimeRow) {
     shell.departureDatetimeRow.hidden = !hasTransitData;
+  }
+  if (shell.transitWalkBudgetRow) {
+    shell.transitWalkBudgetRow.hidden = !hasTransitData;
   }
   if (shell.departureDatetimeInput) {
     const transitDateRange =
@@ -870,6 +905,13 @@ export function bindModeSelectControl(shell, dependencies = {}) {
   // per-edge traversal cost, not just the isochrone's colouring. Persists
   // the raw km/h input values directly (not options.walkingSpeedMps * 3.6)
   // so the URL doesn't pick up km/h -> m/s -> km/h floating-point noise.
+  const handleTransitWalkBudgetChange = () => {
+    const rawMinutes = Number.parseFloat(shell.transitWalkBudgetInput?.value ?? '');
+    if (Number.isFinite(rawMinutes) && rawMinutes >= 0) {
+      persistTransitWalkBudgetMinutesToLocation(rawMinutes);
+    }
+    maybeRequestIsochroneRedraw();
+  };
   const handleSpeedControlChange = () => {
     const walkSpeedKph = parsePositiveFloatOrNull(shell.walkSpeedInput?.value);
     if (walkSpeedKph !== null) {
@@ -892,6 +934,7 @@ export function bindModeSelectControl(shell, dependencies = {}) {
   shell.colourCycleMinutesInput.addEventListener('change', handleCycleChange);
   shell.walkSpeedInput?.addEventListener('change', handleSpeedControlChange);
   shell.bikeSpeedInput?.addEventListener('change', handleSpeedControlChange);
+  shell.transitWalkBudgetInput?.addEventListener('change', handleTransitWalkBudgetChange);
   shell.departureDatetimeInput?.addEventListener('change', handleDepartureDatetimeChange);
 
   return {

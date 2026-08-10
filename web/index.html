@@ -76,6 +76,23 @@
               <input id="bike-speed-kph" name="bike-speed-kph" type="number" min="1" step="0.5" value="18" />
               <span class="control-unit">km/h</span>
             </div>
+            <div class="control-row" id="transit-walk-budget-row" hidden>
+              <label for="transit-walk-budget-minutes" data-i18n="body.options.transitWalkBudget">
+                Most walking per transit leg
+              </label>
+              <span class="control-row-value">
+                <input
+                  id="transit-walk-budget-minutes"
+                  name="transit-walk-budget-minutes"
+                  type="number"
+                  min="0"
+                  max="60"
+                  step="1"
+                  value="5"
+                />
+                <span class="control-unit" data-i18n="body.options.minutesUnit">min</span>
+              </span>
+            </div>
             <div class="control-row">
               <label for="colour-cycle-minutes" data-i18n="body.options.colourCycle">
                 Colour repeating period (minutes)

@@ -3,6 +3,7 @@ import {
   DEFAULT_GRAPH_BINARY_URL,
   DEFAULT_LOCATION_ID,
   DEFAULT_LOCATION_NAME,
+  DEFAULT_TRANSIT_WALK_BUDGET_MINUTES,
   EDGE_INTERPOLATION_SLACK_SECONDS,
   EDGE_MODE_BIKE_BIT,
   EDGE_MODE_CAR_BIT,
@@ -241,6 +242,7 @@ export {
 } from './export/svg.js';
 export { timeToColour } from './render/colour.js';
 
+const TRANSIT_WALK_BUDGET_SCRATCH_PROPERTY = '__transitWalkBudgetDistSeconds';
 const WASM_EDGE_COST_TICK_SCALE = 1_000;
 const EDGE_TRAVERSAL_COST_TICK_CACHE_PROPERTY = '__edgeTraversalCostTicksByModeMask';
 const MODE_SPECIFIC_KERNEL_GRAPH_VIEWS_CACHE_PROPERTY = '__modeSpecificKernelGraphViewsByModeMask';
@@ -716,9 +718,29 @@ export async function runWalkingIsochroneFromSourceNode(
 
   const walkingSpeedMps = options.walkingSpeedMps;
   const bikeCruiseSpeedKph = options.bikeCruiseSpeedKph;
+
+  // Public transit on its own still involves walking - to the first stop,
+  // between stops when changing, and away from the last one. That walking is
+  // ordinary pedestrian movement and must follow the walk graph, so it
+  // respects rivers, railways, private land and everything else the graph
+  // already encodes; what keeps "transit only" honest is that each walking
+  // leg is capped by the user's budget rather than being unlimited.
+  const isTransitOnlyRouting = allowedModeMask === TRANSIT_ONLY_ALLOWED_MODE_MASK;
+  const transitWalkBudgetSeconds =
+    Number.isFinite(options.transitWalkBudgetSeconds) && options.transitWalkBudgetSeconds >= 0
+      ? options.transitWalkBudgetSeconds
+      : DEFAULT_TRANSIT_WALK_BUDGET_MINUTES * 60;
+  // The sentinel mask is a UI-level signal, never a graph mask: the legs it
+  // describes are walked, so every cost/graph structure below is built for
+  // walking.
+  const legModeMask = isTransitOnlyRouting ? EDGE_MODE_WALK_BIT : allowedModeMask;
+  const firstLegTimeLimitSeconds = isTransitOnlyRouting
+    ? Math.min(timeLimitSeconds, transitWalkBudgetSeconds)
+    : timeLimitSeconds;
+
   const edgeTraversalCostSeconds = precomputeEdgeTraversalCostSecondsCache(
     mapData.graph,
-    allowedModeMask,
+    legModeMask,
     null,
     {
       edgeCostPrecomputeKernel,
@@ -729,12 +751,12 @@ export async function runWalkingIsochroneFromSourceNode(
   );
   const edgeTraversalCostTicks = getOrBuildEdgeTraversalCostTicksForMode(
     mapData.graph,
-    allowedModeMask,
+    legModeMask,
     edgeTraversalCostSeconds,
   );
   const kernelGraphViews = getOrBuildModeSpecificKernelGraphViews(
     mapData,
-    allowedModeMask,
+    legModeMask,
     edgeTraversalCostTicks,
   );
   const distSeconds = getOrRotateRoutingDistScratchBuffer(
@@ -747,8 +769,8 @@ export async function runWalkingIsochroneFromSourceNode(
   const searchState = {
     graph: mapData.graph,
     sourceNodeIndex,
-    timeLimitSeconds,
-    allowedModeMask,
+    timeLimitSeconds: firstLegTimeLimitSeconds,
+    allowedModeMask: legModeMask,
     heapStrategy: 'wasm-kernel',
     edgeTraversalCostSeconds,
     distSeconds,
@@ -773,7 +795,7 @@ export async function runWalkingIsochroneFromSourceNode(
         outDistSeconds: distSeconds,
         sourceNodeIndex,
         returnSharedOutputView: true,
-        timeLimitSeconds,
+        timeLimitSeconds: firstLegTimeLimitSeconds,
       });
       if (
         kernelResult
@@ -815,7 +837,6 @@ export async function runWalkingIsochroneFromSourceNode(
       && Number.isFinite(options.departureSecondsOfDay)
       && Number.isInteger(options.departureWeekdayIndex)
     ) {
-      const isTransitOnlyRouting = allowedModeMask === TRANSIT_ONLY_ALLOWED_MODE_MASK;
       const csaResult = runConnectionScanFromWalkingReachableStops(
         mapData.graph,
         finalDistSeconds,
@@ -824,11 +845,6 @@ export async function runWalkingIsochroneFromSourceNode(
           departureWeekdayIndex: options.departureWeekdayIndex,
           timeLimitSeconds,
           walkingSpeedMps,
-          // Pass 1 cannot move at all under the transit-only sentinel mask, so
-          // give the CSA scan the origin's own coordinates to attach directly
-          // to nearby stops (see runConnectionScanFromWalkingReachableStops).
-          originXM: isTransitOnlyRouting ? mapData.graph.nodeI32[sourceNodeIndex * 4] : undefined,
-          originYM: isTransitOnlyRouting ? mapData.graph.nodeI32[sourceNodeIndex * 4 + 1] : undefined,
         },
       );
       if (csaResult.renderableTedgeIndices.length > 0) {
@@ -860,15 +876,30 @@ export async function runWalkingIsochroneFromSourceNode(
           outDistSeconds: transitDistSeconds,
           seedNodeIndices,
           seedStartDistSeconds,
-          returnSharedOutputView: true,
+          // Not the shared view: the walk-budget run below is another kernel
+          // call, and each one reuses the same output region in WASM memory,
+          // so a view handed out here would be overwritten under our feet.
+          returnSharedOutputView: false,
           timeLimitSeconds,
         });
-        finalDistSeconds =
-          multiSourceResult
-          && multiSourceResult.outDistSecondsView instanceof Float32Array
-          && multiSourceResult.outDistSecondsView.length === transitDistSeconds.length
-            ? multiSourceResult.outDistSecondsView
-            : transitDistSeconds;
+        void multiSourceResult;
+        finalDistSeconds = transitDistSeconds;
+
+        if (isTransitOnlyRouting) {
+          // Pass 2 spreads outward from every stop the rider could reach, but
+          // a plain Dijkstra has no notion of "walking since I last got off",
+          // so left alone it would happily walk for hours from a stop reached
+          // early. Recompute how far a walker can get from *any* reached stop
+          // within one budget and drop everything beyond that, which is what
+          // bounds the final leg.
+          applyTransitWalkBudgetReachability(
+            mapData,
+            finalDistSeconds,
+            seedNodeIndices,
+            transitWalkBudgetSeconds,
+            { edgeCostPrecomputeKernel, kernelGraphViews },
+          );
+        }
         // Edge-interpolation vertex buffers were built from the walk-only
         // pass; invalidate so the next render lazily rebuilds them from
         // the transit-augmented distances (getOrBuildSnapshotEdgeVertexData
@@ -922,6 +953,60 @@ export async function runWalkingIsochroneFromSourceNode(
     }
   }
   return runSummary;
+}
+
+/**
+ * Restricts a transit-only field to nodes within one walking budget of
+ * somewhere the rider can actually be: the origin, or a stop transit got them
+ * to. `seedNodeIndices` is exactly that set (pass 2 seeds the origin at index
+ * 0 followed by every reached stop), so re-running the walk search from all of
+ * them at zero cost measures "how far from the nearest boarding/alighting
+ * point is this node", which is precisely what the budget caps.
+ *
+ * Applied as a mask afterwards rather than as a constraint inside the search,
+ * because "walking done since last alighting" is a second cost dimension and a
+ * label-setting Dijkstra settles on one. The resulting set of reachable nodes
+ * is exact; the times within it are pass 2's unconstrained optimum, which for
+ * a node whose quickest stop lies further than the budget away can be slightly
+ * optimistic - it reports that quicker-but-not-walkable journey instead of the
+ * legal slower one. Making that exact needs Pareto labels in the kernel.
+ */
+function applyTransitWalkBudgetReachability(
+  mapData,
+  distSeconds,
+  boardingNodeIndices,
+  walkBudgetSeconds,
+  { edgeCostPrecomputeKernel, kernelGraphViews },
+) {
+  const nodeCount = mapData.graph.header.nNodes;
+  let walkOnlyDistSeconds = mapData[TRANSIT_WALK_BUDGET_SCRATCH_PROPERTY];
+  if (!(walkOnlyDistSeconds instanceof Float32Array) || walkOnlyDistSeconds.length !== nodeCount) {
+    walkOnlyDistSeconds = new Float32Array(nodeCount);
+    mapData[TRANSIT_WALK_BUDGET_SCRATCH_PROPERTY] = walkOnlyDistSeconds;
+  }
+
+  edgeCostPrecomputeKernel.computeTravelTimeFieldMultiSourceForGraph({
+    nodeFirstEdgeIndex: kernelGraphViews.nodeFirstEdgeIndex,
+    nodeEdgeCount: kernelGraphViews.nodeEdgeCount,
+    edgeTargetNodeIndex: kernelGraphViews.edgeTargetNodeIndex,
+    edgeCostTicks: kernelGraphViews.edgeCostTicks,
+    outDistSeconds: walkOnlyDistSeconds,
+    seedNodeIndices: boardingNodeIndices,
+    // All zero: this run measures walking away from a boarding point, not
+    // total journey time.
+    seedStartDistSeconds: new Float32Array(boardingNodeIndices.length),
+    returnSharedOutputView: false,
+    timeLimitSeconds: walkBudgetSeconds,
+  });
+
+  for (let nodeIndex = 0; nodeIndex < nodeCount; nodeIndex += 1) {
+    if (!Number.isFinite(distSeconds[nodeIndex])) {
+      continue;
+    }
+    if (!(walkOnlyDistSeconds[nodeIndex] <= walkBudgetSeconds)) {
+      distSeconds[nodeIndex] = Number.POSITIVE_INFINITY;
+    }
+  }
 }
 
 async function loadEdgeCostPrecomputeKernel(options = {}) {

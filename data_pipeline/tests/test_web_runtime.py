@@ -108,6 +108,7 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
         "colour-cycle-minutes",
         "walk-speed-kph",
         "bike-speed-kph",
+        "transit-walk-budget-minutes",
         "departure-datetime",
         "export-svg-button",
         "isochrone-legend",
@@ -169,6 +170,14 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
     assert bike_speed_input.tag == "input"
     assert bike_speed_input.attrs["type"] == "number"
     assert float(bike_speed_input.attrs["value"]) == numeric_constants["BIKE_CRUISE_SPEED_KPH"]
+
+    walk_budget_input = parsed.elements_by_id["transit-walk-budget-minutes"]
+    assert walk_budget_input.tag == "input"
+    assert walk_budget_input.attrs["type"] == "number"
+    assert (
+        float(walk_budget_input.attrs["value"])
+        == numeric_constants["DEFAULT_TRANSIT_WALK_BUDGET_MINUTES"]
+    )
 
     export_button = parsed.elements_by_id["export-svg-button"]
     assert export_button.tag == "button"
