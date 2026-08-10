@@ -18,6 +18,12 @@ import {
 // drawTravelTimeGrid / drawTravelTimeEdges / drawTravelTimeEdgesFromNodeTimes),
 // each guarded by a `typeof` check at the call site.
 
+// How a Float32Array of edge vertices is packed. The two WebGL edge programs
+// share a single vertex buffer, so whatever is resident in it has to be
+// labelled with the layout that wrote it.
+export const EDGE_VERTEX_LAYOUT_PLAIN = 'plain';
+export const EDGE_VERTEX_LAYOUT_NODE_INDEXED = 'node-indexed';
+
 export function getIsochroneThemeVariant(theme) {
   return normalizeIsochroneTheme(theme, 'dark') === 'light' ? 1 : 0;
 }
@@ -119,6 +125,13 @@ export function shouldUploadEdgeGeometry(
   const append = options.append === true;
   const reuseUploadedGeometry = options.reuseUploadedGeometry === true;
   if (append || !reuseUploadedGeometry) {
+    return true;
+  }
+  // The plain and node-indexed edge programs share one GL vertex buffer but
+  // pack it differently (6 floats per edge vs 12). Matching on the array
+  // identity alone would let a node-indexed draw reuse bytes a plain draw
+  // uploaded, reinterpreting them under the wrong stride.
+  if ((options.previousLayout ?? null) !== (options.layout ?? null)) {
     return true;
   }
   if (previousEdgeVertexDataRef !== edgeVertexData) {
@@ -463,8 +476,22 @@ void main(void) {
     throw new Error('failed to allocate WebGL edge vertex buffer');
   }
   let edgeVertexBufferCapacityFloats = 0;
+  // Single record of what edgeVertexBuffer currently holds. Both edge programs
+  // draw from this one buffer, so tracking them separately would let each one
+  // believe its own geometry was still resident after the other overwrote it.
   let lastUploadedEdgeVertexDataRef = null;
   let lastUploadedEdgeVertexDataLength = 0;
+  let lastUploadedEdgeVertexDataLayout = null;
+  const forgetUploadedEdgeGeometry = () => {
+    lastUploadedEdgeVertexDataRef = null;
+    lastUploadedEdgeVertexDataLength = 0;
+    lastUploadedEdgeVertexDataLayout = null;
+  };
+  const rememberUploadedEdgeGeometry = (edgeVertexData, layout) => {
+    lastUploadedEdgeVertexDataRef = edgeVertexData;
+    lastUploadedEdgeVertexDataLength = edgeVertexData.length;
+    lastUploadedEdgeVertexDataLayout = layout;
+  };
   const ensureEdgeVertexBufferCapacity = (requiredFloats) => {
     if (!Number.isInteger(requiredFloats) || requiredFloats <= 0) {
       throw new Error('requiredFloats must be a positive integer');
@@ -506,8 +533,6 @@ void main(void) {
   let indexedEdgeNodeTimeTextureUploadBuffer = null;
   let indexedEdgeNodeTimeTextureFloat64Bridge = null;
   let indexedEdgeMaxTextureSize = 0;
-  let lastUploadedIndexedEdgeVertexDataRef = null;
-  let lastUploadedIndexedEdgeVertexDataLength = 0;
 
   if (isWebGl2) {
     const indexedEdgeVertexShaderSource = `#version 300 es
@@ -811,8 +836,7 @@ void main(void) {
       const append = options.append ?? false;
       if (edgeVertexData.length === 0) {
         if (!append) {
-          lastUploadedEdgeVertexDataRef = null;
-          lastUploadedEdgeVertexDataLength = 0;
+          forgetUploadedEdgeGeometry();
         }
         return 0;
       }
@@ -854,6 +878,8 @@ void main(void) {
         {
           append,
           reuseUploadedGeometry,
+          previousLayout: lastUploadedEdgeVertexDataLayout,
+          layout: EDGE_VERTEX_LAYOUT_PLAIN,
         },
       );
       if (shouldUploadGeometry) {
@@ -882,12 +908,10 @@ void main(void) {
         gl.uniform1f(edgeThemeVariantLocation, themeVariant);
       }
       gl.drawArrays(gl.LINES, 0, edgeVertexData.length / 3);
-      if (!append) {
-        lastUploadedEdgeVertexDataRef = edgeVertexData;
-        lastUploadedEdgeVertexDataLength = edgeVertexData.length;
+      if (append) {
+        forgetUploadedEdgeGeometry();
       } else {
-        lastUploadedEdgeVertexDataRef = null;
-        lastUploadedEdgeVertexDataLength = 0;
+        rememberUploadedEdgeGeometry(edgeVertexData, EDGE_VERTEX_LAYOUT_PLAIN);
       }
       return edgeVertexData.length / 6;
     },
@@ -909,8 +933,7 @@ void main(void) {
       const append = options.append ?? false;
       if (edgeVertexData.length === 0 || distSeconds.length === 0) {
         if (!append) {
-          lastUploadedIndexedEdgeVertexDataRef = null;
-          lastUploadedIndexedEdgeVertexDataLength = 0;
+          forgetUploadedEdgeGeometry();
           // Nothing to draw, but the caller still expects a fresh frame -
           // without this, a route with zero eligible edges left whatever
           // the previous frame happened to show on screen.
@@ -970,12 +993,14 @@ void main(void) {
       gl.bindBuffer(gl.ARRAY_BUFFER, edgeVertexBuffer);
       ensureEdgeVertexBufferCapacity(edgeVertexData.length);
       const shouldUploadGeometry = shouldUploadEdgeGeometry(
-        lastUploadedIndexedEdgeVertexDataRef,
-        lastUploadedIndexedEdgeVertexDataLength,
+        lastUploadedEdgeVertexDataRef,
+        lastUploadedEdgeVertexDataLength,
         edgeVertexData,
         {
           append,
           reuseUploadedGeometry,
+          previousLayout: lastUploadedEdgeVertexDataLayout,
+          layout: EDGE_VERTEX_LAYOUT_NODE_INDEXED,
         },
       );
       if (shouldUploadGeometry) {
@@ -1013,12 +1038,10 @@ void main(void) {
         gl.uniform1f(indexedEdgeSlackSecondsLocation, edgeSlackSeconds);
       }
       gl.drawArrays(gl.LINES, 0, edgeVertexData.length / 6);
-      if (!append) {
-        lastUploadedIndexedEdgeVertexDataRef = edgeVertexData;
-        lastUploadedIndexedEdgeVertexDataLength = edgeVertexData.length;
+      if (append) {
+        forgetUploadedEdgeGeometry();
       } else {
-        lastUploadedIndexedEdgeVertexDataRef = null;
-        lastUploadedIndexedEdgeVertexDataLength = 0;
+        rememberUploadedEdgeGeometry(edgeVertexData, EDGE_VERTEX_LAYOUT_NODE_INDEXED);
       }
       return edgeVertexData.length / 12;
     },

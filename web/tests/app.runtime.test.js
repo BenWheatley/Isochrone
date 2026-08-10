@@ -1973,6 +1973,34 @@ test('shouldUploadEdgeGeometry only skips upload for unchanged reusable full-fra
   );
 });
 
+test('shouldUploadEdgeGeometry re-uploads when the other edge program last wrote the buffer', () => {
+  // Both WebGL edge programs draw from one shared vertex buffer. A transit-only
+  // frame (plain 6-float layout) followed by a walking frame that reuses its
+  // cached node-indexed template would otherwise match on array identity and
+  // skip the upload, leaving the node-indexed program to read the transit
+  // bytes under a 24-byte stride - long spurious chords across the map.
+  const edgeVertexData = new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+
+  assert.equal(
+    shouldUploadEdgeGeometry(edgeVertexData, edgeVertexData.length, edgeVertexData, {
+      append: false,
+      reuseUploadedGeometry: true,
+      previousLayout: 'plain',
+      layout: 'node-indexed',
+    }),
+    true,
+  );
+  assert.equal(
+    shouldUploadEdgeGeometry(edgeVertexData, edgeVertexData.length, edgeVertexData, {
+      append: false,
+      reuseUploadedGeometry: true,
+      previousLayout: 'node-indexed',
+      layout: 'node-indexed',
+    }),
+    false,
+  );
+});
+
 test('buildStaticEdgeVertexTemplateForMode stores reusable x/y geometry and edge metadata', () => {
   const graph = createFixtureGraph();
   const nodePixels = precomputeNodePixelCoordinates(graph);
