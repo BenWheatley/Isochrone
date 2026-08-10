@@ -10,7 +10,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory, mkstemp
 from urllib.parse import urlparse
 
-import requests  # type: ignore[import-untyped]
+import requests
+
+# pyshp still ships no py.typed marker or stubs (checked through 2.4.2), so
+# unlike requests above this import stays untyped to mypy.
 import shapefile  # type: ignore[import-untyped]
 
 DEFAULT_WATER_POLYGONS_SOURCE = (
