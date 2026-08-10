@@ -57,6 +57,7 @@ import {
   bindUnitSystemControl,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
+  getSelectedTransportModeLabels,
   getSpeedOptionsFromShell,
   getTransitOptionsFromShell,
   initializeAppShell,
@@ -73,8 +74,12 @@ import { bindCanvasClickRouting as bindCanvasClickRoutingInternal } from './inte
 import {
   bindSvgExportControl,
   exportCurrentRenderedIsochroneSvg,
-  formatIsochroneExportTitle,
 } from './export/svg.js';
+import { collectRenderedIsochroneScene } from './export/scene.js';
+import {
+  bindPrintControl,
+  printCurrentRenderedIsochrone,
+} from './export/print.js';
 import {
   DEFAULT_COLOUR_CYCLE_MINUTES,
   normalizeIsochroneTheme,
@@ -139,7 +144,6 @@ import {
   updateRenderBackendBadge,
 } from './ui/status.js';
 import {
-  computeExportDistanceScaleBar,
   renderIsochroneLegendIfNeeded,
   updateDistanceScaleBar,
 } from './ui/legend-scale.js';
@@ -229,6 +233,7 @@ export {
   bindLocationSelectControl,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
+  getSelectedTransportModeLabels,
   getSpeedOptionsFromShell,
   getTransitOptionsFromShell,
   populateLocationSelect,
@@ -241,6 +246,12 @@ export {
   exportCurrentRenderedIsochroneSvg,
   formatIsochroneExportTitle,
 } from './export/svg.js';
+export { collectRenderedIsochroneScene } from './export/scene.js';
+export {
+  bindPrintControl,
+  buildIsochronePrintDocument,
+  printCurrentRenderedIsochrone,
+} from './export/print.js';
 export { timeToColour } from './render/colour.js';
 
 const TRANSIT_WALK_BUDGET_SCRATCH_PROPERTY = '__transitWalkBudgetDistSeconds';
@@ -2047,6 +2058,9 @@ export async function initializeMapData(shell, options = {}) {
     if (shell.exportSvgButton) {
       shell.exportSvgButton.disabled = false;
     }
+    if (shell.printButton) {
+      shell.printButton.disabled = false;
+    }
     fadeOutLoadingOverlay(shell);
 
     const nodePixels = precomputeNodePixelCoordinates(graph);
@@ -2076,6 +2090,9 @@ export async function initializeMapData(shell, options = {}) {
   } catch (error) {
     if (shell.exportSvgButton) {
       shell.exportSvgButton.disabled = true;
+    }
+    if (shell.printButton) {
+      shell.printButton.disabled = true;
     }
     const failureMessage =
       error && typeof error.message === 'string' && error.message.length > 0
@@ -3157,35 +3174,6 @@ export function runGpuCpuParityDiagnostic(renderer, mapData, searchState, option
 
 
 
-function getSelectedTransportModeLabels(shell) {
-  if (!shell || typeof shell !== 'object' || !Array.isArray(shell.modeCheckboxes)) {
-    return [];
-  }
-  const labels = [];
-  for (const checkbox of shell.modeCheckboxes) {
-    if (!checkbox?.checked) {
-      continue;
-    }
-    // Skip the transit checkbox (folded into modeCheckboxes alongside
-    // Walk/Bike/Car/Ferry) while its row is hidden - no transit data for
-    // the loaded region - so a stale checked state from a previous region
-    // can't leak into the export title. Mirrors
-    // getTransitOptionsFromShell's own transitEnabledRow.hidden check.
-    const optionRow = checkbox.closest?.('.mode-checkbox-option') ?? null;
-    if (optionRow?.hidden) {
-      continue;
-    }
-    const labelSpan = optionRow?.querySelector?.('span') ?? null;
-    const label =
-      typeof labelSpan?.textContent === 'string' && labelSpan.textContent.trim().length > 0
-        ? labelSpan.textContent.trim()
-        : null;
-    if (label) {
-      labels.push(label);
-    }
-  }
-  return labels;
-}
 
 
 
@@ -3412,6 +3400,9 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
       if (shell.exportSvgButton) {
         shell.exportSvgButton.disabled = true;
       }
+      if (shell.printButton) {
+        shell.printButton.disabled = true;
+      }
 
       const { boundaryUrl, graphUrl } = buildLocationAssetUrls(nextLocation);
       try {
@@ -3439,6 +3430,9 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           shell.isochroneCanvas.dataset.graphLoaded = 'true';
           if (shell.exportSvgButton) {
             shell.exportSvgButton.disabled = false;
+          }
+          if (shell.printButton) {
+            shell.printButton.disabled = false;
           }
         }
         shell.locationSelect.value =
@@ -3543,63 +3537,21 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         printMediaQuery.addListener(handlePrintMediaChange);
       }
     }
+    // SVG download and print describe the same picture; they differ only in
+    // where the finished document goes.
+    const collectCurrentIsochroneScene = () =>
+      collectRenderedIsochroneScene(shell, initializedMapData, {
+        modeLabels: getSelectedTransportModeLabels(shell),
+        getSnapshotEdgeVertexData: getOrBuildSnapshotEdgeVertexData,
+      });
+
     bindSvgExportControl(shell, {
       async exportCurrentRenderedIsochroneSvg() {
         if (routingBinding && typeof routingBinding.waitForIdle === 'function') {
           await routingBinding.waitForIdle();
         }
 
-        const locationName = initializedMapData?.locationName ?? DEFAULT_LOCATION_NAME;
-        const modeLabels = getSelectedTransportModeLabels(shell);
-        const title = formatIsochroneExportTitle(locationName, modeLabels);
-        const graphHeaderForExport = initializedMapData?.graph.header ?? null;
-        const exportScaleBar = graphHeaderForExport
-          ? computeExportDistanceScaleBar(graphHeaderForExport)
-          : null;
-        const scaleBarLabel =
-          exportScaleBar?.label ?? shell.distanceScaleLabel?.textContent?.trim() ?? '';
-        const scaleBarWidthPx = exportScaleBar?.lineWidthPx ?? 96;
-        const scaleBarSegmentWidthPx = exportScaleBar?.segmentWidthPx;
-        const transitDisclaimerText =
-          shell.routingDisclaimerTransit && !shell.routingDisclaimerTransit.hidden
-            ? (shell.routingDisclaimerTransit.textContent ?? '')
-            : '';
-        const osmDisclaimerText =
-          shell.routingDisclaimerOsm?.textContent ?? shell.routingDisclaimer?.textContent ?? '';
-        const copyrightNotice = `${osmDisclaimerText} ${transitDisclaimerText}`
-          .replace(/\s+/g, ' ')
-          .trim();
-
-        let edgeVertexData = new Float32Array(0);
-        let cycleMinutes = getColourCycleMinutesFromShell(shell);
-        const routingSnapshot = initializedMapData?.lastRoutingSnapshot ?? null;
-        if (initializedMapData && routingSnapshot) {
-          // Transit-only isochrones have no road edges to export; their lines
-          // are the transit connections, already in this same (x, y, seconds)
-          // layout.
-          edgeVertexData =
-            routingSnapshot.allowedModeMask === TRANSIT_ONLY_ALLOWED_MODE_MASK
-              ? (routingSnapshot.transitEdgeVertexData ?? new Float32Array(0))
-              : getOrBuildSnapshotEdgeVertexData(initializedMapData, routingSnapshot, {
-                allowedModeMask: routingSnapshot.allowedModeMask,
-              });
-          cycleMinutes = routingSnapshot.colourCycleMinutes;
-        }
-
-        const currentTheme = resolveIsochroneTheme();
-        return exportCurrentRenderedIsochroneSvg(shell, {
-          graphHeader: initializedMapData?.graph.header ?? null,
-          boundaryPayload: initializedMapData?.boundaryPayload ?? null,
-          edgeVertexData,
-          cycleMinutes,
-          theme: currentTheme,
-          title,
-          messages: getShellLocaleMessages(shell),
-          scaleBarLabel,
-          scaleBarWidthPx,
-          scaleBarSegmentWidthPx,
-          copyrightNotice,
-        });
+        return exportCurrentRenderedIsochroneSvg(shell, collectCurrentIsochroneScene());
       },
       onExportSuccess(result) {
         setRoutingStatus(
@@ -3613,6 +3565,27 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         setRoutingStatus(
           shell,
           getLocalizedShellText(shell, 'routing.exportFailed', 'SVG export failed.'),
+        );
+      },
+    });
+    bindPrintControl(shell, {
+      async printCurrentRenderedIsochrone() {
+        if (routingBinding && typeof routingBinding.waitForIdle === 'function') {
+          await routingBinding.waitForIdle();
+        }
+
+        return printCurrentRenderedIsochrone(shell, collectCurrentIsochroneScene());
+      },
+      onPrintSuccess() {
+        setRoutingStatus(
+          shell,
+          getLocalizedShellText(shell, 'routing.printed', 'Sent to printer.'),
+        );
+      },
+      onPrintError() {
+        setRoutingStatus(
+          shell,
+          getLocalizedShellText(shell, 'routing.printFailed', 'Printing failed.'),
         );
       },
     });

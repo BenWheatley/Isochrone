@@ -24,6 +24,7 @@
   "body.options.transitWalkBudget": "Most walking per transit leg",
   "body.options.minutesUnit": "min",
   "body.options.exportSvg": "Export SVG",
+  "body.options.print": "Print",
   "body.map.aria": "Map viewport",
   "body.loading.boundaries": "Loading district boundaries...",
   "body.distanceScale.aria": "Distance scale bar",
@@ -53,5 +54,7 @@
   "routing.preview": "Done - preview updated{durationSuffix}",
   "routing.none": "Done - no reachable network for selected mode at this start point{durationSuffix}",
   "routing.exportedSvg": "Exported SVG: {filename}",
-  "routing.exportFailed": "SVG export failed."
+  "routing.exportFailed": "SVG export failed.",
+  "routing.printed": "Sent to printer.",
+  "routing.printFailed": "Printing failed."
 }

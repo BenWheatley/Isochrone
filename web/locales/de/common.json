@@ -24,6 +24,7 @@
   "body.options.transitWalkBudget": "Maximaler Fußweg je Teilstrecke",
   "body.options.minutesUnit": "Min.",
   "body.options.exportSvg": "SVG exportieren",
+  "body.options.print": "Drucken",
   "body.map.aria": "Kartenansicht",
   "body.loading.boundaries": "Bezirksgrenzen werden geladen...",
   "body.distanceScale.aria": "Maßstabsleiste",
@@ -53,5 +54,7 @@
   "routing.preview": "Fertig – Vorschau aktualisiert{durationSuffix}",
   "routing.none": "Fertig – für diesen Startpunkt ist im gewählten Modus kein erreichbares Netz vorhanden{durationSuffix}",
   "routing.exportedSvg": "SVG exportiert: {filename}",
-  "routing.exportFailed": "SVG-Export fehlgeschlagen."
+  "routing.exportFailed": "SVG-Export fehlgeschlagen.",
+  "routing.printed": "An den Drucker gesendet.",
+  "routing.printFailed": "Drucken fehlgeschlagen."
 }

@@ -24,6 +24,7 @@
   "body.options.transitWalkBudget": "Marche maximale par trajet",
   "body.options.minutesUnit": "min",
   "body.options.exportSvg": "Exporter en SVG",
+  "body.options.print": "Imprimer",
   "body.map.aria": "Vue de la carte",
   "body.loading.boundaries": "Chargement des limites des districts...",
   "body.distanceScale.aria": "Barre d'échelle",
@@ -53,5 +54,7 @@
   "routing.preview": "Terminé - aperçu mis à jour{durationSuffix}",
   "routing.none": "Terminé - aucun réseau accessible pour le mode sélectionné à partir de ce point de départ{durationSuffix}",
   "routing.exportedSvg": "SVG exporté : {filename}",
-  "routing.exportFailed": "Échec de l'export SVG."
+  "routing.exportFailed": "Échec de l'export SVG.",
+  "routing.printed": "Envoyé à l’imprimante.",
+  "routing.printFailed": "Échec de l’impression."
 }

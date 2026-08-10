@@ -206,7 +206,7 @@ function readComputedCssCustomProperty(computedStyle, propertyName) {
   return value.length > 0 ? value : null;
 }
 
-function resolveSvgBackgroundColour(shell, options = {}) {
+export function resolveSvgBackgroundColour(shell, options = {}) {
   const explicitColour = options.backgroundColour ?? options.backgroundColor;
   if (typeof explicitColour === 'string' && explicitColour.trim().length > 0) {
     return explicitColour.trim();
@@ -240,7 +240,7 @@ function resolveSvgBackgroundColour(shell, options = {}) {
   return '#ffffff';
 }
 
-function resolveSvgTheme(shell, options = {}) {
+export function resolveSvgTheme(shell, options = {}) {
   if (typeof options.theme === 'string' && options.theme.trim().length > 0) {
     return normalizeIsochroneTheme(options.theme.trim(), ISOCHRONE_THEME_DARK);
   }
@@ -250,7 +250,7 @@ function resolveSvgTheme(shell, options = {}) {
   return normalizeIsochroneTheme(datasetTheme, ISOCHRONE_THEME_DARK);
 }
 
-function resolveSvgOverlayColours(shell, options = {}) {
+export function resolveSvgOverlayColours(shell, options = {}) {
   const theme = resolveSvgTheme(shell, options);
   const defaults = DEFAULT_OVERLAY_COLOURS[theme];
   const explicit = options.overlayColours && typeof options.overlayColours === 'object'

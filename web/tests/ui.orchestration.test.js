@@ -8,6 +8,7 @@ import {
   bindPointerButtonInversionControl,
   bindThemeControl,
   getAllowedModeMaskFromShell,
+  getSelectedTransportModeLabels,
   getSpeedOptionsFromShell,
   getTransitOptionsFromShell,
   populateLocationSelect,
@@ -787,4 +788,52 @@ test('bindHeaderMenuControl closes menu on outside pointerdown and Escape key', 
   assert.equal(controlsMenu.open, true);
   assert.equal(controlsMenuSummary.focusCallCount, 1);
   assert.equal(insideTargets.has(controlsMenu), true);
+});
+
+function createModeCheckboxStub(value, { checked = false, label = '', hidden = false } = {}) {
+  const optionRow = {
+    hidden,
+    querySelector(selector) {
+      // Mirrors index.html: the icon ligature span comes first, the readable
+      // name is the .sr-only one after it.
+      if (selector === '.sr-only') {
+        return { textContent: label };
+      }
+      if (selector === 'span') {
+        return { textContent: `directions_${value}` };
+      }
+      return null;
+    },
+  };
+  return {
+    value,
+    checked,
+    closest(selector) {
+      return selector === '.mode-icon-option' ? optionRow : null;
+    },
+  };
+}
+
+test('getSelectedTransportModeLabels reads readable names, not the icon ligatures', () => {
+  const walk = createModeCheckboxStub('walk', { checked: true, label: 'Walk' });
+  const bike = createModeCheckboxStub('bike', { checked: false, label: 'Bike' });
+  const transit = createModeCheckboxStub('transit', { checked: true, label: 'Public transit' });
+
+  assert.deepEqual(
+    getSelectedTransportModeLabels({ modeCheckboxes: [walk, bike, transit] }),
+    ['Walk', 'Public transit'],
+  );
+});
+
+test('getSelectedTransportModeLabels skips a checked mode whose row is hidden', () => {
+  // Region without transit data: the row is hidden, so a checked state left
+  // over from a previous region must not reach the export title.
+  const walk = createModeCheckboxStub('walk', { checked: true, label: 'Walk' });
+  const transit = createModeCheckboxStub('transit', {
+    checked: true,
+    label: 'Public transit',
+    hidden: true,
+  });
+
+  assert.deepEqual(getSelectedTransportModeLabels({ modeCheckboxes: [walk, transit] }), ['Walk']);
 });

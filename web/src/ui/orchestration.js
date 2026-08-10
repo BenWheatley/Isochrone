@@ -81,6 +81,7 @@ export function initializeAppShell(doc, options = {}) {
   const transitEnabledRow = resolvedDocument.getElementById('transit-enabled-row');
   const transitEnabledInput = resolvedDocument.getElementById('transit-enabled');
   const exportSvgButton = resolvedDocument.getElementById('export-svg-button');
+  const printButton = resolvedDocument.getElementById('print-button');
   const distanceScale = resolvedDocument.getElementById('distance-scale');
   const distanceScaleLine = resolvedDocument.getElementById('distance-scale-line');
   const distanceScaleLabel = resolvedDocument.getElementById('distance-scale-label');
@@ -179,6 +180,9 @@ export function initializeAppShell(doc, options = {}) {
   if (!exportSvgButton || exportSvgButton.tagName !== 'BUTTON') {
     throw new Error('index.html is missing <button id="export-svg-button">');
   }
+  if (!printButton || printButton.tagName !== 'BUTTON') {
+    throw new Error('index.html is missing <button id="print-button">');
+  }
   if (!distanceScale || distanceScale.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="distance-scale">');
   }
@@ -214,6 +218,7 @@ export function initializeAppShell(doc, options = {}) {
     renderBackendBadge.textContent,
   );
   exportSvgButton.disabled = true;
+  printButton.disabled = true;
   const locationSearch = globalThis.location?.search ?? '';
   const persistedModeValues = parseModeValuesFromLocationSearch(locationSearch);
   if (persistedModeValues !== null && persistedModeValues.length > 0) {
@@ -279,6 +284,7 @@ export function initializeAppShell(doc, options = {}) {
     transitEnabledRow,
     transitEnabledInput,
     exportSvgButton,
+    printButton,
     distanceScale,
     distanceScaleLine,
     distanceScaleLabel,
@@ -719,6 +725,38 @@ export function restoreDefaultModeIfNoneSelected(shell) {
 
   setSelectedModeValues(routingModeCheckboxes, ['car']);
   return true;
+}
+
+export function getSelectedTransportModeLabels(shell) {
+  if (!shell || typeof shell !== 'object' || !Array.isArray(shell.modeCheckboxes)) {
+    return [];
+  }
+  const labels = [];
+  for (const checkbox of shell.modeCheckboxes) {
+    if (!checkbox?.checked) {
+      continue;
+    }
+    // Skip the transit checkbox (folded into modeCheckboxes alongside
+    // Walk/Bike/Car/Ferry) while its row is hidden - no transit data for
+    // the loaded region - so a stale checked state from a previous region
+    // can't leak into the export title. Mirrors
+    // getTransitOptionsFromShell's own transitEnabledRow.hidden check.
+    const optionRow = checkbox.closest?.('.mode-icon-option') ?? null;
+    if (optionRow?.hidden) {
+      continue;
+    }
+    // The first span in the row is the Material Symbols ligature ("directions_walk");
+    // the readable name is the screen-reader one next to it.
+    const labelSpan = optionRow?.querySelector?.('.sr-only') ?? null;
+    const label =
+      typeof labelSpan?.textContent === 'string' && labelSpan.textContent.trim().length > 0
+        ? labelSpan.textContent.trim()
+        : null;
+    if (label) {
+      labels.push(label);
+    }
+  }
+  return labels;
 }
 
 export function getColourCycleMinutesFromShell(shell) {

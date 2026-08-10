@@ -295,6 +295,16 @@ body {
   white-space: nowrap;
 }
 
+/* The actions row holds only buttons, so the label/control two-column split
+   above would fling them to opposite edges. Keep them grouped instead, and
+   let the count grow without touching this rule. */
+.control-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 0.5rem;
+}
+
 /* Group separator between the panel's logical sections (routing / display /
    interaction / actions). A real <hr> rather than a border on the next
    control, so the grouping is visible in the markup and to assistive tech
