@@ -1,6 +1,12 @@
 # Isochrone
 
-Berlin isochrone web application with a Python preprocessing pipeline and a browser-based renderer.
+Isochrone (equal-time) map renderer, as a single-page web app.
+
+Front end: minimal web application, aiming for performance and usability, no analytics etc.
+
+Back end: a Python preprocessing pipeline
+
+Data: OpenStreetMap, regional public transport (at time of writing, that's just VBB for the Berlin map)
 
 [Live App](https://benwheatley.github.io/Isochrone/web/)
 
