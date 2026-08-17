@@ -159,7 +159,10 @@ test('buildRenderedIsochroneSvgDocument uses full-region graph coordinates and i
 
   assert.ok(svg.startsWith('<?xml version="1.0" encoding="UTF-8"?>'));
   assert.ok(svg.includes('<svg xmlns="http://www.w3.org/2000/svg"'));
-  assert.ok(svg.includes('viewBox="0 0 100 100"'));
+  // The sheet is larger than the map: the poster adds a title band, a key
+  // and a credits footer around it. What must not change is the map's own
+  // coordinate system, which the map group carries by translation.
+  assert.ok(svg.includes('id="isochrone-map" clip-path="url(#isochrone-map-clip)" transform="translate('));
   assert.ok(!svg.includes('<image '));
   assert.ok(svg.includes('id="isochrone-boundaries"'));
   assert.ok(svg.includes('d="M 10 10 L 20 20 L 30 30"'));
@@ -303,7 +306,11 @@ test('exportCurrentRenderedIsochroneSvg uses graph extent instead of current can
     },
   });
 
-  assert.ok(result.svgDocument.includes('viewBox="0 0 100 100"'));
+  assert.ok(
+    result.svgDocument.includes(
+      'id="isochrone-map" clip-path="url(#isochrone-map-clip)" transform="translate(',
+    ),
+  );
   assert.ok(result.svgDocument.includes('d="M 10 10 L 20 20 L 30 30"'));
   assert.ok(result.svgDocument.includes('x2="20"'));
 });

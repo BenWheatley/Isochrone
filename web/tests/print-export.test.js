@@ -90,8 +90,9 @@ test('buildIsochronePrintDocument inlines the SVG without its XML declaration', 
   assert.ok(!printDocument.includes('<?xml'));
   assert.ok(printDocument.includes('<svg><title>x</title></svg>'));
   assert.ok(printDocument.includes('<title>Berlin &amp; walking</title>'));
-  // No page margins: the SVG carries its own title, legend, scale and credits.
-  assert.ok(printDocument.includes('@page { size: landscape; margin: 0; }'));
+  // No page margins: the poster carries its own margin, title, key, scale
+  // and credits, so it should fill the sheet edge to edge.
+  assert.ok(printDocument.includes('@page { margin: 0; }'));
 });
 
 test('printCurrentRenderedIsochrone prints the vector document, not the canvas', () => {

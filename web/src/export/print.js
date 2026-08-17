@@ -33,11 +33,15 @@ export function buildIsochronePrintDocument(svgDocument, options = {}) {
     '<meta charset="utf-8">',
     `<title>${escapedTitle}</title>`,
     '<style>',
-    // Landscape with no margin: the SVG already carries its own title,
-    // legend, scale bar and attribution inside the frame.
-    '@page { size: landscape; margin: 0; }',
+    // No page margin: the poster carries its own margin, title band, legend,
+    // scale bar and credits, so the sheet should be filled edge to edge.
+    '@page { margin: 0; }',
     'html, body { margin: 0; padding: 0; }',
-    'svg { display: block; width: 100%; height: auto; }',
+    // Fill the sheet and let the SVG's own preserveAspectRatio (xMidYMid meet)
+    // letterbox it, so the poster comes out centred and uncropped whichever
+    // way round the user prints.
+    'body { width: 100vw; height: 100vh; overflow: hidden; }',
+    'svg { display: block; width: 100%; height: 100%; }',
     '</style>',
     '</head>',
     '<body>',
