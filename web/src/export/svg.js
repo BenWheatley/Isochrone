@@ -607,6 +607,19 @@ function buildSvgBoundaryLineMarkup(features, boundaryStroke, strokeWidth) {
   );
 }
 
+/**
+ * A colour channel tuple from timeToColour as a CSS colour.
+ *
+ * Reads the tuple's length rather than assuming three channels, so a palette
+ * that later carries alpha still renders instead of silently losing it.
+ */
+function formatEdgeColour(colour) {
+  const [r, g, b, a] = colour;
+  return colour.length > 3 && Number.isFinite(a)
+    ? `rgba(${r}, ${g}, ${b}, ${a})`
+    : `rgb(${r}, ${g}, ${b})`;
+}
+
 export function buildIsochroneEdgeLineMarkup(edgeVertexData, options = {}) {
   assertEdgeVertexData(edgeVertexData);
 
@@ -622,10 +635,21 @@ export function buildIsochroneEdgeLineMarkup(edgeVertexData, options = {}) {
   const strokeWidth = formatSvgNumber(
     Number.isFinite(options.strokeWidth) && options.strokeWidth > 0 ? options.strokeWidth : 1,
   );
+
+  // Edges are merged into one <path> per distinct colour rather than one
+  // <line> each: a region like Berlin has ~514k edges but only a handful of
+  // colours, and half a million elements with repeated stroke attributes is
+  // what made the document enormous and Safari's print pipeline give up.
+  //
+  // Which colours exist is discovered here, not assumed. The palette is
+  // currently a small set of bands, but nothing below depends on that - a
+  // different band count, or a continuous ramp, still works and simply yields
+  // more groups. Insertion order is kept so output stays deterministic.
+  //
   // Endpoints are rounded to whole grid pixels - the resolution the graph is
   // stored at anyway, and far finer than print can resolve. On a region with
   // half a million edges the dropped decimals are several MB of file.
-  const edgeLines = [];
+  const subpathsByColour = new Map();
   for (let i = 0; i < edgeVertexData.length; i += 6) {
     const x0 = edgeVertexData[i];
     const y0 = edgeVertexData[i + 1];
@@ -648,14 +672,25 @@ export function buildIsochroneEdgeLineMarkup(edgeVertexData, options = {}) {
     }
 
     const representativeSeconds = Math.max(0, (t0 + t1) * 0.5);
-    const [r, g, b] = timeToColour(representativeSeconds, { cycleMinutes, theme });
+    const colour = formatEdgeColour(timeToColour(representativeSeconds, { cycleMinutes, theme }));
 
-    edgeLines.push(
-      `<line x1="${Math.round(x0)}" y1="${Math.round(y0)}" x2="${Math.round(x1)}" y2="${Math.round(y1)}" stroke="rgb(${r}, ${g}, ${b})" stroke-width="${strokeWidth}" stroke-linecap="round" />`,
+    let subpaths = subpathsByColour.get(colour);
+    if (subpaths === undefined) {
+      subpaths = [];
+      subpathsByColour.set(colour, subpaths);
+    }
+    subpaths.push(
+      `M${Math.round(x0)} ${Math.round(y0)}L${Math.round(x1)} ${Math.round(y1)}`,
     );
   }
 
-  return edgeLines.join('\n');
+  const pathMarkup = [];
+  for (const [colour, subpaths] of subpathsByColour) {
+    pathMarkup.push(
+      `<path d="${subpaths.join('')}" fill="none" stroke="${escapeXml(colour)}" stroke-width="${strokeWidth}" stroke-linecap="round" />`,
+    );
+  }
+  return pathMarkup.join('\n');
 }
 
 export function buildRenderedIsochroneSvgDocument(options = {}) {

@@ -113,7 +113,7 @@ test('printCurrentRenderedIsochrone prints the vector document, not the canvas',
   assert.equal(iframe.printCount, 1);
   assert.equal(documentObject.appended.length, 1);
   assert.ok(frameDocument.written.includes('<svg'));
-  assert.ok(result.svgDocument.includes('x2="3"'));
+  assert.ok(result.svgDocument.includes('d="M1 2L3 4"'));
   // The overlay word-wraps, so match a single word rather than the phrase.
   assert.ok(result.printDocument.includes('OpenStreetMap'));
 
