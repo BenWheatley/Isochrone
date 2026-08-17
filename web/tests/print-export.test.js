@@ -95,6 +95,19 @@ test('buildIsochronePrintDocument inlines the SVG without its XML declaration', 
   assert.ok(printDocument.includes('@page { margin: 0; }'));
 });
 
+test('print stylesheet sizes against the page box, not the screen viewport', () => {
+  const printDocument = buildIsochronePrintDocument('<svg></svg>');
+
+  // vh/vw are defined against the screen viewport even when printing, which
+  // Safari takes literally; percentages resolve against the page area, which
+  // is the sheet. Combined with overflow:hidden the old rules gave Safari a
+  // blank page.
+  assert.ok(!printDocument.includes('vh'));
+  assert.ok(!printDocument.includes('vw'));
+  assert.ok(!printDocument.includes('overflow: hidden'));
+  assert.ok(printDocument.includes('html, body { margin: 0; padding: 0; height: 100%; }'));
+});
+
 test('printCurrentRenderedIsochrone prints the vector document, not the canvas', () => {
   const { documentObject, iframe, frameDocument } = createPrintDocumentStub();
   const shell = createShellStub(documentObject);

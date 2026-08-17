@@ -36,12 +36,18 @@ export function buildIsochronePrintDocument(svgDocument, options = {}) {
     // No page margin: the poster carries its own margin, title band, legend,
     // scale bar and credits, so the sheet should be filled edge to edge.
     '@page { margin: 0; }',
-    'html, body { margin: 0; padding: 0; }',
-    // Fill the sheet and let the SVG's own preserveAspectRatio (xMidYMid meet)
-    // letterbox it, so the poster comes out centred and uncropped whichever
-    // way round the user prints.
-    'body { width: 100vw; height: 100vh; overflow: hidden; }',
-    'svg { display: block; width: 100%; height: 100%; }',
+    // Percentage heights, not vh/vw. In paged media the initial containing
+    // block is the page area, so 100% resolves to the sheet - whereas viewport
+    // units are defined against the screen viewport, which Safari takes
+    // literally when printing. Paired with the old overflow:hidden that gave
+    // Safari an empty page.
+    'html, body { margin: 0; padding: 0; height: 100%; }',
+    // No overflow:hidden either. If a browser still resolves the height oddly,
+    // the poster should spill and look wrong rather than be clipped away to
+    // nothing - a bad layout is recoverable, a blank sheet is not.
+    // The SVG's own preserveAspectRatio (xMidYMid meet) letterboxes it, so it
+    // comes out centred and uncropped whichever way round the user prints.
+    'svg { display: block; width: 100%; height: 100%; max-width: 100%; }',
     '</style>',
     '</head>',
     '<body>',
