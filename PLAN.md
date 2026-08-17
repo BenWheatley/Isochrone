@@ -768,7 +768,13 @@ Tasks
 - [x] Non-Berlin fixtures are the norm across the pipeline test suite, not just one token fixture
 - [x] Onboarding steps are documented in `docs/region-data-pipeline.md` (the `docs/locations.md` filename in the original plan didn't end up matching what shipped); legacy Berlin filenames are called out explicitly as a compatibility path, not hidden
 
-**Currently configured regions** (`data_pipeline/regions.json`): berlin, paris, cologne, athens, london, rome, portsmouth, rhode-island, luxembourg-country, singapore, adelaide, nairobi. **Deployed** (present in `web/src/data/locations.json`, i.e. actually fetched/built and shipped): berlin, paris, rome, luxembourg-country, london, cologne, rhode-island.
+**Currently configured regions** (`data_pipeline/regions.json`, 16): berlin, paris, cologne, athens, london, rome, portsmouth, rhode-island, luxembourg-country, singapore, adelaide, nairobi, mexico-city, ottawa, zurich-canton, cyprus. **Deployed** (present in `web/src/data/locations.json`, i.e. actually fetched/built and shipped, 12): berlin, paris, cologne, london, rome, rhode-island, luxembourg-country, singapore, mexico-city, ottawa, zurich-canton, cyprus.
+
+**Configured but not deployed** (4), with the state each one stalled in:
+- `athens` — boundary fetch succeeded; the routing Overpass query returned an empty `elements` array (see `data_pipeline/input/athens-routing.osm.json.failed-*`). The relation selector or admin level likely needs revisiting: `rel(1370736)` is the City of Athens municipality only, which may not intersect the routing query as written.
+- `portsmouth` — routing extract succeeded (7.7 MB); the *boundary* query died on an Overpass dispatcher timeout ("server is probably too busy"). Transient, so worth a straight retry.
+- `adelaide` — never attempted; no input artifacts.
+- `nairobi` — never attempted; no input artifacts.
 
 ---
 
@@ -833,7 +839,7 @@ Tasks
 Estimated time: 45 min
 
 Tasks
-- [ ] Add a feed registry file (`docs/transit_feed_registry.md` or JSON) with per-region metadata: provider, licence URL, update cadence, timezone, and feed format.
+- [x] Add a feed registry file (`docs/transit_feed_registry.md` or JSON) with per-region metadata: provider, licence URL, update cadence, timezone, and feed format — `docs/transit_feed_registry.md` surveys candidate GTFS sources and expected licences for all 16 configured regions, ranks them, and records the one-feed-per-region structural limit. Entries are unverified leads, explicitly flagged as needing confirmation at fetch time; only Berlin's has actually been fetched.
 - [x] Add pipeline config inputs so the same scripts run for any city — done as a per-region optional `transitFeed` block in `regions.json` (`RegionSpec.transit_feed`) plus a `transit`/`gtfs` fetch+build component (`region-data.py fetch|build --components transit`), rather than the originally-sketched `--region`/`--transit-feed`/`--transit-format` CLI flags.
 - [ ] Define licence gate rules (allowed for local processing, allowed for redistribution, attribution requirements) and fail export when redistribution is disallowed.
 
