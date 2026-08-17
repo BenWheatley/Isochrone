@@ -64,5 +64,6 @@
   "export.mode.bike": "cycling",
   "export.mode.car": "driving",
   "export.mode.water": "ferry",
-  "export.mode.transit": "public transport"
+  "export.mode.transit": "public transport",
+  "body.busy.export": "Preparing the vector map..."
 }

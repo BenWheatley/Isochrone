@@ -64,5 +64,6 @@
   "export.mode.bike": "Fahrrad",
   "export.mode.car": "Auto",
   "export.mode.water": "Fähre",
-  "export.mode.transit": "öffentlicher Nahverkehr"
+  "export.mode.transit": "öffentlicher Nahverkehr",
+  "body.busy.export": "Vektorkarte wird vorbereitet ..."
 }

@@ -56,6 +56,8 @@ export function initializeAppShell(doc, options = {}) {
   const controlsMenuSummary = resolvedDocument.getElementById('controls-menu-summary');
   const locationSelect = resolvedDocument.getElementById('location-select');
   const loadingOverlay = resolvedDocument.getElementById('loading');
+  const busyOverlay = resolvedDocument.getElementById('busy-overlay');
+  const busyOverlayText = resolvedDocument.getElementById('busy-overlay-text');
   const loadingText = resolvedDocument.getElementById('loading-text');
   const loadingProgressBar = resolvedDocument.getElementById('loading-progress-bar');
   const routingStatus = resolvedDocument.getElementById('routing-status');
@@ -261,6 +263,8 @@ export function initializeAppShell(doc, options = {}) {
     controlsMenuSummary,
     locationSelect,
     loadingOverlay,
+    busyOverlay,
+    busyOverlayText,
     loadingText,
     loadingProgressBar,
     routingStatus,

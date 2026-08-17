@@ -64,5 +64,6 @@
   "export.mode.bike": "vélo",
   "export.mode.car": "voiture",
   "export.mode.water": "ferry",
-  "export.mode.transit": "transports en commun"
+  "export.mode.transit": "transports en commun",
+  "body.busy.export": "Préparation de la carte vectorielle..."
 }
