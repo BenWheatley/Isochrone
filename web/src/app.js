@@ -57,7 +57,7 @@ import {
   bindUnitSystemControl,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
-  getSelectedTransportModeLabels,
+  getSelectedTransportModeValues,
   getSpeedOptionsFromShell,
   getTransitOptionsFromShell,
   initializeAppShell,
@@ -233,7 +233,7 @@ export {
   bindLocationSelectControl,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
-  getSelectedTransportModeLabels,
+  getSelectedTransportModeValues,
   getSpeedOptionsFromShell,
   getTransitOptionsFromShell,
   populateLocationSelect,
@@ -3541,7 +3541,8 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
     // where the finished document goes.
     const collectCurrentIsochroneScene = () =>
       collectRenderedIsochroneScene(shell, initializedMapData, {
-        modeLabels: getSelectedTransportModeLabels(shell),
+        modeValues: getSelectedTransportModeValues(shell),
+        locale: shell.locale,
         getSnapshotEdgeVertexData: getOrBuildSnapshotEdgeVertexData,
       });
 

@@ -25,10 +25,12 @@ export function collectRenderedIsochroneScene(shell, mapData, options = {}) {
   if (typeof getSnapshotEdgeVertexData !== 'function') {
     throw new Error('options.getSnapshotEdgeVertexData must be a function');
   }
-  const modeLabels = options.modeLabels ?? [];
-  if (!Array.isArray(modeLabels)) {
-    throw new Error('options.modeLabels must be an array when provided');
+  const modeValues = options.modeValues ?? [];
+  if (!Array.isArray(modeValues)) {
+    throw new Error('options.modeValues must be an array when provided');
   }
+  const locale = options.locale ?? shell.locale ?? 'en';
+  const messages = getShellLocaleMessages(shell);
 
   const graphHeader = mapData?.graph?.header ?? null;
   const scaleBar = graphHeader ? computeExportDistanceScaleBar(graphHeader) : null;
@@ -54,11 +56,11 @@ export function collectRenderedIsochroneScene(shell, mapData, options = {}) {
     edgeVertexData,
     cycleMinutes,
     theme: options.theme ?? resolveIsochroneTheme(),
-    title: formatIsochroneExportTitle(
-      mapData?.locationName ?? DEFAULT_LOCATION_NAME,
-      modeLabels,
-    ),
-    messages: getShellLocaleMessages(shell),
+    ...formatIsochroneExportTitle(mapData?.locationName ?? DEFAULT_LOCATION_NAME, modeValues, {
+      messages,
+      locale,
+    }),
+    messages,
     scaleBarLabel: scaleBar?.label ?? shell.distanceScaleLabel?.textContent?.trim() ?? '',
     scaleBarWidthPx: scaleBar?.lineWidthPx ?? 96,
     scaleBarSegmentWidthPx: scaleBar?.segmentWidthPx,

@@ -56,5 +56,13 @@
   "routing.exportedSvg": "SVG exporté : {filename}",
   "routing.exportFailed": "Échec de l'export SVG.",
   "routing.printed": "Envoyé à l’imprimante.",
-  "routing.printFailed": "Échec de l’impression."
+  "routing.printFailed": "Échec de l’impression.",
+  "export.title": "Isochrone : {location}",
+  "export.modes": "Modes de transport : {modes}",
+  "export.unknownLocation": "lieu inconnu",
+  "export.mode.walk": "marche",
+  "export.mode.bike": "vélo",
+  "export.mode.car": "voiture",
+  "export.mode.water": "ferry",
+  "export.mode.transit": "transports en commun"
 }

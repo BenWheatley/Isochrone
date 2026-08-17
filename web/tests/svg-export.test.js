@@ -452,9 +452,51 @@ test('buildSvgExportFilename formats local timestamp deterministically', () => {
   assert.equal(fileName, 'isochrone-20260311-090807.svg');
 });
 
-test('formatIsochroneExportTitle composes location and transport mode labels', () => {
-  const title = formatIsochroneExportTitle('Berlin', ['Walk', 'Bike', 'Car']);
-  assert.equal(title, 'Isochrone of Berlin, by Walk, Bike, Car');
+test('formatIsochroneExportTitle names the mode list rather than running it into the title', () => {
+  // "Isochrone of Berlin, by Walk, Public transit" was not a sentence. Naming
+  // the list keeps it grammatical for every combination, in every language,
+  // without needing a preposition that agrees with each mode noun.
+  assert.deepEqual(formatIsochroneExportTitle('Berlin', ['walk', 'bike', 'car']), {
+    title: 'Isochrone of Berlin',
+    // Conjunction and comma style come from Intl.ListFormat for the locale,
+    // rather than being hand-joined in one language's punctuation.
+    subtitle: 'Travel modes: walking, cycling, and driving',
+  });
+  assert.deepEqual(formatIsochroneExportTitle('Berlin', ['walk', 'transit']), {
+    title: 'Isochrone of Berlin',
+    subtitle: 'Travel modes: walking and public transport',
+  });
+  assert.deepEqual(formatIsochroneExportTitle('Berlin', ['water']), {
+    title: 'Isochrone of Berlin',
+    subtitle: 'Travel modes: ferry',
+  });
+});
+
+test('formatIsochroneExportTitle localises both lines and the list conjunction', () => {
+  const messages = {
+    'export.title': 'Isochrone von {location}',
+    'export.modes': 'Verkehrsmittel: {modes}',
+    'export.mode.walk': 'zu Fuß',
+    'export.mode.transit': 'öffentlicher Nahverkehr',
+  };
+  assert.deepEqual(
+    formatIsochroneExportTitle('Berlin', ['walk', 'transit'], { messages, locale: 'de' }),
+    {
+      title: 'Isochrone von Berlin',
+      subtitle: 'Verkehrsmittel: zu Fuß und öffentlicher Nahverkehr',
+    },
+  );
+});
+
+test('formatIsochroneExportTitle drops the subtitle when no mode is selected', () => {
+  assert.deepEqual(formatIsochroneExportTitle('Berlin', []), {
+    title: 'Isochrone of Berlin',
+    subtitle: '',
+  });
+  assert.deepEqual(formatIsochroneExportTitle('Berlin', ['not-a-mode']), {
+    title: 'Isochrone of Berlin',
+    subtitle: '',
+  });
 });
 
 test('bindSvgExportControl invokes export callback on button click', async () => {

@@ -83,13 +83,19 @@ export function printCurrentRenderedIsochrone(shell, options = {}) {
     theme,
     overlayColours: resolveSvgOverlayColours(shell, { ...options, theme }),
     title: options.title ?? 'Isochrone',
+    subtitle: options.subtitle,
     messages: options.messages ?? null,
     scaleBarLabel: options.scaleBarLabel,
     scaleBarWidthPx: options.scaleBarWidthPx,
     scaleBarSegmentWidthPx: options.scaleBarSegmentWidthPx,
     copyrightNotice: options.copyrightNotice,
   });
-  const printDocument = buildIsochronePrintDocument(svgDocument, { title: options.title });
+  // The browser offers the document title as the default "Save as PDF"
+  // filename, so it carries the modes too, not just the place.
+  const documentTitle = typeof options.subtitle === 'string' && options.subtitle.length > 0
+    ? `${options.title ?? 'Isochrone'} - ${options.subtitle}`
+    : options.title;
+  const printDocument = buildIsochronePrintDocument(svgDocument, { title: documentTitle });
 
   const documentObject = options.documentObject ?? globalThis.document;
   if (

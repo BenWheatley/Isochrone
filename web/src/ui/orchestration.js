@@ -727,11 +727,19 @@ export function restoreDefaultModeIfNoneSelected(shell) {
   return true;
 }
 
-export function getSelectedTransportModeLabels(shell) {
+/**
+ * The canonical values ('walk', 'bike', 'car', 'water', 'transit') of the modes
+ * currently selected.
+ *
+ * Values rather than the on-screen button labels: an export title needs mode
+ * names declined for its own sentence, which are not always the words that fit
+ * a toggle button, so it looks them up under its own locale keys.
+ */
+export function getSelectedTransportModeValues(shell) {
   if (!shell || typeof shell !== 'object' || !Array.isArray(shell.modeCheckboxes)) {
     return [];
   }
-  const labels = [];
+  const values = [];
   for (const checkbox of shell.modeCheckboxes) {
     if (!checkbox?.checked) {
       continue;
@@ -745,18 +753,11 @@ export function getSelectedTransportModeLabels(shell) {
     if (optionRow?.hidden) {
       continue;
     }
-    // The first span in the row is the Material Symbols ligature ("directions_walk");
-    // the readable name is the screen-reader one next to it.
-    const labelSpan = optionRow?.querySelector?.('.sr-only') ?? null;
-    const label =
-      typeof labelSpan?.textContent === 'string' && labelSpan.textContent.trim().length > 0
-        ? labelSpan.textContent.trim()
-        : null;
-    if (label) {
-      labels.push(label);
+    if (typeof checkbox.value === 'string' && checkbox.value.length > 0) {
+      values.push(checkbox.value);
     }
   }
-  return labels;
+  return values;
 }
 
 export function getColourCycleMinutesFromShell(shell) {

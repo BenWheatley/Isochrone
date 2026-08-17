@@ -5,6 +5,7 @@ import {
   timeToColour,
 } from '../render/colour.js';
 import { formatLegendRange, formatLegendRepeatNote } from '../ui/legend-format.js';
+import { formatCommonMessage } from '../ui/localization.js';
 import {
   getAirportFillStyle,
   getBoundaryStrokeStyle,
@@ -340,7 +341,11 @@ export function computeIsochronePosterLayout(mapWidthPx, mapHeightPx, options = 
   const scaleFontSize = unit * 1.35;
   const creditFontSize = unit * 0.95;
 
-  const titleBandHeight = titleFontSize * 1.8;
+  const subtitleFontSize = unit * 1.5;
+  const hasSubtitle = options.hasSubtitle === true;
+  const titleBandHeight = hasSubtitle
+    ? titleFontSize * 1.5 + subtitleFontSize * 1.9
+    : titleFontSize * 1.8;
   const mapX = margin;
   const mapY = margin + titleBandHeight;
 
@@ -366,8 +371,10 @@ export function computeIsochronePosterLayout(mapWidthPx, mapHeightPx, options = 
     legendNoteFontSize,
     scaleFontSize,
     creditFontSize,
+    subtitleFontSize,
     titleBandHeight,
     titleBaselineY: margin + titleFontSize,
+    subtitleBaselineY: margin + titleFontSize * 1.5 + subtitleFontSize,
     mapX,
     mapY,
     mapWidthPx,
@@ -389,12 +396,18 @@ export function computeIsochronePosterLayout(mapWidthPx, mapHeightPx, options = 
   };
 }
 
-function buildSvgTitleOverlayMarkup(layout, title, overlayColours) {
-  return [
+function buildSvgTitleOverlayMarkup(layout, title, subtitle, overlayColours) {
+  const lines = [
     '  <g id="isochrone-title">',
     `    <text x="${formatSvgNumber(layout.margin)}" y="${formatSvgNumber(layout.titleBaselineY)}" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="${formatSvgNumber(layout.titleFontSize)}" font-weight="600" fill="${escapeXml(overlayColours.overlayText)}">${escapeXml(title)}</text>`,
-    '  </g>',
-  ].join('\n');
+  ];
+  if (typeof subtitle === 'string' && subtitle.length > 0) {
+    lines.push(
+      `    <text x="${formatSvgNumber(layout.margin)}" y="${formatSvgNumber(layout.subtitleBaselineY)}" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="${formatSvgNumber(layout.subtitleFontSize)}" fill="${escapeXml(overlayColours.overlayNote)}">${escapeXml(subtitle)}</text>`,
+    );
+  }
+  lines.push('  </g>');
+  return lines.join('\n');
 }
 
 /**
@@ -666,6 +679,7 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
     theme,
   });
   const title = typeof options.title === 'string' ? options.title : 'Isochrone export';
+  const subtitle = typeof options.subtitle === 'string' ? options.subtitle : '';
   const scaleBarLabel =
     typeof options.scaleBarLabel === 'string' && options.scaleBarLabel.trim().length > 0
       ? options.scaleBarLabel.trim()
@@ -683,7 +697,9 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
       ? options.copyrightNotice.trim()
       : 'Map data © OpenStreetMap contributors, available under the Open Database License (ODbL): https://www.openstreetmap.org/copyright';
   const messages = options.messages ?? null;
-  const escapedTitle = escapeXml(title);
+  // The accessible name carries both lines, since the subtitle is what says
+  // which modes the isochrone is for.
+  const escapedTitle = escapeXml(subtitle.length > 0 ? `${title}. ${subtitle}` : title);
   const escapedBackgroundColour = escapeXml(backgroundColour);
 
   if ((options.graphHeader && !options.boundaryPayload) || (!options.graphHeader && options.boundaryPayload)) {
@@ -738,13 +754,16 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
   // Two passes: the sheet's height depends on how many lines the key and the
   // credits wrap to, which in turn depends on the type sizes the first pass
   // establishes. The type sizes never change between passes, only the offsets.
-  const provisionalLayout = computeIsochronePosterLayout(widthPx, heightPx);
+  const provisionalLayout = computeIsochronePosterLayout(widthPx, heightPx, {
+    hasSubtitle: subtitle.length > 0,
+  });
   const creditLines = wrapCopyrightNotice(copyrightNotice, provisionalLayout);
   const legendEntries = buildLegendEntries(cycleMinutes, { messages, theme });
   const legendRows = layOutLegendRows(legendEntries, provisionalLayout);
   const layout = computeIsochronePosterLayout(widthPx, heightPx, {
     creditLineCount: creditLines.length,
     legendRowCount: legendRows.rows.length,
+    hasSubtitle: subtitle.length > 0,
   });
 
   const boundaryMarkup = projectedBoundary
@@ -759,7 +778,7 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
     theme,
     strokeWidth: layout.unit * 0.045,
   });
-  const titleOverlayMarkup = buildSvgTitleOverlayMarkup(layout, title, overlayColours);
+  const titleOverlayMarkup = buildSvgTitleOverlayMarkup(layout, title, subtitle, overlayColours);
   const legendOverlayMarkup = buildSvgLegendOverlayMarkup(layout, legendRows, overlayColours, {
     noteText: formatLegendRepeatNote(cycleMinutes, { messages }),
   });
@@ -809,21 +828,87 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
     .join('\n');
 }
 
-export function formatIsochroneExportTitle(locationName, modeLabels) {
+// Mode names as they read inside the export's subtitle, which is not always how
+// they read on a toggle button - so they get their own locale keys.
+const EXPORT_MODE_NAME_FALLBACKS = {
+  walk: 'walking',
+  bike: 'cycling',
+  car: 'driving',
+  water: 'ferry',
+  transit: 'public transport',
+};
+
+/**
+ * Joins names the way the reader's language does it ("a, b and c" / "a, b und
+ * c" / "a, b et c"), falling back to comma separation where Intl.ListFormat is
+ * unavailable.
+ */
+function formatModeNameList(names, locale) {
+  if (names.length === 0) {
+    return '';
+  }
+  if (typeof Intl?.ListFormat === 'function') {
+    try {
+      return new Intl.ListFormat(locale || 'en', {
+        style: 'long',
+        type: 'conjunction',
+      }).format(names);
+    } catch {
+      // Unknown locale tag - fall through to the plain join.
+    }
+  }
+  return names.join(', ');
+}
+
+/**
+ * Builds the export's heading as a title plus a labelled subtitle, e.g.
+ * "Isochrone of Berlin" / "Travel modes: walking and public transport".
+ *
+ * Naming the list ("Travel modes: ...") rather than running it into the title
+ * ("...by walking, public transit") is what keeps this grammatical across every
+ * language and every combination of modes: the alternative needs a preposition
+ * that agrees with each mode noun, and those differ by mode and by language.
+ */
+export function formatIsochroneExportTitle(locationName, modeValues, options = {}) {
+  const messages = options.messages ?? null;
+  const locale = typeof options.locale === 'string' && options.locale.trim().length > 0
+    ? options.locale.trim()
+    : 'en';
   const normalizedLocation =
     typeof locationName === 'string' && locationName.trim().length > 0
       ? locationName.trim()
-      : 'Unknown location';
-  const normalizedModeLabels = [];
-  if (Array.isArray(modeLabels)) {
-    for (const modeLabel of modeLabels) {
-      if (typeof modeLabel === 'string' && modeLabel.trim().length > 0) {
-        normalizedModeLabels.push(modeLabel.trim());
+      : formatCommonMessage(messages, 'export.unknownLocation', {}, 'an unknown location');
+
+  const names = [];
+  if (Array.isArray(modeValues)) {
+    for (const modeValue of modeValues) {
+      if (typeof modeValue !== 'string') {
+        continue;
       }
+      const fallback = EXPORT_MODE_NAME_FALLBACKS[modeValue];
+      if (fallback === undefined) {
+        continue;
+      }
+      names.push(formatCommonMessage(messages, `export.mode.${modeValue}`, {}, fallback));
     }
   }
-  const modeList = normalizedModeLabels.length > 0 ? normalizedModeLabels.join(', ') : 'none selected';
-  return `Isochrone of ${normalizedLocation}, by ${modeList}`;
+
+  const title = formatCommonMessage(
+    messages,
+    'export.title',
+    { location: normalizedLocation },
+    `Isochrone of ${normalizedLocation}`,
+  );
+  const subtitle = names.length > 0
+    ? formatCommonMessage(
+      messages,
+      'export.modes',
+      { modes: formatModeNameList(names, locale) },
+      `Travel modes: ${formatModeNameList(names, locale)}`,
+    )
+    : '';
+
+  return { title, subtitle };
 }
 
 export function buildSvgExportFilename(now = new Date()) {
@@ -875,6 +960,7 @@ export function exportCurrentRenderedIsochroneSvg(shell, options = {}) {
     theme,
     overlayColours,
     title: options.title ?? 'Isochrone export',
+    subtitle: options.subtitle,
     messages: options.messages ?? null,
     scaleBarLabel: options.scaleBarLabel,
     scaleBarWidthPx: options.scaleBarWidthPx,
