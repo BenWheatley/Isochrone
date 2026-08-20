@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,8 +33,15 @@ BoundaryBuilder = Callable[..., dict[str, Any]]
 GraphBuilder = Callable[..., dict[str, Any]]
 QueryRenderer = Callable[..., str]
 OverpassFetcher = Callable[..., None]
+_SUPPORTED_TRANSIT_ARCHIVE_FORMATS: frozenset[str] = frozenset({"files", "zip"})
 DEFAULT_FETCH_COMPONENTS: frozenset[str] = frozenset({"routing", "boundary"})
 DEFAULT_BUILD_COMPONENTS: frozenset[str] = frozenset({"graph", "boundary"})
+# transfers.txt is optional in the GTFS spec and some feeds omit it; every
+# other table here is load-bearing for the CSA scan.
+REQUIRED_GTFS_TRANSIT_FILE_NAMES: frozenset[str] = frozenset(
+    {"agency", "calendar", "calendar_dates", "routes", "stops", "trips", "stop_times"}
+)
+
 GTFS_TRANSIT_FILE_NAMES: tuple[str, ...] = (
     "agency",
     "calendar",
@@ -54,9 +62,22 @@ class RegionDataHelpFormatter(
 
 
 @dataclass(frozen=True)
+class TransitAttributionSpec:
+    """Who to credit, and under what, wherever the data surfaces."""
+
+    operator: str
+    licence_name: str
+    url: str
+
+
+@dataclass(frozen=True)
 class TransitFeedSpec:
     base_url: str
     licence: str
+    # How the publisher serves the feed. "files" is one CSV per GTFS table
+    # (the Berlin mirror); "zip" is the single archive most agencies publish.
+    archive_format: str = "files"
+    attribution: TransitAttributionSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -227,6 +248,16 @@ def _build_manifest_location_entry(
         entry["localizedNames"] = dict(spec.localized_names)
     if spec.transit_feed is not None and transit_date_range is not None:
         entry["transitDateRange"] = dict(transit_date_range)
+    # Attribution travels with the region rather than living in the UI's locale
+    # files: which operator to credit is a property of the region's feed, not
+    # of the language the page happens to be in.
+    if spec.transit_feed is not None and spec.transit_feed.attribution is not None:
+        attribution = spec.transit_feed.attribution
+        entry["transitAttribution"] = {
+            "operator": attribution.operator,
+            "licenceName": attribution.licence_name,
+            "url": attribution.url,
+        }
     return entry
 
 
@@ -335,6 +366,7 @@ def run_fetch_pipeline(
                 base_url=spec.transit_feed.base_url,
                 output_dir=transit_dir,
                 max_time_seconds=max_time_seconds,
+                archive_format=spec.transit_feed.archive_format,
                 stderr=stderr,
             )
 
@@ -345,8 +377,31 @@ def fetch_gtfs_transit_files(
     output_dir: Path,
     max_time_seconds: int,
     file_names: tuple[str, ...] = GTFS_TRANSIT_FILE_NAMES,
+    archive_format: str = "files",
     stderr: TextIO | None = None,
 ) -> None:
+    """Download a GTFS feed into ``output_dir`` as one ``<table>.txt`` per table.
+
+    Publishers serve GTFS two ways. A few expose the tables individually (the
+    Berlin mirror serves ``<table>.csv``); most publish a single zip, which is
+    what the spec itself describes. Both land in the same layout on disk so the
+    build does not care which it was.
+    """
+    if archive_format not in _SUPPORTED_TRANSIT_ARCHIVE_FORMATS:
+        raise ValueError(
+            f"archive_format must be one of {sorted(_SUPPORTED_TRANSIT_ARCHIVE_FORMATS)}, "
+            f"got {archive_format!r}"
+        )
+    if archive_format == "zip":
+        _fetch_gtfs_transit_zip(
+            base_url=base_url,
+            output_dir=output_dir,
+            max_time_seconds=max_time_seconds,
+            file_names=file_names,
+            stderr=stderr,
+        )
+        return
+
     stderr = stderr or sys.stderr
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -390,6 +445,108 @@ def fetch_gtfs_transit_files(
             temp_output_path.replace(output_path)
         finally:
             temp_output_path.unlink(missing_ok=True)
+
+
+def extract_gtfs_tables_from_archive(
+    *,
+    archive_path: Path,
+    output_dir: Path,
+    file_names: tuple[str, ...] = GTFS_TRANSIT_FILE_NAMES,
+    source_label: str | None = None,
+    stderr: TextIO | None = None,
+) -> tuple[str, ...]:
+    """Unpack the GTFS tables we use out of ``archive_path``.
+
+    Split out from the download so the interesting behaviour - which tables are
+    required, and what a feed missing them should say - is testable without
+    reaching the network.
+    """
+    stderr = stderr or sys.stderr
+    label = source_label or str(archive_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            # Some publishers nest the tables in a folder inside the archive,
+            # so match on the base name rather than the full member path.
+            members = {Path(name).name: name for name in archive.namelist()}
+            # Feeds legitimately omit optional tables (transfers.txt is the
+            # usual one), so a missing member is only fatal when the build
+            # actually needs it. Report the whole set at once, so one run tells
+            # you what a feed has rather than one table per attempt.
+            missing = sorted(
+                file_name
+                for file_name in file_names
+                if f"{file_name}.txt" not in members
+                and file_name in REQUIRED_GTFS_TRANSIT_FILE_NAMES
+            )
+            if missing:
+                raise RuntimeError(
+                    f"GTFS archive at {label} is missing required tables: "
+                    f"{', '.join(missing)}\n"
+                    f"archive contains: {', '.join(sorted(members))}"
+                )
+
+            extracted: list[str] = []
+            for file_name in file_names:
+                member = members.get(f"{file_name}.txt")
+                if member is None:
+                    _log(stderr, f"    {file_name}.txt absent (optional)")
+                    continue
+                output_path = output_dir / f"{file_name}.txt"
+                with archive.open(member) as source, output_path.open("wb") as target:
+                    shutil.copyfileobj(source, target)
+                _log(stderr, f"    {file_name}.txt -> {output_path}")
+                extracted.append(file_name)
+            return tuple(extracted)
+    except zipfile.BadZipFile as error:
+        raise RuntimeError(f"GTFS archive at {label} is not a valid zip file: {error}") from error
+
+
+def _fetch_gtfs_transit_zip(
+    *,
+    base_url: str,
+    output_dir: Path,
+    max_time_seconds: int,
+    file_names: tuple[str, ...],
+    stderr: TextIO | None = None,
+) -> None:
+    stderr = stderr or sys.stderr
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _log(stderr, f"  downloading {base_url} -> {output_dir}")
+
+    with tempfile.TemporaryDirectory(prefix="gtfs-zip-") as scratch_dir:
+        archive_path = Path(scratch_dir) / "gtfs.zip"
+        result = subprocess.run(
+            [
+                "curl",
+                "--show-error",
+                "--fail",
+                "--max-time",
+                str(max_time_seconds),
+                "-L",
+                base_url,
+                "-o",
+                str(archive_path),
+            ],
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"GTFS transit archive download failed for {base_url}\n"
+                f"curl_exit_code={result.returncode}\n"
+                f"curl_stderr={result.stderr.strip()}"
+            )
+
+        extract_gtfs_tables_from_archive(
+            archive_path=archive_path,
+            output_dir=output_dir,
+            file_names=file_names,
+            source_label=base_url,
+            stderr=stderr,
+        )
 
 
 def run_build_pipeline(
@@ -985,9 +1142,36 @@ def _normalize_transit_feed(value: object, *, field_name: str) -> TransitFeedSpe
     base_url = _require_non_empty_string(value.get("baseUrl"), f"{field_name}.baseUrl")
     licence = _require_non_empty_string(value.get("licence"), f"{field_name}.licence")
 
+    archive_format = value.get("archiveFormat", "files")
+    if archive_format not in _SUPPORTED_TRANSIT_ARCHIVE_FORMATS:
+        raise ValueError(
+            f"{field_name}.archiveFormat must be one of "
+            f"{sorted(_SUPPORTED_TRANSIT_ARCHIVE_FORMATS)}, got {archive_format!r}"
+        )
+
     return TransitFeedSpec(
         base_url=base_url.rstrip("/"),
         licence=licence,
+        archive_format=archive_format,
+        attribution=_normalize_transit_attribution(
+            value.get("attribution"), field_name=f"{field_name}.attribution"
+        ),
+    )
+
+
+def _normalize_transit_attribution(
+    value: object, *, field_name: str
+) -> TransitAttributionSpec | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be an object when provided")
+    return TransitAttributionSpec(
+        operator=_require_non_empty_string(value.get("operator"), f"{field_name}.operator"),
+        licence_name=_require_non_empty_string(
+            value.get("licenceName"), f"{field_name}.licenceName"
+        ),
+        url=_require_non_empty_string(value.get("url"), f"{field_name}.url"),
     )
 
 

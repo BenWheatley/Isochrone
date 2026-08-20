@@ -34,13 +34,33 @@ sends no request to Google.
 
 Attribution is shown in the app footer and embedded in every exported SVG.
 
-## VBB public transit data (Berlin only)
+## Public transit data (per region)
 
-- **What:** GTFS stop and connection tables folded into the Berlin routing
-  graph.
+GTFS stop and connection tables, folded into the routing graph of the region
+they belong to. Each feed is licensed on condition of attribution, so each is
+credited separately.
+
+### Berlin
+
 - **Copyright:** © VBB (Verkehrsverbund Berlin-Brandenburg)
 - **Licence:** Creative Commons Attribution 4.0 (CC BY 4.0) —
   <http://www.vbb.de/vbbgtfs>
+- **Note:** fetched via the `vbb-gtfs.jannisr.de` mirror because VBB's own
+  `gtfs.zip` has a reproducibly corrupted `stop_times.txt` entry. VBB remains
+  the licence holder to credit; the mirror is a technical detail.
 
-Attribution is shown in the app footer, and in exported SVGs, whenever a region
-with transit data is loaded.
+### Adelaide
+
+- **Copyright:** © Adelaide Metro — Department for Infrastructure and
+  Transport, South Australia
+- **Licence:** Creative Commons Attribution 4.0 (CC BY 4.0) —
+  <https://data.sa.gov.au/data/dataset/https-gtfs-adelaidemetro-com-au>
+- **Note:** licence confirmed 2026-08-17 against the publisher's own CKAN API
+  (`license_id=cc-by`). The feed covers South Australia state-wide; the build
+  clips it to the region extent.
+
+Attribution is shown in the app footer, and in exported SVGs and printed
+output, whenever a region with transit data is loaded. The operator, licence
+name and link travel with the region in the locations manifest rather than
+being hardcoded, so adding a feed cannot ship uncredited data — a pipeline
+test fails if a configured feed has no attribution block.

@@ -2033,6 +2033,8 @@ export async function initializeMapData(shell, options = {}) {
     const graph = await loadGraphBinary(shell, graphOptions);
     updateTransitControlAvailability(shell, graph.header.nStops > 0, {
       transitDateRange: options.transitDateRange,
+      transitAttribution: options.transitAttribution,
+      messages: getShellLocaleMessages(shell),
     });
     const edgeCostPrecomputeKernel = await edgeCostPrecomputeKernelPromise;
     const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
@@ -3418,6 +3420,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           boundaries: { url: boundaryUrl },
           graph: { url: graphUrl },
           transitDateRange: nextLocation.transitDateRange,
+          transitAttribution: nextLocation.transitAttribution,
         });
         initializedMapData = mapData;
         currentLocationId = nextLocation.id;

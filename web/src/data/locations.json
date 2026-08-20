@@ -8,6 +8,11 @@
       "transitDateRange": {
         "min": "2026-08-04",
         "max": "2026-12-12"
+      },
+      "transitAttribution": {
+        "operator": "VBB (Verkehrsverbund Berlin-Brandenburg)",
+        "licenceName": "Creative Commons Attribution 4.0 (CC BY 4.0)",
+        "url": "http://www.vbb.de/vbbgtfs"
       }
     },
     {

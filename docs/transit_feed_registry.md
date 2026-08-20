@@ -3,20 +3,21 @@
 Candidate GTFS sources for the regions in `data_pipeline/regions.json`, for
 deciding which region gets public transport support next.
 
-**Read the licence column as "where to look and what to expect", not as
-verified fact.** Feed URLs and licence terms change more often than almost
-anything else in this space, and nothing below has been fetched or checked
-against its publisher. Every entry needs confirming at fetch time, the way
-VBB's was for Berlin. The confidence column says how much to trust the row,
-not how good the data is.
+**Except where a row says "verified", read the licence column as "where to
+look and what to expect", not as fact.** Feed URLs and licence terms change
+more often than almost anything else in this space, and the candidate rows
+below have *not* been fetched or checked against their publishers. Confirm at
+fetch time, the way Berlin's and Adelaide's were. The confidence column says
+how much to trust the row, not how good the data is.
 
 Survey date: 2026-08-17.
 
-## Already shipped
+## Configured
 
 | Region | Source | Licence | Notes |
 | --- | --- | --- | --- |
-| berlin | VBB, mirrored via `vbb-gtfs.jannisr.de` | CC BY 4.0 | Mirror used because VBB's own `gtfs.zip` has a reproducibly corrupted `stop_times.txt` entry. VBB remains the licence holder to credit. |
+| berlin | VBB, mirrored via `vbb-gtfs.jannisr.de` | CC BY 4.0 | Mirror used because VBB's own `gtfs.zip` has a reproducibly corrupted `stop_times.txt` entry. VBB remains the licence holder to credit. Served as loose CSVs, hence `archiveFormat: "files"`. |
+| adelaide | Adelaide Metro (Department for Infrastructure and Transport) | CC BY 4.0 — **verified** | Licence confirmed 2026-08-17 against data.sa.gov.au's CKAN API (`license_id=cc-by`). Feed URL from Adelaide Metro's own OpenAPI spec: `/v1/static/latest/google_transit.zip`; guessed paths 403. State-wide feed, clipped to the region like VBB's is to Brandenburg. Configured but **not yet built** — the region itself is still undeployed and its scope is unresolved (see below). |
 
 ## Strong candidates
 
@@ -29,7 +30,6 @@ unambiguous.
 | luxembourg-country | data.public.lu national GTFS | CC0 / CC BY | High |
 | cologne | DELFI / gtfs.de Germany-wide GTFS | CC BY 4.0 | High |
 | ottawa | OC Transpo via open.ottawa.ca | City of Ottawa OGL | High |
-| adelaide | data.sa.gov.au | CC BY 4.0 | High |
 | portsmouth | UK Bus Open Data Service | OGL v3 | High, buses only — rail is a separate feed under separate terms |
 
 ## Workable, with friction
@@ -66,6 +66,22 @@ unambiguous.
    small enough to iterate on in seconds.
 3. **cologne** or **ottawa**, whichever is wanted first — both are single
    authoritative feeds with clear terms.
+
+## Adding a feed
+
+1. Add a `transitFeed` block to the region's entry in `data_pipeline/regions.json`:
+   `baseUrl`, `archiveFormat` (`"zip"` for a single archive, `"files"` for one
+   CSV per table), a free-text `licence` provenance note, and an `attribution`
+   block (`operator`, `licenceName`, `url`). The attribution block is not
+   optional in practice — a pipeline test fails if a configured feed lacks one,
+   because shipping uncredited CC BY data breaches the licence.
+2. `./data_pipeline/region-data.py fetch --only <id> --components transit`
+3. `./data_pipeline/region-data.py build --only <id> --components graph,transit`
+
+The attribution then flows automatically into the locations manifest, the app
+footer, and SVG/print exports. Nothing needs editing in the web app or the
+locale files: the sentence around the credit is translated, but the operator
+name and licence come from the region.
 
 ## Known structural limit
 

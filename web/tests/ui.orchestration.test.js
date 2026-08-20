@@ -8,6 +8,7 @@ import {
   bindPointerButtonInversionControl,
   bindThemeControl,
   getAllowedModeMaskFromShell,
+  applyTransitAttributionToShell,
   getSelectedTransportModeValues,
   getSpeedOptionsFromShell,
   getTransitOptionsFromShell,
@@ -836,4 +837,85 @@ test('getSelectedTransportModeValues skips a checked mode whose row is hidden', 
   });
 
   assert.deepEqual(getSelectedTransportModeValues({ modeCheckboxes: [walk, transit] }), ['walk']);
+});
+
+function createDisclaimerShellStub() {
+  return {
+    routingDisclaimerTransit: { hidden: true },
+    routingDisclaimerTransitText: { textContent: 'stale' },
+    routingDisclaimerTransitLink: {
+      textContent: 'stale',
+      attrs: {},
+      setAttribute(name, value) { this.attrs[name] = value; },
+      removeAttribute(name) { delete this.attrs[name]; },
+    },
+  };
+}
+
+test('applyTransitAttributionToShell credits the region operator, not a baked-in one', () => {
+  const shell = createDisclaimerShellStub();
+
+  applyTransitAttributionToShell(shell, {
+    operator: 'Adelaide Metro — Department for Infrastructure and Transport, South Australia',
+    licenceName: 'Creative Commons Attribution 4.0 (CC BY 4.0)',
+    url: 'https://data.sa.gov.au/data/dataset/https-gtfs-adelaidemetro-com-au',
+  });
+
+  assert.match(shell.routingDisclaimerTransitText.textContent, /Adelaide Metro/);
+  assert.match(shell.routingDisclaimerTransitText.textContent, /CC BY 4\.0/);
+  assert.equal(
+    shell.routingDisclaimerTransitLink.attrs.href,
+    'https://data.sa.gov.au/data/dataset/https-gtfs-adelaidemetro-com-au',
+  );
+});
+
+test('applyTransitAttributionToShell translates the sentence but not the operator', () => {
+  const shell = createDisclaimerShellStub();
+  const messages = {
+    'body.disclaimer.transit':
+      'Nahverkehrsdaten © {operator}, verfügbar unter der Lizenz {licence}:',
+  };
+
+  applyTransitAttributionToShell(
+    shell,
+    {
+      operator: 'VBB (Verkehrsverbund Berlin-Brandenburg)',
+      licenceName: 'Creative Commons Attribution 4.0 (CC BY 4.0)',
+      url: 'http://www.vbb.de/vbbgtfs',
+    },
+    messages,
+  );
+
+  assert.equal(
+    shell.routingDisclaimerTransitText.textContent,
+    'Nahverkehrsdaten © VBB (Verkehrsverbund Berlin-Brandenburg), verfügbar unter der Lizenz '
+    + 'Creative Commons Attribution 4.0 (CC BY 4.0):',
+  );
+});
+
+test('applyTransitAttributionToShell clears the credit when a region has no transit feed', () => {
+  // Switching from Berlin to a region without transit must not leave VBB's
+  // credit on screen attached to somebody else's map.
+  const shell = createDisclaimerShellStub();
+  applyTransitAttributionToShell(shell, {
+    operator: 'VBB', licenceName: 'CC BY 4.0', url: 'http://www.vbb.de/vbbgtfs',
+  });
+  assert.notEqual(shell.routingDisclaimerTransitText.textContent, '');
+
+  assert.equal(applyTransitAttributionToShell(shell, null), false);
+  assert.equal(shell.routingDisclaimerTransitText.textContent, '');
+  assert.equal(shell.routingDisclaimerTransitLink.textContent, '');
+  assert.equal(shell.routingDisclaimerTransitLink.attrs.href, undefined);
+});
+
+test('updateTransitControlAvailability clears the transit credit when data is absent', () => {
+  const shell = createDisclaimerShellStub();
+  updateTransitControlAvailability(shell, false, {
+    transitAttribution: {
+      operator: 'VBB', licenceName: 'CC BY 4.0', url: 'http://www.vbb.de/vbbgtfs',
+    },
+  });
+
+  assert.equal(shell.routingDisclaimerTransit.hidden, true);
+  assert.equal(shell.routingDisclaimerTransitText.textContent, '');
 });
