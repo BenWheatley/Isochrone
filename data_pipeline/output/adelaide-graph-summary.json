@@ -1,0 +1,99 @@
+{
+  "generated_at_utc": "2026-08-20T20:04:16.770933+00:00",
+  "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/adelaide-routing.osm.json",
+  "binary_output": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/output/adelaide-graph.bin",
+  "binary_size_bytes": 29005324,
+  "before_node_count": 681377,
+  "before_edge_count": 1505024,
+  "after_node_count": 220780,
+  "after_edge_count": 578754,
+  "constraint_tag_presence": {
+    "access": 3689,
+    "foot": 7538,
+    "oneway": 21930,
+    "oneway:foot": 0,
+    "bicycle": 9056,
+    "cycleway": 4180,
+    "oneway:bicycle": 81,
+    "motor_vehicle": 879,
+    "vehicle": 5,
+    "sidewalk": 3076,
+    "junction": 2643,
+    "service": 19345,
+    "surface": 70559,
+    "tracktype": 375,
+    "maxspeed": 28579,
+    "maxspeed:forward": 34,
+    "maxspeed:backward": 11,
+    "duration": 0
+  },
+  "constraint_tag_coverage_ratio": {
+    "access": 0.02388676288713197,
+    "foot": 0.048809546934996145,
+    "oneway": 0.14199965034285825,
+    "oneway:foot": 0.0,
+    "bicycle": 0.05863879769744297,
+    "cycleway": 0.027066052824128932,
+    "oneway:bicycle": 0.0005244857126206802,
+    "motor_vehicle": 0.005691641251772567,
+    "vehicle": 3.23756612728815e-05,
+    "sidewalk": 0.0199175068150767,
+    "junction": 0.01711377454884516,
+    "service": 0.12526143346477853,
+    "surface": 0.45687885675064915,
+    "tracktype": 0.0024281745954661126,
+    "maxspeed": 0.18505280470353608,
+    "maxspeed:forward": 0.0002201544966555942,
+    "maxspeed:backward": 7.12264548003393e-05,
+    "duration": 0.0
+  },
+  "edge_mode_mask_counts": {
+    "7": 346372,
+    "1": 189652,
+    "3": 42628,
+    "5": 102
+  },
+  "edge_mode_counts": {
+    "walk": 578754,
+    "bike": 389000,
+    "car": 346474,
+    "water": 0
+  },
+  "edge_mode_coverage_ratio": {
+    "walk": 1.0,
+    "bike": 0.6721335835259886,
+    "car": 0.5986550416930164,
+    "water": 0.0
+  },
+  "transit": {
+    "parsed_stop_count": 7766,
+    "attached_stop_count": 7353,
+    "dropped_stop_count": 413,
+    "total_stop_count_in_feed": 9173,
+    "raw_connection_count": 934003,
+    "date_range": {
+      "min": "2026-08-20",
+      "max": "2026-10-11"
+    },
+    "final_stop_count": 7353,
+    "final_connection_count": 917563
+  },
+  "header": {
+    "magic": "0x49534F43",
+    "version": 2,
+    "flags": 1,
+    "n_nodes": 220780,
+    "n_edges": 578754,
+    "n_stops": 7353,
+    "n_tedges": 917563,
+    "origin_easting": 266953.5357736203,
+    "origin_northing": 6083005.6642737575,
+    "epsg_code": 28354,
+    "grid_width_px": 3590,
+    "grid_height_px": 8905,
+    "pixel_size_m": 10.0,
+    "node_table_offset": 64,
+    "edge_table_offset": 3532544,
+    "stop_table_offset": 10477592
+  }
+}

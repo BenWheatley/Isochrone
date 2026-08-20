@@ -22,24 +22,6 @@
       "boundaryFileName": "paris-district-boundaries-canvas.json"
     },
     {
-      "id": "rome",
-      "name": "Rome",
-      "graphFileName": "rome-graph.bin.gz",
-      "boundaryFileName": "rome-district-boundaries-canvas.json"
-    },
-    {
-      "id": "luxembourg-country",
-      "name": "Luxembourg (country)",
-      "graphFileName": "luxembourg-country-graph.bin.gz",
-      "boundaryFileName": "luxembourg-country-district-boundaries-canvas.json"
-    },
-    {
-      "id": "london",
-      "name": "London",
-      "graphFileName": "london-graph.bin.gz",
-      "boundaryFileName": "london-district-boundaries-canvas.json"
-    },
-    {
       "id": "cologne",
       "name": "Cologne",
       "graphFileName": "cologne-graph.bin.gz",
@@ -49,10 +31,44 @@
       }
     },
     {
+      "id": "athens",
+      "name": "Athens",
+      "graphFileName": "athens-graph.bin.gz",
+      "boundaryFileName": "athens-district-boundaries-canvas.json",
+      "localizedNames": {
+        "de": "Athen",
+        "fr": "Athènes"
+      }
+    },
+    {
+      "id": "london",
+      "name": "London",
+      "graphFileName": "london-graph.bin.gz",
+      "boundaryFileName": "london-district-boundaries-canvas.json"
+    },
+    {
+      "id": "rome",
+      "name": "Rome",
+      "graphFileName": "rome-graph.bin.gz",
+      "boundaryFileName": "rome-district-boundaries-canvas.json"
+    },
+    {
+      "id": "portsmouth",
+      "name": "Portsmouth",
+      "graphFileName": "portsmouth-graph.bin.gz",
+      "boundaryFileName": "portsmouth-district-boundaries-canvas.json"
+    },
+    {
       "id": "rhode-island",
       "name": "Rhode Island",
       "graphFileName": "rhode-island-graph.bin.gz",
       "boundaryFileName": "rhode-island-district-boundaries-canvas.json"
+    },
+    {
+      "id": "luxembourg-country",
+      "name": "Luxembourg (country)",
+      "graphFileName": "luxembourg-country-graph.bin.gz",
+      "boundaryFileName": "luxembourg-country-district-boundaries-canvas.json"
     },
     {
       "id": "singapore",
@@ -63,6 +79,27 @@
         "de": "Singapur",
         "fr": "Singapour"
       }
+    },
+    {
+      "id": "adelaide",
+      "name": "Adelaide",
+      "graphFileName": "adelaide-graph.bin.gz",
+      "boundaryFileName": "adelaide-district-boundaries-canvas.json",
+      "transitDateRange": {
+        "min": "2026-08-20",
+        "max": "2026-10-11"
+      },
+      "transitAttribution": {
+        "operator": "Adelaide Metro — Department for Infrastructure and Transport, South Australia",
+        "licenceName": "Creative Commons Attribution 4.0 (CC BY 4.0)",
+        "url": "https://data.sa.gov.au/data/dataset/https-gtfs-adelaidemetro-com-au"
+      }
+    },
+    {
+      "id": "nairobi",
+      "name": "Nairobi",
+      "graphFileName": "nairobi-graph.bin.gz",
+      "boundaryFileName": "nairobi-district-boundaries-canvas.json"
     },
     {
       "id": "mexico-city",

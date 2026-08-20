@@ -80,6 +80,7 @@
       "graphFileName": "portsmouth-graph.bin.gz",
       "boundaryFileName": "portsmouth-district-boundaries-canvas.json",
       "locationRelation": "rel(127167)[\"name\"=\"Portsmouth\"][\"wikidata\"=\"Q72259\"]",
+      "coastal": true,
       "subdivisionAdminLevel": "10",
       "epsg": 27700
     },
@@ -131,8 +132,9 @@
         },
         "licence": "CC BY 4.0 \u2014 confirmed 2026-08-17 via data.sa.gov.au CKAN (license_id=cc-by, license_url=creativecommons.org/licenses/by/4.0, organization \"Department for Infrastructure and Transport\"). Feed URL taken from Adelaide Metro's own OpenAPI spec; guessed paths return 403. Feed is state-wide South Australia, so the build clips it to the region extent."
       },
-      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q1094063\"]",
-      "subdivisionAdminLevel": "10",
+      "locationRelation": "rel(11381689)[\"wikidata\"=\"Q5112\"]",
+      "subdivisionAdminLevel": "6",
+      "coastal": true,
       "epsg": 28354
     },
     {
