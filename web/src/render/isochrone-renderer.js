@@ -1138,13 +1138,83 @@ void main(void) {
   return renderer;
 }
 
+// Whether WebGL works here, decided once per page rather than per canvas.
+let cachedWebGlRendererSupport = null;
+
+/** Drops a probe's GPU context instead of waiting for garbage collection. */
+function releaseProbeCanvasContext(probeCanvas) {
+  if (!probeCanvas || typeof probeCanvas.getContext !== 'function') {
+    return;
+  }
+  try {
+    const gl = probeCanvas.getContext('webgl2') ?? probeCanvas.getContext('webgl');
+    gl?.getExtension?.('WEBGL_lose_context')?.loseContext?.();
+  } catch {
+    // Nothing to release, or the context is already gone.
+  }
+}
+
+/**
+ * Tests the WebGL renderer on a throwaway canvas.
+ *
+ * Handing a canvas to WebGL is irreversible: from then on getContext('2d')
+ * returns null on that element forever. So if the WebGL build is attempted on
+ * the real canvas and fails partway - after the context exists but before the
+ * shaders, buffers and textures are all in place - the 2D fallback cannot run
+ * either, and the canvas is left unusable by both renderers. Deciding on a
+ * disposable canvas keeps the real one clean for whichever renderer wins.
+ */
+function detectWebGlRendererSupport(canvas, options = {}) {
+  if (cachedWebGlRendererSupport !== null) {
+    return cachedWebGlRendererSupport;
+  }
+  const documentObject = canvas?.ownerDocument ?? globalThis.document ?? null;
+  if (!documentObject || typeof documentObject.createElement !== 'function') {
+    // Nowhere to probe (a test double, say). Assume WebGL and let the caller
+    // handle failure, which is the behaviour this replaced.
+    return true;
+  }
+
+  let probeCanvas = null;
+  try {
+    probeCanvas = documentObject.createElement('canvas');
+    probeCanvas.width = 1;
+    probeCanvas.height = 1;
+    cachedWebGlRendererSupport = createWebGlIsochroneRenderer(probeCanvas, options) !== null;
+  } catch (error) {
+    console.warn('WebGL renderer unavailable; using the 2D canvas renderer.', error);
+    cachedWebGlRendererSupport = false;
+  } finally {
+    releaseProbeCanvasContext(probeCanvas);
+  }
+  return cachedWebGlRendererSupport;
+}
+
+export function resetWebGlRendererSupportCache() {
+  cachedWebGlRendererSupport = null;
+}
+
 export function createIsochroneRenderer(canvas, options = {}) {
+  if (!detectWebGlRendererSupport(canvas, options)) {
+    return createCanvas2dIsochroneRenderer(canvas);
+  }
+
   try {
     const webglRenderer = createWebGlIsochroneRenderer(canvas, options);
+    // A null return means no context was ever attached, so the canvas is still
+    // clean and 2D remains available - unlike the throwing case below.
     return webglRenderer ?? createCanvas2dIsochroneRenderer(canvas);
   } catch (error) {
-    console.warn('WebGL renderer initialization failed; falling back to 2D canvas renderer.', error);
-    return createCanvas2dIsochroneRenderer(canvas);
+    // The probe succeeded, so this is not a missing-capability problem, and
+    // the real canvas is now WebGL-bound with no way back to 2D. Report what
+    // actually broke rather than the 2D context error that used to surface
+    // here and hid it.
+    throw new Error(
+      `WebGL renderer initialization failed on the target canvas after probing successfully: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      { cause: error },
+    );
   }
 }
 
