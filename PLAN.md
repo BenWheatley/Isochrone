@@ -770,11 +770,11 @@ Tasks
 
 **Currently configured regions** (`data_pipeline/regions.json`, 16): berlin, paris, cologne, athens, london, rome, portsmouth, rhode-island, luxembourg-country, singapore, adelaide, nairobi, mexico-city, ottawa, zurich-canton, cyprus. **Deployed** (present in `web/src/data/locations.json`, i.e. actually fetched/built and shipped, 12): berlin, paris, cologne, london, rome, rhode-island, luxembourg-country, singapore, mexico-city, ottawa, zurich-canton, cyprus.
 
-**Configured but not deployed** (4), with the state each one stalled in:
-- `athens` — boundary fetch succeeded; the routing Overpass query returned an empty `elements` array (see `data_pipeline/input/athens-routing.osm.json.failed-*`). The relation selector or admin level likely needs revisiting: `rel(1370736)` is the City of Athens municipality only, which may not intersect the routing query as written.
-- `portsmouth` — routing extract succeeded (7.7 MB); the *boundary* query died on an Overpass dispatcher timeout ("server is probably too busy"). Transient, so worth a straight retry.
-- `adelaide` — never attempted; no input artifacts.
-- `nairobi` — never attempted; no input artifacts.
+All 16 configured regions are deployed as of 2026-08-20. The last four were resolved as follows:
+- `athens` — the routing query had been returning zero elements because the selector filtered on `name="Athens"`/`Q1524`, but `rel(1370736)` carries `name="Δήμος Αθηναίων"`/`Q1224979`. Corrected; the fixed selector returns 73,846 elements. Note the relation is the *municipality* (9 x 10 km), not the Athens urban area.
+- `portsmouth` — the earlier boundary failure was a transient Overpass dispatcher timeout and succeeded on retry. Its grid is 206 x 248 km because its ferries reach the Isle of Wight, France and the Channel Islands; the viewport still frames the city, which is what decoupling the viewport from the grid (12.x) was for.
+- `adelaide` — rescoped from the CBD council (Q1094063, 4 x 5 km) to metropolitan Adelaide (`rel(11381689)`, Q5112, 38 x 86 km), and built with its CC BY 4.0 GTFS folded in.
+- `nairobi` — built; 83,143 nodes over 50 x 32 km.
 
 ---
 

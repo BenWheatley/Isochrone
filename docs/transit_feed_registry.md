@@ -17,7 +17,7 @@ Survey date: 2026-08-17.
 | Region | Source | Licence | Notes |
 | --- | --- | --- | --- |
 | berlin | VBB, mirrored via `vbb-gtfs.jannisr.de` | CC BY 4.0 | Mirror used because VBB's own `gtfs.zip` has a reproducibly corrupted `stop_times.txt` entry. VBB remains the licence holder to credit. Served as loose CSVs, hence `archiveFormat: "files"`. |
-| adelaide | Adelaide Metro (Department for Infrastructure and Transport) | CC BY 4.0 — **verified** | Licence confirmed 2026-08-17 against data.sa.gov.au's CKAN API (`license_id=cc-by`). Feed URL from Adelaide Metro's own OpenAPI spec: `/v1/static/latest/google_transit.zip`; guessed paths 403. State-wide feed, clipped to the region like VBB's is to Brandenburg. Configured but **not yet built** — the region itself is still undeployed and its scope is unresolved (see below). |
+| adelaide | Adelaide Metro (Department for Infrastructure and Transport) | CC BY 4.0 — **verified** | Licence confirmed 2026-08-17 against data.sa.gov.au's CKAN API (`license_id=cc-by`). Feed URL from Adelaide Metro's own OpenAPI spec: `/v1/static/latest/google_transit.zip`; guessed paths 403. State-wide feed, clipped to the region like VBB's is to Brandenburg. **Built and deployed** 2026-08-20: 7,353 stops attached, 917,563 connections. The region was rescoped from the CBD council (Q1094063, 4x5 km) to metropolitan Adelaide (rel(11381689), Q5112, 38x86 km), since a metro-wide feed on a CBD-sized region made no sense. |
 
 ## Strong candidates
 
