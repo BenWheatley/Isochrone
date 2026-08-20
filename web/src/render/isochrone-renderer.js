@@ -209,11 +209,18 @@ export function createWebGlIsochroneRenderer(canvas, options = {}) {
     preserveDrawingBuffer: false,
     ...options.contextAttributes,
   };
-  const contextWebGl2 = canvas.getContext('webgl2', contextAttributes);
-  const contextWebGl = canvas.getContext('webgl', contextAttributes);
-  const gl = contextWebGl2 ?? contextWebGl;
+  // Ask for the second context type only if the first declined. Requesting
+  // both unconditionally spends a context request that cannot succeed - a
+  // canvas already bound to webgl2 will never hand out webgl - and Safari
+  // reports that redundant request as "WebGL: context lost".
+  const gl = canvas.getContext('webgl2', contextAttributes)
+    ?? canvas.getContext('webgl', contextAttributes);
   if (!gl) {
     return null;
+  }
+
+  if (typeof options.onContext === 'function') {
+    options.onContext(gl);
   }
 
   const isWebGl2 =
@@ -1141,16 +1148,19 @@ void main(void) {
 // Whether WebGL works here, decided once per page rather than per canvas.
 let cachedWebGlRendererSupport = null;
 
-/** Drops a probe's GPU context instead of waiting for garbage collection. */
-function releaseProbeCanvasContext(probeCanvas) {
-  if (!probeCanvas || typeof probeCanvas.getContext !== 'function') {
-    return;
-  }
+/**
+ * Drops a probe's GPU context instead of waiting for garbage collection.
+ *
+ * Takes the context the probe already obtained rather than asking the canvas
+ * for it again: on a probe that failed there is no context to re-request, so
+ * asking would *create* one and leave it live - the opposite of releasing, and
+ * worse on a browser that is already short of contexts.
+ */
+function releaseProbeContext(probeContext) {
   try {
-    const gl = probeCanvas.getContext('webgl2') ?? probeCanvas.getContext('webgl');
-    gl?.getExtension?.('WEBGL_lose_context')?.loseContext?.();
+    probeContext?.getExtension?.('WEBGL_lose_context')?.loseContext?.();
   } catch {
-    // Nothing to release, or the context is already gone.
+    // Already gone, or the extension is unavailable.
   }
 }
 
@@ -1176,16 +1186,40 @@ function detectWebGlRendererSupport(canvas, options = {}) {
   }
 
   let probeCanvas = null;
+  let probeContext = null;
   try {
     probeCanvas = documentObject.createElement('canvas');
     probeCanvas.width = 1;
     probeCanvas.height = 1;
-    cachedWebGlRendererSupport = createWebGlIsochroneRenderer(probeCanvas, options) !== null;
+    // Safari can lose a context the moment it is created on a canvas that is
+    // not in the document, which would make the probe report no WebGL support
+    // and drop the whole browser to the 2D renderer for no reason. Attaching
+    // it (invisibly, 1x1) while the probe runs keeps the test honest.
+    if (typeof probeCanvas.setAttribute === 'function') {
+      probeCanvas.setAttribute(
+        'style',
+        'position:fixed;left:-1px;top:-1px;width:1px;height:1px;opacity:0;pointer-events:none;',
+      );
+      probeCanvas.setAttribute('aria-hidden', 'true');
+    }
+    documentObject.body?.appendChild?.(probeCanvas);
+
+    const probeRenderer = createWebGlIsochroneRenderer(probeCanvas, {
+      ...options,
+      onContext(gl) {
+        probeContext = gl;
+      },
+    });
+    // A context that reports itself lost is not usable, however well the
+    // construction went.
+    cachedWebGlRendererSupport =
+      probeRenderer !== null && probeContext?.isContextLost?.() !== true;
   } catch (error) {
     console.warn('WebGL renderer unavailable; using the 2D canvas renderer.', error);
     cachedWebGlRendererSupport = false;
   } finally {
-    releaseProbeCanvasContext(probeCanvas);
+    releaseProbeContext(probeContext);
+    probeCanvas?.remove?.();
   }
   return cachedWebGlRendererSupport;
 }
