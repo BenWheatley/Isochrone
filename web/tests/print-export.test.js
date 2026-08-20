@@ -90,8 +90,22 @@ test('buildIsochronePrintDocument inlines the SVG without its XML declaration', 
   assert.ok(!printDocument.includes('<?xml'));
   assert.ok(printDocument.includes('<svg><title>x</title></svg>'));
   assert.ok(printDocument.includes('<title>Berlin &amp; walking</title>'));
-  // No page margins: the SVG carries its own title, legend, scale and credits.
-  assert.ok(printDocument.includes('@page { size: landscape; margin: 0; }'));
+  // No page margins: the poster carries its own margin, title, key, scale
+  // and credits, so it should fill the sheet edge to edge.
+  assert.ok(printDocument.includes('@page { margin: 0; }'));
+});
+
+test('print stylesheet sizes against the page box, not the screen viewport', () => {
+  const printDocument = buildIsochronePrintDocument('<svg></svg>');
+
+  // vh/vw are defined against the screen viewport even when printing, which
+  // Safari takes literally; percentages resolve against the page area, which
+  // is the sheet. Combined with overflow:hidden the old rules gave Safari a
+  // blank page.
+  assert.ok(!printDocument.includes('vh'));
+  assert.ok(!printDocument.includes('vw'));
+  assert.ok(!printDocument.includes('overflow: hidden'));
+  assert.ok(printDocument.includes('html, body { margin: 0; padding: 0; height: 100%; }'));
 });
 
 test('printCurrentRenderedIsochrone prints the vector document, not the canvas', () => {
@@ -112,7 +126,7 @@ test('printCurrentRenderedIsochrone prints the vector document, not the canvas',
   assert.equal(iframe.printCount, 1);
   assert.equal(documentObject.appended.length, 1);
   assert.ok(frameDocument.written.includes('<svg'));
-  assert.ok(result.svgDocument.includes('x2="3"'));
+  assert.ok(result.svgDocument.includes('d="M1 2L3 4"'));
   // The overlay word-wraps, so match a single word rather than the phrase.
   assert.ok(result.printDocument.includes('OpenStreetMap'));
 

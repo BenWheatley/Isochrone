@@ -5,6 +5,7 @@ import {
   timeToColour,
 } from '../render/colour.js';
 import { formatLegendRange, formatLegendRepeatNote } from '../ui/legend-format.js';
+import { formatCommonMessage } from '../ui/localization.js';
 import {
   getAirportFillStyle,
   getBoundaryStrokeStyle,
@@ -303,71 +304,202 @@ export function resolveSvgOverlayColours(shell, options = {}) {
   };
 }
 
-function buildSvgTitleOverlayMarkup(widthPx, title, overlayColours) {
-  void widthPx;
-  return [
-    '  <g id="isochrone-title">',
-    `    <text x="12" y="24" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="15" fill="${escapeXml(overlayColours.overlayText)}">${escapeXml(title)}</text>`,
-    '  </g>',
-  ].join('\n');
+// Rough advance width of the sans-serif stack, as a fraction of font size.
+// Only used to decide where to wrap, so it errs narrow: over-wrapping costs a
+// line, under-wrapping would run text off the page.
+const APPROX_GLYPH_WIDTH_RATIO = 0.55;
+
+function estimateTextWidth(text, fontSize) {
+  return text.length * fontSize * APPROX_GLYPH_WIDTH_RATIO;
 }
 
-function buildSvgLegendOverlayMarkup(widthPx, cycleMinutes, overlayColours, options = {}) {
-  const entries = buildLegendEntries(cycleMinutes, {
-    messages: options.messages ?? null,
-    theme: options.theme,
-  });
-  const rowHeight = 17;
-  const boxWidth = 220;
-  const boxHeight = 16 + entries.length * rowHeight + 20;
-  const boxX = Math.max(12, widthPx - boxWidth - 12);
-  const boxY = 12;
+/**
+ * Geometry for the exported sheet, laid out as a poster: a title band, the map
+ * in a frame, then a footer carrying the scale bar and the data credits.
+ *
+ * Every measurement derives from the map's own pixel size, so the proportions
+ * hold for any region and at any print size - the SVG scales as one unit, and
+ * the type scales with it instead of staying at screen sizes and shrinking to
+ * nothing on paper.
+ */
+export function computeIsochronePosterLayout(mapWidthPx, mapHeightPx, options = {}) {
+  assertPositiveInteger(mapWidthPx, 'mapWidthPx');
+  assertPositiveInteger(mapHeightPx, 'mapHeightPx');
+  const creditLineCount = Number.isInteger(options.creditLineCount) && options.creditLineCount > 0
+    ? options.creditLineCount
+    : 0;
+  const legendRowCount = Number.isInteger(options.legendRowCount) && options.legendRowCount > 0
+    ? options.legendRowCount
+    : 1;
 
+  // One typographic unit, ~1.1% of the sheet's long edge.
+  const unit = Math.max(4, Math.max(mapWidthPx, mapHeightPx) / 90);
+  const margin = unit * 2;
+  const titleFontSize = unit * 2.6;
+  const legendFontSize = unit * 1.5;
+  const legendNoteFontSize = unit * 1.2;
+  const scaleFontSize = unit * 1.35;
+  const creditFontSize = unit * 0.95;
+
+  const subtitleFontSize = unit * 1.5;
+  const hasSubtitle = options.hasSubtitle === true;
+  const titleBandHeight = hasSubtitle
+    ? titleFontSize * 1.5 + subtitleFontSize * 1.9
+    : titleFontSize * 1.8;
+  const mapX = margin;
+  const mapY = margin + titleBandHeight;
+
+  const scaleBarHeight = unit * 0.9;
+  const scaleRowHeight = Math.max(scaleBarHeight, scaleFontSize) * 1.6;
+  // Row pitch comes from the font, so substituting a different sans-serif at
+  // print time cannot collapse rows into each other.
+  const legendRowHeight = legendFontSize * 1.7;
+  const creditLineHeight = creditFontSize * 1.4;
+
+  // Footer stack, each band on its own line so nothing can collide: the key,
+  // then the scale bar, then the data credits.
+  const legendY = mapY + mapHeightPx + unit * 1.8;
+  const legendNoteBaselineY = legendY + legendRowCount * legendRowHeight + legendNoteFontSize;
+  const scaleY = legendNoteBaselineY + unit * 1.2;
+  const creditFirstBaselineY = scaleY + scaleRowHeight + creditFontSize;
+
+  return {
+    unit,
+    margin,
+    titleFontSize,
+    legendFontSize,
+    legendNoteFontSize,
+    scaleFontSize,
+    creditFontSize,
+    subtitleFontSize,
+    titleBandHeight,
+    titleBaselineY: margin + titleFontSize,
+    subtitleBaselineY: margin + titleFontSize * 1.5 + subtitleFontSize,
+    mapX,
+    mapY,
+    mapWidthPx,
+    mapHeightPx,
+    legendY,
+    legendRowHeight,
+    legendNoteBaselineY,
+    scaleBarHeight,
+    scaleRowHeight,
+    scaleY,
+    creditLineHeight,
+    creditFirstBaselineY,
+    posterWidthPx: Math.ceil(mapWidthPx + margin * 2),
+    posterHeightPx: Math.ceil(
+      creditLineCount > 0
+        ? creditFirstBaselineY + (creditLineCount - 1) * creditLineHeight + margin
+        : scaleY + scaleRowHeight + margin,
+    ),
+  };
+}
+
+function buildSvgTitleOverlayMarkup(layout, title, subtitle, overlayColours) {
   const lines = [
-    '  <g id="isochrone-legend">',
+    '  <g id="isochrone-title">',
+    `    <text x="${formatSvgNumber(layout.margin)}" y="${formatSvgNumber(layout.titleBaselineY)}" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="${formatSvgNumber(layout.titleFontSize)}" font-weight="600" fill="${escapeXml(overlayColours.overlayText)}">${escapeXml(title)}</text>`,
   ];
-
-  let textY = boxY + 10;
-  for (const entry of entries) {
+  if (typeof subtitle === 'string' && subtitle.length > 0) {
     lines.push(
-      `    <rect x="${formatSvgNumber(boxX + 10)}" y="${formatSvgNumber(textY - 10)}" width="11" height="11" rx="2" fill="rgb(${entry.colour[0]}, ${entry.colour[1]}, ${entry.colour[2]})" />`,
+      `    <text x="${formatSvgNumber(layout.margin)}" y="${formatSvgNumber(layout.subtitleBaselineY)}" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="${formatSvgNumber(layout.subtitleFontSize)}" fill="${escapeXml(overlayColours.overlayNote)}">${escapeXml(subtitle)}</text>`,
     );
-    lines.push(
-      `    <text x="${formatSvgNumber(boxX + 28)}" y="${formatSvgNumber(textY)}" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="11" fill="${escapeXml(overlayColours.overlayText)}">${escapeXml(entry.label)}</text>`,
-    );
-    textY += rowHeight;
   }
-  lines.push(
-    `    <text x="${formatSvgNumber(boxX + 10)}" y="${formatSvgNumber(boxY + boxHeight - 7)}" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="10" fill="${escapeXml(overlayColours.overlayNote)}">${escapeXml(formatLegendRepeatNote(cycleMinutes, { messages: options.messages ?? null }))}</text>`,
-  );
+  lines.push('  </g>');
+  return lines.join('\n');
+}
+
+/**
+ * Packs the colour key into rows of swatch+label pairs that fit the poster's
+ * content width. Laying it out along the footer rather than as a panel floating
+ * over the map keeps the export free of the translucent on-screen chrome, and
+ * means the key can never sit on top of the isochrone it explains.
+ */
+function layOutLegendRows(entries, layout) {
+  const swatchSize = layout.legendFontSize;
+  const swatchGap = layout.unit * 0.7;
+  const itemGap = layout.unit * 2.4;
+
+  const items = entries.map((entry) => ({
+    entry,
+    width: swatchSize + swatchGap + estimateTextWidth(entry.label, layout.legendFontSize),
+  }));
+
+  const rows = [];
+  let currentRow = [];
+  let currentWidth = 0;
+  for (const item of items) {
+    const advance = currentRow.length === 0 ? item.width : itemGap + item.width;
+    if (currentRow.length > 0 && currentWidth + advance > layout.mapWidthPx) {
+      rows.push(currentRow);
+      currentRow = [item];
+      currentWidth = item.width;
+      continue;
+    }
+    currentRow.push(item);
+    currentWidth += advance;
+  }
+  if (currentRow.length > 0) {
+    rows.push(currentRow);
+  }
+  return { rows, swatchSize, swatchGap, itemGap };
+}
+
+function buildSvgLegendOverlayMarkup(layout, legendRows, overlayColours, options = {}) {
+  const { rows, swatchSize, swatchGap, itemGap } = legendRows;
+  const noteText = options.noteText ?? '';
+
+  const lines = ['  <g id="isochrone-legend">'];
+  let rowTop = layout.legendY;
+  for (const row of rows) {
+    let itemX = layout.mapX;
+    const centreY = rowTop + layout.legendRowHeight / 2;
+    for (const item of row) {
+      lines.push(
+        `    <rect x="${formatSvgNumber(itemX)}" y="${formatSvgNumber(centreY - swatchSize / 2)}" width="${formatSvgNumber(swatchSize)}" height="${formatSvgNumber(swatchSize)}" rx="${formatSvgNumber(swatchSize * 0.18)}" fill="rgb(${item.entry.colour[0]}, ${item.entry.colour[1]}, ${item.entry.colour[2]})" />`,
+      );
+      lines.push(
+        `    <text x="${formatSvgNumber(itemX + swatchSize + swatchGap)}" y="${formatSvgNumber(centreY)}" dominant-baseline="central" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="${formatSvgNumber(layout.legendFontSize)}" fill="${escapeXml(overlayColours.overlayText)}">${escapeXml(item.entry.label)}</text>`,
+      );
+      itemX += item.width + itemGap;
+    }
+    rowTop += layout.legendRowHeight;
+  }
+  if (noteText.length > 0) {
+    lines.push(
+      `    <text x="${formatSvgNumber(layout.mapX)}" y="${formatSvgNumber(layout.legendNoteBaselineY)}" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="${formatSvgNumber(layout.legendNoteFontSize)}" fill="${escapeXml(overlayColours.overlayNote)}">${escapeXml(noteText)}</text>`,
+    );
+  }
   lines.push('  </g>');
   return lines.join('\n');
 }
 
 function buildSvgScaleOverlayMarkup(
-  heightPx,
+  layout,
   scaleBarLabel,
   scaleBarWidthPx,
   scaleBarSegmentWidthPx,
   overlayColours,
 ) {
-  const clampedScaleWidthPx = Math.max(24, Math.round(scaleBarWidthPx));
+  // The scale bar arrives measured in map pixels, which is exactly the unit the
+  // map group is drawn in, so it needs no rescaling - only repositioning into
+  // the footer band.
+  const clampedScaleWidthPx = Math.max(layout.unit * 2, scaleBarWidthPx);
   const clampedSegmentWidthPx = Math.max(
-    4,
-    Math.min(clampedScaleWidthPx, Math.round(scaleBarSegmentWidthPx)),
+    layout.unit * 0.4,
+    Math.min(clampedScaleWidthPx, scaleBarSegmentWidthPx),
   );
-  const boxWidth = Math.max(120, clampedScaleWidthPx + 24);
-  const boxX = 12;
-  const lineX = boxX;
-  const lineY = Math.max(12, heightPx - 30);
-  const lineHeight = 5;
+  const lineX = layout.mapX;
+  const barHeight = layout.scaleBarHeight;
+  const lineY = layout.scaleY + (layout.scaleRowHeight - barHeight) / 2;
   const clipId = 'isochrone-scale-pattern-clip';
-  const labelY = Math.min(heightPx - 8, lineY + 19);
+  const cornerRadius = barHeight / 2;
 
   const lines = [
     '  <g id="isochrone-scale">',
-    `    <defs><clipPath id="${clipId}"><rect x="${lineX}" y="${formatSvgNumber(lineY)}" width="${clampedScaleWidthPx}" height="${lineHeight}" rx="3" /></clipPath></defs>`,
-    `    <rect x="${lineX}" y="${formatSvgNumber(lineY)}" width="${clampedScaleWidthPx}" height="${lineHeight}" rx="3" fill="${escapeXml(overlayColours.scaleLineBackground)}" stroke="${escapeXml(overlayColours.scaleLineBorder)}" />`,
+    `    <defs><clipPath id="${clipId}"><rect x="${formatSvgNumber(lineX)}" y="${formatSvgNumber(lineY)}" width="${formatSvgNumber(clampedScaleWidthPx)}" height="${formatSvgNumber(barHeight)}" rx="${formatSvgNumber(cornerRadius)}" /></clipPath></defs>`,
+    `    <rect x="${formatSvgNumber(lineX)}" y="${formatSvgNumber(lineY)}" width="${formatSvgNumber(clampedScaleWidthPx)}" height="${formatSvgNumber(barHeight)}" rx="${formatSvgNumber(cornerRadius)}" fill="${escapeXml(overlayColours.scaleLineBackground)}" stroke="${escapeXml(overlayColours.scaleLineBorder)}" stroke-width="${formatSvgNumber(Math.max(0.5, layout.unit * 0.08))}" />`,
     `    <g id="isochrone-scale-pattern" clip-path="url(#${clipId})">`,
   ];
 
@@ -378,36 +510,39 @@ function buildSvgScaleOverlayMarkup(
   ) {
     const segmentWidth = Math.min(clampedSegmentWidthPx, lineX + clampedScaleWidthPx - segmentX);
     lines.push(
-      `      <rect x="${formatSvgNumber(segmentX)}" y="${formatSvgNumber(lineY)}" width="${formatSvgNumber(segmentWidth)}" height="${lineHeight}" fill="${escapeXml(overlayColours.scaleLineAlternate)}" />`,
+      `      <rect x="${formatSvgNumber(segmentX)}" y="${formatSvgNumber(lineY)}" width="${formatSvgNumber(segmentWidth)}" height="${formatSvgNumber(barHeight)}" fill="${escapeXml(overlayColours.scaleLineAlternate)}" />`,
     );
   }
 
   lines.push('    </g>');
+  // Label sits beside the bar, not under it: the credits occupy the line below.
   lines.push(
-    `    <text x="${formatSvgNumber(boxX + boxWidth / 2)}" y="${formatSvgNumber(labelY)}" text-anchor="middle" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="11" fill="${escapeXml(overlayColours.overlayText)}">${escapeXml(scaleBarLabel)}</text>`,
+    `    <text x="${formatSvgNumber(lineX + clampedScaleWidthPx + layout.unit)}" y="${formatSvgNumber(lineY + barHeight / 2)}" dominant-baseline="central" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="${formatSvgNumber(layout.scaleFontSize)}" fill="${escapeXml(overlayColours.overlayText)}">${escapeXml(scaleBarLabel)}</text>`,
   );
   lines.push('  </g>');
   return lines.join('\n');
 }
 
-function buildSvgCopyrightOverlayMarkup(widthPx, heightPx, copyrightNotice, overlayColours) {
-  const maxCharsPerLine = Math.max(12, Math.floor((widthPx - 24) / 5.5));
-  const wrappedLines = wrapTextByWords(copyrightNotice, maxCharsPerLine, Number.POSITIVE_INFINITY);
+function wrapCopyrightNotice(copyrightNotice, layout) {
+  const maxCharsPerLine = Math.max(
+    16,
+    Math.floor(layout.mapWidthPx / (layout.creditFontSize * APPROX_GLYPH_WIDTH_RATIO)),
+  );
+  return wrapTextByWords(copyrightNotice, maxCharsPerLine, Number.POSITIVE_INFINITY);
+}
+
+function buildSvgCopyrightOverlayMarkup(layout, wrappedLines, overlayColours) {
   if (wrappedLines.length === 0) {
     return '';
   }
 
-  const lineHeight = 12;
-  const textX = Math.max(12, widthPx - 12);
-  const firstTextY = Math.max(12, heightPx - 12 - (wrappedLines.length - 1) * lineHeight);
-
   const lines = ['  <g id="isochrone-copyright">'];
-  let textY = firstTextY;
+  let textY = layout.creditFirstBaselineY;
   for (const line of wrappedLines) {
     lines.push(
-      `    <text x="${formatSvgNumber(textX)}" y="${formatSvgNumber(textY)}" text-anchor="end" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="10" fill="${escapeXml(overlayColours.overlayNote)}">${escapeXml(line)}</text>`,
+      `    <text x="${formatSvgNumber(layout.mapX)}" y="${formatSvgNumber(textY)}" font-family="${escapeXml(SVG_FONT_STACK)}" font-size="${formatSvgNumber(layout.creditFontSize)}" fill="${escapeXml(overlayColours.overlayNote)}">${escapeXml(line)}</text>`,
     );
-    textY += lineHeight;
+    textY += layout.creditLineHeight;
   }
   lines.push('  </g>');
   return lines.join('\n');
@@ -442,7 +577,7 @@ function buildSvgFilledPolygonMarkup(features, fillColour, groupId) {
   return [`  <g id="${groupId}">`, ...pathMarkup, '  </g>'].join('\n');
 }
 
-function buildSvgStrokedLineMarkup(features, resolveStrokeColour, groupId) {
+function buildSvgStrokedLineMarkup(features, resolveStrokeColour, groupId, strokeWidth = 1.2) {
   const pathMarkup = [];
   for (const feature of features) {
     const strokeColour = resolveStrokeColour(feature);
@@ -451,7 +586,7 @@ function buildSvgStrokedLineMarkup(features, resolveStrokeColour, groupId) {
         continue;
       }
       pathMarkup.push(
-        `    <path d="${buildSvgPathCommands(path)}" fill="none" stroke="${escapeXml(strokeColour)}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />`,
+        `    <path d="${buildSvgPathCommands(path)}" fill="none" stroke="${escapeXml(strokeColour)}" stroke-width="${formatSvgNumber(strokeWidth)}" stroke-linecap="round" stroke-linejoin="round" />`,
       );
     }
   }
@@ -463,8 +598,26 @@ function buildSvgStrokedLineMarkup(features, resolveStrokeColour, groupId) {
   return [`  <g id="${groupId}">`, ...pathMarkup, '  </g>'].join('\n');
 }
 
-function buildSvgBoundaryLineMarkup(features, boundaryStroke) {
-  return buildSvgStrokedLineMarkup(features, () => boundaryStroke, 'isochrone-boundaries');
+function buildSvgBoundaryLineMarkup(features, boundaryStroke, strokeWidth) {
+  return buildSvgStrokedLineMarkup(
+    features,
+    () => boundaryStroke,
+    'isochrone-boundaries',
+    strokeWidth,
+  );
+}
+
+/**
+ * A colour channel tuple from timeToColour as a CSS colour.
+ *
+ * Reads the tuple's length rather than assuming three channels, so a palette
+ * that later carries alpha still renders instead of silently losing it.
+ */
+function formatEdgeColour(colour) {
+  const [r, g, b, a] = colour;
+  return colour.length > 3 && Number.isFinite(a)
+    ? `rgba(${r}, ${g}, ${b}, ${a})`
+    : `rgb(${r}, ${g}, ${b})`;
 }
 
 export function buildIsochroneEdgeLineMarkup(edgeVertexData, options = {}) {
@@ -476,7 +629,27 @@ export function buildIsochroneEdgeLineMarkup(edgeVertexData, options = {}) {
   }
 
   const theme = normalizeIsochroneTheme(options.theme, ISOCHRONE_THEME_DARK);
-  const edgeLines = [];
+  // Stroke width is in map units and scales with the artwork. A non-scaling
+  // stroke would hold at one device pixel while the map shrank to fit a page,
+  // which is what made printed lines look far too heavy.
+  const strokeWidth = formatSvgNumber(
+    Number.isFinite(options.strokeWidth) && options.strokeWidth > 0 ? options.strokeWidth : 1,
+  );
+
+  // Edges are merged into one <path> per distinct colour rather than one
+  // <line> each: a region like Berlin has ~514k edges but only a handful of
+  // colours, and half a million elements with repeated stroke attributes is
+  // what made the document enormous and Safari's print pipeline give up.
+  //
+  // Which colours exist is discovered here, not assumed. The palette is
+  // currently a small set of bands, but nothing below depends on that - a
+  // different band count, or a continuous ramp, still works and simply yields
+  // more groups. Insertion order is kept so output stays deterministic.
+  //
+  // Endpoints are rounded to whole grid pixels - the resolution the graph is
+  // stored at anyway, and far finer than print can resolve. On a region with
+  // half a million edges the dropped decimals are several MB of file.
+  const subpathsByColour = new Map();
   for (let i = 0; i < edgeVertexData.length; i += 6) {
     const x0 = edgeVertexData[i];
     const y0 = edgeVertexData[i + 1];
@@ -499,14 +672,25 @@ export function buildIsochroneEdgeLineMarkup(edgeVertexData, options = {}) {
     }
 
     const representativeSeconds = Math.max(0, (t0 + t1) * 0.5);
-    const [r, g, b] = timeToColour(representativeSeconds, { cycleMinutes, theme });
+    const colour = formatEdgeColour(timeToColour(representativeSeconds, { cycleMinutes, theme }));
 
-    edgeLines.push(
-      `<line x1="${formatSvgNumber(x0)}" y1="${formatSvgNumber(y0)}" x2="${formatSvgNumber(x1)}" y2="${formatSvgNumber(y1)}" stroke="rgb(${r}, ${g}, ${b})" stroke-width="1" stroke-linecap="round" vector-effect="non-scaling-stroke" />`,
+    let subpaths = subpathsByColour.get(colour);
+    if (subpaths === undefined) {
+      subpaths = [];
+      subpathsByColour.set(colour, subpaths);
+    }
+    subpaths.push(
+      `M${Math.round(x0)} ${Math.round(y0)}L${Math.round(x1)} ${Math.round(y1)}`,
     );
   }
 
-  return edgeLines.join('\n');
+  const pathMarkup = [];
+  for (const [colour, subpaths] of subpathsByColour) {
+    pathMarkup.push(
+      `<path d="${subpaths.join('')}" fill="none" stroke="${escapeXml(colour)}" stroke-width="${strokeWidth}" stroke-linecap="round" />`,
+    );
+  }
+  return pathMarkup.join('\n');
 }
 
 export function buildRenderedIsochroneSvgDocument(options = {}) {
@@ -530,6 +714,7 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
     theme,
   });
   const title = typeof options.title === 'string' ? options.title : 'Isochrone export';
+  const subtitle = typeof options.subtitle === 'string' ? options.subtitle : '';
   const scaleBarLabel =
     typeof options.scaleBarLabel === 'string' && options.scaleBarLabel.trim().length > 0
       ? options.scaleBarLabel.trim()
@@ -547,7 +732,9 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
       ? options.copyrightNotice.trim()
       : 'Map data © OpenStreetMap contributors, available under the Open Database License (ODbL): https://www.openstreetmap.org/copyright';
   const messages = options.messages ?? null;
-  const escapedTitle = escapeXml(title);
+  // The accessible name carries both lines, since the subtitle is what says
+  // which modes the isochrone is for.
+  const escapedTitle = escapeXml(subtitle.length > 0 ? `${title}. ${subtitle}` : title);
   const escapedBackgroundColour = escapeXml(backgroundColour);
 
   if ((options.graphHeader && !options.boundaryPayload) || (!options.graphHeader && options.boundaryPayload)) {
@@ -599,37 +786,63 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
         'isochrone-waterways',
       )
     : '';
+  // Two passes: the sheet's height depends on how many lines the key and the
+  // credits wrap to, which in turn depends on the type sizes the first pass
+  // establishes. The type sizes never change between passes, only the offsets.
+  const provisionalLayout = computeIsochronePosterLayout(widthPx, heightPx, {
+    hasSubtitle: subtitle.length > 0,
+  });
+  const creditLines = wrapCopyrightNotice(copyrightNotice, provisionalLayout);
+  const legendEntries = buildLegendEntries(cycleMinutes, { messages, theme });
+  const legendRows = layOutLegendRows(legendEntries, provisionalLayout);
+  const layout = computeIsochronePosterLayout(widthPx, heightPx, {
+    creditLineCount: creditLines.length,
+    legendRowCount: legendRows.rows.length,
+    hasSubtitle: subtitle.length > 0,
+  });
+
   const boundaryMarkup = projectedBoundary
-    ? buildSvgBoundaryLineMarkup(projectedBoundary.features, overlayColours.boundaryStroke)
+    ? buildSvgBoundaryLineMarkup(
+        projectedBoundary.features,
+        overlayColours.boundaryStroke,
+        layout.unit * 0.09,
+      )
     : '';
   const edgeLines = buildIsochroneEdgeLineMarkup(edgeVertexData, {
     cycleMinutes,
     theme,
+    strokeWidth: layout.unit * 0.045,
   });
-  const titleOverlayMarkup = buildSvgTitleOverlayMarkup(widthPx, title, overlayColours);
-  const legendOverlayMarkup = buildSvgLegendOverlayMarkup(widthPx, cycleMinutes, overlayColours, {
-    messages,
-    theme,
+  const titleOverlayMarkup = buildSvgTitleOverlayMarkup(layout, title, subtitle, overlayColours);
+  const legendOverlayMarkup = buildSvgLegendOverlayMarkup(layout, legendRows, overlayColours, {
+    noteText: formatLegendRepeatNote(cycleMinutes, { messages }),
   });
   const scaleOverlayMarkup = buildSvgScaleOverlayMarkup(
-    heightPx,
+    layout,
     scaleBarLabel,
     scaleBarWidthPx,
     scaleBarSegmentWidthPx,
     overlayColours,
   );
   const copyrightOverlayMarkup = buildSvgCopyrightOverlayMarkup(
-    widthPx,
-    heightPx,
-    copyrightNotice,
+    layout,
+    creditLines,
     overlayColours,
   );
 
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${widthPx}" height="${heightPx}" viewBox="0 0 ${widthPx} ${heightPx}" role="img" aria-label="${escapedTitle}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.posterWidthPx}" height="${layout.posterHeightPx}" viewBox="0 0 ${layout.posterWidthPx} ${layout.posterHeightPx}" role="img" aria-label="${escapedTitle}">`,
     `  <title>${escapedTitle}</title>`,
-    `  <rect id="isochrone-background" x="0" y="0" width="${widthPx}" height="${heightPx}" fill="${escapedBackgroundColour}" />`,
+    `  <rect id="isochrone-background" x="0" y="0" width="${layout.posterWidthPx}" height="${layout.posterHeightPx}" fill="${escapedBackgroundColour}" />`,
+    // Coastline and water polygons are projected from the region boundary and
+    // run past the routing grid they are drawn against, so the map is clipped
+    // to its own extent - otherwise that overspill bleeds into the poster's
+    // margins and off the edge of the sheet.
+    `  <defs><clipPath id="isochrone-map-clip"><rect x="0" y="0" width="${widthPx}" height="${heightPx}" /></clipPath></defs>`,
+    // The map keeps its own pixel coordinate system; the poster frame is built
+    // around it by translation, so projected geometry never has to be rescaled.
+    `  <g id="isochrone-map" clip-path="url(#isochrone-map-clip)" transform="translate(${formatSvgNumber(layout.mapX)}, ${formatSvgNumber(layout.mapY)})">`,
     forestMarkup,
     airportMarkup,
     inlandWaterMarkup,
@@ -638,6 +851,7 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
     boundaryMarkup,
     '  <g id="isochrone-edges">',
     edgeLines,
+    '  </g>',
     '  </g>',
     titleOverlayMarkup,
     legendOverlayMarkup,
@@ -649,21 +863,87 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
     .join('\n');
 }
 
-export function formatIsochroneExportTitle(locationName, modeLabels) {
+// Mode names as they read inside the export's subtitle, which is not always how
+// they read on a toggle button - so they get their own locale keys.
+const EXPORT_MODE_NAME_FALLBACKS = {
+  walk: 'walking',
+  bike: 'cycling',
+  car: 'driving',
+  water: 'ferry',
+  transit: 'public transport',
+};
+
+/**
+ * Joins names the way the reader's language does it ("a, b and c" / "a, b und
+ * c" / "a, b et c"), falling back to comma separation where Intl.ListFormat is
+ * unavailable.
+ */
+function formatModeNameList(names, locale) {
+  if (names.length === 0) {
+    return '';
+  }
+  if (typeof Intl?.ListFormat === 'function') {
+    try {
+      return new Intl.ListFormat(locale || 'en', {
+        style: 'long',
+        type: 'conjunction',
+      }).format(names);
+    } catch {
+      // Unknown locale tag - fall through to the plain join.
+    }
+  }
+  return names.join(', ');
+}
+
+/**
+ * Builds the export's heading as a title plus a labelled subtitle, e.g.
+ * "Isochrone of Berlin" / "Travel modes: walking and public transport".
+ *
+ * Naming the list ("Travel modes: ...") rather than running it into the title
+ * ("...by walking, public transit") is what keeps this grammatical across every
+ * language and every combination of modes: the alternative needs a preposition
+ * that agrees with each mode noun, and those differ by mode and by language.
+ */
+export function formatIsochroneExportTitle(locationName, modeValues, options = {}) {
+  const messages = options.messages ?? null;
+  const locale = typeof options.locale === 'string' && options.locale.trim().length > 0
+    ? options.locale.trim()
+    : 'en';
   const normalizedLocation =
     typeof locationName === 'string' && locationName.trim().length > 0
       ? locationName.trim()
-      : 'Unknown location';
-  const normalizedModeLabels = [];
-  if (Array.isArray(modeLabels)) {
-    for (const modeLabel of modeLabels) {
-      if (typeof modeLabel === 'string' && modeLabel.trim().length > 0) {
-        normalizedModeLabels.push(modeLabel.trim());
+      : formatCommonMessage(messages, 'export.unknownLocation', {}, 'an unknown location');
+
+  const names = [];
+  if (Array.isArray(modeValues)) {
+    for (const modeValue of modeValues) {
+      if (typeof modeValue !== 'string') {
+        continue;
       }
+      const fallback = EXPORT_MODE_NAME_FALLBACKS[modeValue];
+      if (fallback === undefined) {
+        continue;
+      }
+      names.push(formatCommonMessage(messages, `export.mode.${modeValue}`, {}, fallback));
     }
   }
-  const modeList = normalizedModeLabels.length > 0 ? normalizedModeLabels.join(', ') : 'none selected';
-  return `Isochrone of ${normalizedLocation}, by ${modeList}`;
+
+  const title = formatCommonMessage(
+    messages,
+    'export.title',
+    { location: normalizedLocation },
+    `Isochrone of ${normalizedLocation}`,
+  );
+  const subtitle = names.length > 0
+    ? formatCommonMessage(
+      messages,
+      'export.modes',
+      { modes: formatModeNameList(names, locale) },
+      `Travel modes: ${formatModeNameList(names, locale)}`,
+    )
+    : '';
+
+  return { title, subtitle };
 }
 
 export function buildSvgExportFilename(now = new Date()) {
@@ -715,6 +995,7 @@ export function exportCurrentRenderedIsochroneSvg(shell, options = {}) {
     theme,
     overlayColours,
     title: options.title ?? 'Isochrone export',
+    subtitle: options.subtitle,
     messages: options.messages ?? null,
     scaleBarLabel: options.scaleBarLabel,
     scaleBarWidthPx: options.scaleBarWidthPx,

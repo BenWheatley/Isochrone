@@ -58,8 +58,13 @@ export function pickScaleBucketDistanceMetres(totalDistanceMetres) {
   return candidates[0].candidate;
 }
 
-export function computeDistanceScaleBarGeometry(metresPerPixel) {
-  const preferredWidthPx = 120;
+export function computeDistanceScaleBarGeometry(metresPerPixel, options = {}) {
+  // 120px suits the on-screen widget. Print asks for a wider target, because a
+  // bar sized for a screen overlay is a stub next to a poster-sized map.
+  const preferredWidthPx =
+    Number.isFinite(options.preferredWidthPx) && options.preferredWidthPx > 0
+      ? options.preferredWidthPx
+      : 120;
   const preferredDistanceMetres = preferredWidthPx * metresPerPixel;
   const unitSystem = resolveUnitSystem();
   const chosenDistanceMetres = pickNiceDistanceMetres(preferredDistanceMetres, unitSystem);
@@ -75,11 +80,18 @@ export function computeDistanceScaleBarGeometry(metresPerPixel) {
   };
 }
 
-export function computeExportDistanceScaleBar(graphHeader) {
+export function computeExportDistanceScaleBar(graphHeader, options = {}) {
   if (!graphHeader || !(graphHeader.pixelSizeM > 0)) {
     throw new Error('graphHeader.pixelSizeM must be positive');
   }
-  return computeDistanceScaleBarGeometry(graphHeader.pixelSizeM);
+  // Aim for roughly an eighth of the map's width, so the bar stays a readable
+  // measuring stick at poster size instead of a 120px screen widget.
+  const preferredWidthPx = graphHeader.gridWidthPx > 0
+    ? graphHeader.gridWidthPx / 8
+    : undefined;
+  return computeDistanceScaleBarGeometry(graphHeader.pixelSizeM, {
+    preferredWidthPx: options.preferredWidthPx ?? preferredWidthPx,
+  });
 }
 
 export function renderIsochroneLegend(shell, cycleMinutes, options = {}) {

@@ -33,11 +33,21 @@ export function buildIsochronePrintDocument(svgDocument, options = {}) {
     '<meta charset="utf-8">',
     `<title>${escapedTitle}</title>`,
     '<style>',
-    // Landscape with no margin: the SVG already carries its own title,
-    // legend, scale bar and attribution inside the frame.
-    '@page { size: landscape; margin: 0; }',
-    'html, body { margin: 0; padding: 0; }',
-    'svg { display: block; width: 100%; height: auto; }',
+    // No page margin: the poster carries its own margin, title band, legend,
+    // scale bar and credits, so the sheet should be filled edge to edge.
+    '@page { margin: 0; }',
+    // Percentage heights, not vh/vw. In paged media the initial containing
+    // block is the page area, so 100% resolves to the sheet - whereas viewport
+    // units are defined against the screen viewport, which Safari takes
+    // literally when printing. Paired with the old overflow:hidden that gave
+    // Safari an empty page.
+    'html, body { margin: 0; padding: 0; height: 100%; }',
+    // No overflow:hidden either. If a browser still resolves the height oddly,
+    // the poster should spill and look wrong rather than be clipped away to
+    // nothing - a bad layout is recoverable, a blank sheet is not.
+    // The SVG's own preserveAspectRatio (xMidYMid meet) letterboxes it, so it
+    // comes out centred and uncropped whichever way round the user prints.
+    'svg { display: block; width: 100%; height: 100%; max-width: 100%; }',
     '</style>',
     '</head>',
     '<body>',
@@ -79,13 +89,19 @@ export function printCurrentRenderedIsochrone(shell, options = {}) {
     theme,
     overlayColours: resolveSvgOverlayColours(shell, { ...options, theme }),
     title: options.title ?? 'Isochrone',
+    subtitle: options.subtitle,
     messages: options.messages ?? null,
     scaleBarLabel: options.scaleBarLabel,
     scaleBarWidthPx: options.scaleBarWidthPx,
     scaleBarSegmentWidthPx: options.scaleBarSegmentWidthPx,
     copyrightNotice: options.copyrightNotice,
   });
-  const printDocument = buildIsochronePrintDocument(svgDocument, { title: options.title });
+  // The browser offers the document title as the default "Save as PDF"
+  // filename, so it carries the modes too, not just the place.
+  const documentTitle = typeof options.subtitle === 'string' && options.subtitle.length > 0
+    ? `${options.title ?? 'Isochrone'} - ${options.subtitle}`
+    : options.title;
+  const printDocument = buildIsochronePrintDocument(svgDocument, { title: documentTitle });
 
   const documentObject = options.documentObject ?? globalThis.document;
   if (

@@ -56,5 +56,14 @@
   "routing.exportedSvg": "SVG exportiert: {filename}",
   "routing.exportFailed": "SVG-Export fehlgeschlagen.",
   "routing.printed": "An den Drucker gesendet.",
-  "routing.printFailed": "Drucken fehlgeschlagen."
+  "routing.printFailed": "Drucken fehlgeschlagen.",
+  "export.title": "Isochrone von {location}",
+  "export.modes": "Verkehrsmittel: {modes}",
+  "export.unknownLocation": "einem unbekannten Ort",
+  "export.mode.walk": "zu Fuß",
+  "export.mode.bike": "Fahrrad",
+  "export.mode.car": "Auto",
+  "export.mode.water": "Fähre",
+  "export.mode.transit": "öffentlicher Nahverkehr",
+  "body.busy.export": "Vektorkarte wird vorbereitet ..."
 }

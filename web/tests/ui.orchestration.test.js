@@ -8,7 +8,7 @@ import {
   bindPointerButtonInversionControl,
   bindThemeControl,
   getAllowedModeMaskFromShell,
-  getSelectedTransportModeLabels,
+  getSelectedTransportModeValues,
   getSpeedOptionsFromShell,
   getTransitOptionsFromShell,
   populateLocationSelect,
@@ -814,18 +814,18 @@ function createModeCheckboxStub(value, { checked = false, label = '', hidden = f
   };
 }
 
-test('getSelectedTransportModeLabels reads readable names, not the icon ligatures', () => {
+test('getSelectedTransportModeValues returns the canonical values of checked modes', () => {
   const walk = createModeCheckboxStub('walk', { checked: true, label: 'Walk' });
   const bike = createModeCheckboxStub('bike', { checked: false, label: 'Bike' });
   const transit = createModeCheckboxStub('transit', { checked: true, label: 'Public transit' });
 
   assert.deepEqual(
-    getSelectedTransportModeLabels({ modeCheckboxes: [walk, bike, transit] }),
-    ['Walk', 'Public transit'],
+    getSelectedTransportModeValues({ modeCheckboxes: [walk, bike, transit] }),
+    ['walk', 'transit'],
   );
 });
 
-test('getSelectedTransportModeLabels skips a checked mode whose row is hidden', () => {
+test('getSelectedTransportModeValues skips a checked mode whose row is hidden', () => {
   // Region without transit data: the row is hidden, so a checked state left
   // over from a previous region must not reach the export title.
   const walk = createModeCheckboxStub('walk', { checked: true, label: 'Walk' });
@@ -835,5 +835,5 @@ test('getSelectedTransportModeLabels skips a checked mode whose row is hidden', 
     hidden: true,
   });
 
-  assert.deepEqual(getSelectedTransportModeLabels({ modeCheckboxes: [walk, transit] }), ['Walk']);
+  assert.deepEqual(getSelectedTransportModeValues({ modeCheckboxes: [walk, transit] }), ['walk']);
 });

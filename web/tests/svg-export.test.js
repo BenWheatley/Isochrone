@@ -123,9 +123,57 @@ test('buildIsochroneEdgeLineMarkup skips hidden edges and applies theme palette'
     { cycleMinutes: 75, theme: 'light' },
   );
 
-  assert.equal(markup.match(/<line /g)?.length ?? 0, 1);
+  assert.equal(markup.match(/<path /g)?.length ?? 0, 1);
   assert.ok(markup.includes('stroke="rgb(0, 110, 210)"'));
-  assert.ok(!markup.includes('x1="1"'));
+  assert.ok(markup.includes('d="M10 12L22 24"'));
+  // The negative-time edge is hidden, so its endpoint never reaches the path.
+  assert.ok(!markup.includes('M1 2'));
+});
+
+test('buildIsochroneEdgeLineMarkup merges edges into one path per distinct colour', () => {
+  // Two edges in the first colour band and one in a later band: three <line>
+  // elements collapse to two <path> elements, and the stroke attributes are
+  // written once per colour instead of once per edge.
+  const markup = buildIsochroneEdgeLineMarkup(
+    new Float32Array([
+      0, 0, 0, 1, 1, 0,
+      2, 2, 0, 3, 3, 0,
+      4, 4, 3000, 5, 5, 3000,
+    ]),
+    { cycleMinutes: 60, theme: 'light' },
+  );
+
+  const paths = markup.match(/<path /g) ?? [];
+  assert.equal(paths.length, 2);
+  assert.ok(markup.includes('d="M0 0L1 1M2 2L3 3"'));
+  assert.ok(markup.includes('d="M4 4L5 5"'));
+});
+
+test('buildIsochroneEdgeLineMarkup groups by whatever colours the palette returns', () => {
+  // Colour banding is not assumed: the grouping keys on the colours actually
+  // produced, so a future accessible palette with a different band count - or
+  // none at all - still renders, just with a different number of paths.
+  const singleBandMarkup = buildIsochroneEdgeLineMarkup(
+    new Float32Array([0, 0, 0, 1, 1, 0, 2, 2, 0, 3, 3, 0]),
+    { cycleMinutes: 60, theme: 'light' },
+  );
+  assert.equal((singleBandMarkup.match(/<path /g) ?? []).length, 1);
+
+  // One edge in each fifth of the cycle exercises every band the palette
+  // currently defines, without the test naming how many that is.
+  const everyBandMarkup = buildIsochroneEdgeLineMarkup(
+    new Float32Array([
+      0, 0, 0, 1, 1, 0,
+      0, 0, 800, 1, 1, 800,
+      0, 0, 1500, 1, 1, 1500,
+      0, 0, 2200, 1, 1, 2200,
+      0, 0, 3400, 1, 1, 3400,
+    ]),
+    { cycleMinutes: 60, theme: 'light' },
+  );
+  const bandCount = (everyBandMarkup.match(/<path /g) ?? []).length;
+  assert.ok(bandCount > 1);
+  assert.equal(new Set(everyBandMarkup.match(/stroke="[^"]+"/g)).size, bandCount);
 });
 
 test('buildRenderedIsochroneSvgDocument uses full-region graph coordinates and ignores viewport zoom', () => {
@@ -159,14 +207,15 @@ test('buildRenderedIsochroneSvgDocument uses full-region graph coordinates and i
 
   assert.ok(svg.startsWith('<?xml version="1.0" encoding="UTF-8"?>'));
   assert.ok(svg.includes('<svg xmlns="http://www.w3.org/2000/svg"'));
-  assert.ok(svg.includes('viewBox="0 0 100 100"'));
+  // The sheet is larger than the map: the poster adds a title band, a key
+  // and a credits footer around it. What must not change is the map's own
+  // coordinate system, which the map group carries by translation.
+  assert.ok(svg.includes('id="isochrone-map" clip-path="url(#isochrone-map-clip)" transform="translate('));
   assert.ok(!svg.includes('<image '));
   assert.ok(svg.includes('id="isochrone-boundaries"'));
   assert.ok(svg.includes('d="M 10 10 L 20 20 L 30 30"'));
-  assert.ok(svg.includes('x1="10"'));
-  assert.ok(svg.includes('y1="10"'));
-  assert.ok(svg.includes('x2="20"'));
-  assert.ok(svg.includes('y2="20"'));
+  // Edge endpoints keep graph coordinates; they now live in a merged path.
+  assert.ok(svg.includes('d="M10 10L20 20"'));
 });
 
 test('buildRenderedIsochroneSvgDocument exports sea, forest, airport, inland-water, and waterway layers', () => {
@@ -303,9 +352,13 @@ test('exportCurrentRenderedIsochroneSvg uses graph extent instead of current can
     },
   });
 
-  assert.ok(result.svgDocument.includes('viewBox="0 0 100 100"'));
+  assert.ok(
+    result.svgDocument.includes(
+      'id="isochrone-map" clip-path="url(#isochrone-map-clip)" transform="translate(',
+    ),
+  );
   assert.ok(result.svgDocument.includes('d="M 10 10 L 20 20 L 30 30"'));
-  assert.ok(result.svgDocument.includes('x2="20"'));
+  assert.ok(result.svgDocument.includes('d="M10 10L20 20"'));
 });
 
 test('buildRenderedIsochroneSvgDocument localizes legend note and range labels', () => {
@@ -445,9 +498,51 @@ test('buildSvgExportFilename formats local timestamp deterministically', () => {
   assert.equal(fileName, 'isochrone-20260311-090807.svg');
 });
 
-test('formatIsochroneExportTitle composes location and transport mode labels', () => {
-  const title = formatIsochroneExportTitle('Berlin', ['Walk', 'Bike', 'Car']);
-  assert.equal(title, 'Isochrone of Berlin, by Walk, Bike, Car');
+test('formatIsochroneExportTitle names the mode list rather than running it into the title', () => {
+  // "Isochrone of Berlin, by Walk, Public transit" was not a sentence. Naming
+  // the list keeps it grammatical for every combination, in every language,
+  // without needing a preposition that agrees with each mode noun.
+  assert.deepEqual(formatIsochroneExportTitle('Berlin', ['walk', 'bike', 'car']), {
+    title: 'Isochrone of Berlin',
+    // Conjunction and comma style come from Intl.ListFormat for the locale,
+    // rather than being hand-joined in one language's punctuation.
+    subtitle: 'Travel modes: walking, cycling, and driving',
+  });
+  assert.deepEqual(formatIsochroneExportTitle('Berlin', ['walk', 'transit']), {
+    title: 'Isochrone of Berlin',
+    subtitle: 'Travel modes: walking and public transport',
+  });
+  assert.deepEqual(formatIsochroneExportTitle('Berlin', ['water']), {
+    title: 'Isochrone of Berlin',
+    subtitle: 'Travel modes: ferry',
+  });
+});
+
+test('formatIsochroneExportTitle localises both lines and the list conjunction', () => {
+  const messages = {
+    'export.title': 'Isochrone von {location}',
+    'export.modes': 'Verkehrsmittel: {modes}',
+    'export.mode.walk': 'zu Fuß',
+    'export.mode.transit': 'öffentlicher Nahverkehr',
+  };
+  assert.deepEqual(
+    formatIsochroneExportTitle('Berlin', ['walk', 'transit'], { messages, locale: 'de' }),
+    {
+      title: 'Isochrone von Berlin',
+      subtitle: 'Verkehrsmittel: zu Fuß und öffentlicher Nahverkehr',
+    },
+  );
+});
+
+test('formatIsochroneExportTitle drops the subtitle when no mode is selected', () => {
+  assert.deepEqual(formatIsochroneExportTitle('Berlin', []), {
+    title: 'Isochrone of Berlin',
+    subtitle: '',
+  });
+  assert.deepEqual(formatIsochroneExportTitle('Berlin', ['not-a-mode']), {
+    title: 'Isochrone of Berlin',
+    subtitle: '',
+  });
 });
 
 test('bindSvgExportControl invokes export callback on button click', async () => {

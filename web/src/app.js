@@ -57,7 +57,7 @@ import {
   bindUnitSystemControl,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
-  getSelectedTransportModeLabels,
+  getSelectedTransportModeValues,
   getSpeedOptionsFromShell,
   getTransitOptionsFromShell,
   initializeAppShell,
@@ -76,6 +76,7 @@ import {
   exportCurrentRenderedIsochroneSvg,
 } from './export/svg.js';
 import { collectRenderedIsochroneScene } from './export/scene.js';
+import { runWithBusyOverlay } from './ui/busy-overlay.js';
 import {
   bindPrintControl,
   printCurrentRenderedIsochrone,
@@ -233,7 +234,7 @@ export {
   bindLocationSelectControl,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
-  getSelectedTransportModeLabels,
+  getSelectedTransportModeValues,
   getSpeedOptionsFromShell,
   getTransitOptionsFromShell,
   populateLocationSelect,
@@ -247,6 +248,12 @@ export {
   formatIsochroneExportTitle,
 } from './export/svg.js';
 export { collectRenderedIsochroneScene } from './export/scene.js';
+export {
+  hideBusyOverlay,
+  runWithBusyOverlay,
+  showBusyOverlay,
+  waitForNextPaint,
+} from './ui/busy-overlay.js';
 export {
   bindPrintControl,
   buildIsochronePrintDocument,
@@ -3541,9 +3548,19 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
     // where the finished document goes.
     const collectCurrentIsochroneScene = () =>
       collectRenderedIsochroneScene(shell, initializedMapData, {
-        modeLabels: getSelectedTransportModeLabels(shell),
+        modeValues: getSelectedTransportModeValues(shell),
+        locale: shell.locale,
         getSnapshotEdgeVertexData: getOrBuildSnapshotEdgeVertexData,
       });
+
+    // Building the document is a single synchronous pass over every edge -
+    // seconds of frozen UI on a region the size of Berlin - so it runs behind
+    // an overlay that is guaranteed to have painted first.
+    const buildExportBehindOverlay = (build) => runWithBusyOverlay(
+      shell,
+      getLocalizedShellText(shell, 'body.busy.export', 'Preparing the vector map...'),
+      build,
+    );
 
     bindSvgExportControl(shell, {
       async exportCurrentRenderedIsochroneSvg() {
@@ -3551,7 +3568,8 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           await routingBinding.waitForIdle();
         }
 
-        return exportCurrentRenderedIsochroneSvg(shell, collectCurrentIsochroneScene());
+        return buildExportBehindOverlay(() =>
+          exportCurrentRenderedIsochroneSvg(shell, collectCurrentIsochroneScene()));
       },
       onExportSuccess(result) {
         setRoutingStatus(
@@ -3574,7 +3592,8 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           await routingBinding.waitForIdle();
         }
 
-        return printCurrentRenderedIsochrone(shell, collectCurrentIsochroneScene());
+        return buildExportBehindOverlay(() =>
+          printCurrentRenderedIsochrone(shell, collectCurrentIsochroneScene()));
       },
       onPrintSuccess() {
         setRoutingStatus(
