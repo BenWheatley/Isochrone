@@ -4,6 +4,7 @@ import {
   EDGE_MODE_BIKE_BIT,
   EDGE_MODE_CAR_BIT,
   EDGE_MODE_WALK_BIT,
+  EDGE_MODE_BOARDING_BITS,
   EDGE_MODE_WATER_BIT,
   EDGE_TRAVERSAL_COST_CACHE_PROPERTY,
   ROAD_CLASS_MOTORWAY,
@@ -247,10 +248,22 @@ export function computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMas
   const edgeMaxspeedKph = graph.edgeMaxspeedKph[edgeIndex];
 
   if ((edgeModeMask & EDGE_MODE_WATER_BIT) !== 0) {
-    // A ferry leg's crossing time doesn't depend on which boarding bit
-    // (walk/bike/car) matched allowedModeMask — always cost it at the
-    // baked ferry speed (duration-tag-derived, explicit maxspeed, or the
-    // flat fallback, already resolved at build time into edgeMaxspeedKph).
+    // A ferry needs Ferry selected *and* a way to get aboard: a walk-on ferry
+    // carries the walk bit, a drive-on ferry the car bit, and so on. Matching
+    // on the boarding bit alone let ferries be used whenever Walk was ticked,
+    // which is how a Portsmouth walking isochrone crossed the Solent.
+    if ((allowedModeMask & EDGE_MODE_WATER_BIT) === 0) {
+      return Infinity;
+    }
+    const boardingModeMask = edgeModeMask & EDGE_MODE_BOARDING_BITS;
+    if (boardingModeMask !== 0 && (allowedModeMask & boardingModeMask) === 0) {
+      return Infinity;
+    }
+
+    // Crossing time itself doesn't depend on which boarding bit matched -
+    // always cost it at the baked ferry speed (duration-tag-derived, explicit
+    // maxspeed, or the flat fallback, resolved at build time into
+    // edgeMaxspeedKph).
     const waterSpeedKph = edgeMaxspeedKph > 0 ? edgeMaxspeedKph : WATER_FALLBACK_SPEED_KPH;
     if (waterSpeedKph <= 0) {
       return Infinity;

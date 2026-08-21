@@ -762,28 +762,41 @@ test('computeEdgeTraversalCostSeconds costs ferry edges at ferry speed regardles
   graph.edgeModeMask[0] = EDGE_MODE_WALK_BIT | EDGE_MODE_WATER_BIT;
   graph.edgeMaxspeedKph[0] = 36;
   const expectedFerrySeconds = distanceMeters / ((36 * 1000) / 3600);
-  assert.ok(
-    Math.abs(computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_WALK_BIT) - expectedFerrySeconds)
-      < 1e-6,
-  );
-  assert.ok(
-    Math.abs(computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_WATER_BIT) - expectedFerrySeconds)
-      < 1e-6,
-  );
-  assert.notEqual(expectedFerrySeconds, bakedWalkingCostSeconds);
-  assert.equal(
-    computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_BIKE_BIT),
-    Number.POSITIVE_INFINITY,
-  );
 
-  // A car-only ferry (no WALK/BIKE bit) is unreachable under Walk alone but
-  // reachable under Water alone.
-  graph.edgeModeMask[0] = EDGE_MODE_CAR_BIT | EDGE_MODE_WATER_BIT;
+  // Riding a ferry needs Ferry selected *and* a mode you can board it in.
+  // Walk alone used to be enough, which let a walking isochrone cross open
+  // water - Portsmouth reached the Isle of Wight on foot.
   assert.equal(
     computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_WALK_BIT),
     Number.POSITIVE_INFINITY,
   );
-  assert.ok(computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_WATER_BIT) > 0);
+  // Ferry alone cannot reach the terminal in the first place.
+  assert.equal(
+    computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_WATER_BIT),
+    Number.POSITIVE_INFINITY,
+  );
+  assert.ok(
+    Math.abs(
+      computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_WALK_BIT | EDGE_MODE_WATER_BIT)
+        - expectedFerrySeconds,
+    ) < 1e-6,
+  );
+  assert.notEqual(expectedFerrySeconds, bakedWalkingCostSeconds);
+  // A bike cannot board a walk-only vessel even with Ferry selected.
+  assert.equal(
+    computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_BIKE_BIT | EDGE_MODE_WATER_BIT),
+    Number.POSITIVE_INFINITY,
+  );
+
+  // A drive-on ferry takes Car + Ferry, not Walk + Ferry.
+  graph.edgeModeMask[0] = EDGE_MODE_CAR_BIT | EDGE_MODE_WATER_BIT;
+  assert.equal(
+    computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_WALK_BIT | EDGE_MODE_WATER_BIT),
+    Number.POSITIVE_INFINITY,
+  );
+  assert.ok(
+    computeEdgeTraversalCostSeconds(graph, 0, EDGE_MODE_CAR_BIT | EDGE_MODE_WATER_BIT) > 0,
+  );
 
   // With no baked maxspeed, a water edge falls back to WATER_FALLBACK_SPEED_KPH.
   graph.edgeModeMask[0] = EDGE_MODE_WATER_BIT;

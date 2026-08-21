@@ -19,6 +19,12 @@ export const EDGE_MODE_WALK_BIT = 1;
 export const EDGE_MODE_BIKE_BIT = 1 << 1;
 export const EDGE_MODE_CAR_BIT = 1 << 2;
 export const EDGE_MODE_WATER_BIT = 1 << 3;
+// The modes you can board a ferry in. A ferry edge carries the water bit plus
+// whichever of these its vessel accepts, so a walk-on ferry is walk|water and
+// a drive-on ferry car|water. Riding one needs Ferry selected *and* a matching
+// boarding mode - see computeEdgeTraversalCostSeconds.
+export const EDGE_MODE_BOARDING_BITS =
+  EDGE_MODE_WALK_BIT | EDGE_MODE_BIKE_BIT | EDGE_MODE_CAR_BIT;
 // A query-time sentinel passed as allowedModeMask when the user has
 // selected Public transit but no real road/ferry mode. It deliberately
 // matches no bit any real graph edge ever carries (edge_mode_mask is only
