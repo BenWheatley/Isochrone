@@ -28,6 +28,21 @@ from .projection import DEFAULT_PIXEL_SIZE_M
 _MAX_GRID_METERS_PER_AXIS = 65_535 * DEFAULT_PIXEL_SIZE_M
 FERRY_GRID_BUDGET_METERS = 500_000.0
 assert FERRY_GRID_BUDGET_METERS < _MAX_GRID_METERS_PER_AXIS
+# How far past the road network's own extent a ferry may reach.
+#
+# The flat 500 km budget above only ever protected the binary format's u16
+# grid fields; it said nothing about whether a route was worth drawing.
+# Portsmouth's ferries reach the Isle of Wight, France and the Channel
+# Islands, so its grid came out 206 x 248 km for a city 11 km across - and
+# since the map never zooms out past the region's own boundary, every one of
+# those lines ran off the edge to a destination that is never shown.
+#
+# Expressed as a fraction of the core span so it scales with the region: a
+# harbour crossing survives, an international route does not.
+FERRY_MARGIN_FRACTION = 0.25
+# Floor under that fraction, so a compact region is not held so tightly that a
+# harbour or river crossing on its own doorstep is rejected.
+FERRY_MARGIN_FLOOR_METERS = 2_000.0
 _EARTH_RADIUS_M = 6_371_000.0
 _METERS_PER_DEGREE_LAT = 110_540.0
 _METERS_PER_DEGREE_LON_AT_EQUATOR = 111_320.0
@@ -363,12 +378,22 @@ def select_ferry_ways_within_grid_budget(
     core_bbox: tuple[float, float, float, float] | None,
     *,
     budget_meters: float = FERRY_GRID_BUDGET_METERS,
+    margin_fraction: float = FERRY_MARGIN_FRACTION,
+    margin_floor_meters: float = FERRY_MARGIN_FLOOR_METERS,
 ) -> tuple[WayCandidate, ...]:
-    """Greedily accept ferry ways, nearest-to-the-core-network first, up to
-    a grid-size budget. Ways that would push either axis of the combined
-    bounding box past the budget are skipped (later, farther candidates may
-    still be skipped even though the core alone has room, since the point
-    is to keep the *combined* grid within the u16 header capacity).
+    """Greedily accept ferry ways, nearest-to-the-core-network first.
+
+    Two limits apply, and a way must satisfy both. The grid budget keeps the
+    combined extent inside the binary format's u16 header capacity. The margin
+    keeps it near the road network: a ferry may push the bounding box out by at
+    most ``margin_fraction`` of the core span on each axis, because the map
+    never zooms out past the region's own boundary, so a line reaching well
+    beyond it just runs off the edge of every view.
+
+    The road network is the right reference for "the region": the Overpass
+    extract only returns ways inside the queried relation, so its bounding box
+    is the region's, without the boundary artifacts having to be plumbed
+    through to the graph build.
     """
     candidates = [
         (way, _bbox_of(coords))
@@ -389,12 +414,22 @@ def select_ferry_ways_within_grid_budget(
         key=lambda pair: _haversine_m(*core_center, *_bbox_center(pair[1])),
     )
 
+    core_lat_span_m, core_lon_span_m = _bbox_span_m(core_bbox)
+    max_lat_span_m = min(
+        budget_meters,
+        max(core_lat_span_m * (1.0 + margin_fraction), core_lat_span_m + margin_floor_meters),
+    )
+    max_lon_span_m = min(
+        budget_meters,
+        max(core_lon_span_m * (1.0 + margin_fraction), core_lon_span_m + margin_floor_meters),
+    )
+
     accepted: list[WayCandidate] = []
     combined_bbox = core_bbox
     for way, way_bbox in candidates:
         candidate_bbox = _merge_bbox(combined_bbox, way_bbox)
         lat_span_m, lon_span_m = _bbox_span_m(candidate_bbox)
-        if lat_span_m <= budget_meters and lon_span_m <= budget_meters:
+        if lat_span_m <= max_lat_span_m and lon_span_m <= max_lon_span_m:
             accepted.append(way)
             combined_bbox = candidate_bbox
 

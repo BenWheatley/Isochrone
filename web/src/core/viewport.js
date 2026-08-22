@@ -80,16 +80,24 @@ export function resolveViewportFrame(graphHeader, viewport = null, options = {})
   const visibleWidthPx = frameWidthPx / effectiveScale;
   const visibleHeightPx = frameHeightPx / effectiveScale;
 
+  // Panning is bounded by the same box the zoom-out limit uses, not by the
+  // routing grid. A region whose ferries reach another country has a grid
+  // hundreds of kilometres wide, and being able to scroll out to the far end
+  // of a line that leaves the map shows nothing but empty space.
+  const panBounds = resolvePanBounds(graphHeader, options);
+
   return {
     scale,
     offsetXPx: normalizeViewportAxis(
       asFiniteOrFallback(sourceViewport.offsetXPx, 0),
-      graphHeader.gridWidthPx,
+      panBounds.minXPx,
+      panBounds.maxXPx,
       visibleWidthPx,
     ),
     offsetYPx: normalizeViewportAxis(
       asFiniteOrFallback(sourceViewport.offsetYPx, 0),
-      graphHeader.gridHeightPx,
+      panBounds.minYPx,
+      panBounds.maxYPx,
       visibleHeightPx,
     ),
     frameWidthPx,
@@ -173,9 +181,9 @@ export function zoomMapViewportAtCanvasPixel(
  * options.fitBoundingBoxPx is supplied (the district boundary's own pixel
  * bounding box, padded), scale=1 instead means "that boundary fits the
  * frame" - minScale/maxScale are untouched, so the zoom-out limit becomes
- * the boundary view itself, while panning (bounded by the full grid in
- * normalizeViewportAxis) still reaches the wider routing extent at that
- * same zoom level.
+ * the boundary view itself. Panning is held to the same padded box (see
+ * resolvePanBounds); it used to range over the full grid, which let a
+ * ferry-widened region scroll far past anything worth looking at.
  */
 function resolveFitScale(graphHeader, frameWidthPx, frameHeightPx, options) {
   const fitBoundingBoxPx = options.fitBoundingBoxPx ?? null;
@@ -228,12 +236,50 @@ function validatePositiveFinite(value, label) {
   return value;
 }
 
-function normalizeViewportAxis(sourceOffsetPx, graphSpanPx, visibleSpanPx) {
-  if (visibleSpanPx >= graphSpanPx) {
-    const centeredOffsetPx = -(visibleSpanPx - graphSpanPx) / 2;
+function normalizeViewportAxis(sourceOffsetPx, minPx, maxPx, visibleSpanPx) {
+  const spanPx = maxPx - minPx;
+  if (visibleSpanPx >= spanPx) {
+    // The whole box fits: centre it rather than pinning it to an edge.
+    const centeredOffsetPx = minPx - (visibleSpanPx - spanPx) / 2;
     return Math.abs(centeredOffsetPx) < Number.EPSILON ? 0 : centeredOffsetPx;
   }
-  return clamp(sourceOffsetPx, 0, graphSpanPx - visibleSpanPx);
+  return clamp(sourceOffsetPx, minPx, maxPx - visibleSpanPx);
+}
+
+/**
+ * The graph-pixel box panning may not leave.
+ *
+ * Defaults to the whole grid, so a region without a fit box behaves as before;
+ * with one, panning is held to the padded box that also sets the zoom-out
+ * limit.
+ */
+function resolvePanBounds(graphHeader, options = {}) {
+  const fitBoundingBoxPx = options.fitBoundingBoxPx ?? null;
+  if (
+    !fitBoundingBoxPx
+    || !Number.isFinite(fitBoundingBoxPx.minX)
+    || !Number.isFinite(fitBoundingBoxPx.minY)
+    || !Number.isFinite(fitBoundingBoxPx.maxX)
+    || !Number.isFinite(fitBoundingBoxPx.maxY)
+  ) {
+    return { minXPx: 0, minYPx: 0, maxXPx: graphHeader.gridWidthPx, maxYPx: graphHeader.gridHeightPx };
+  }
+
+  const paddingFactor = Number.isFinite(options.fitBoundingBoxPaddingFactor)
+    ? options.fitBoundingBoxPaddingFactor
+    : DEFAULT_FIT_BOUNDING_BOX_PADDING_FACTOR;
+  const boxWidthPx = Math.max(1, fitBoundingBoxPx.maxX - fitBoundingBoxPx.minX);
+  const boxHeightPx = Math.max(1, fitBoundingBoxPx.maxY - fitBoundingBoxPx.minY);
+  // Same padding the fit scale applies, so the pannable area matches exactly
+  // what the most-zoomed-out view shows.
+  const padXPx = (boxWidthPx * paddingFactor - boxWidthPx) / 2;
+  const padYPx = (boxHeightPx * paddingFactor - boxHeightPx) / 2;
+  return {
+    minXPx: fitBoundingBoxPx.minX - padXPx,
+    minYPx: fitBoundingBoxPx.minY - padYPx,
+    maxXPx: fitBoundingBoxPx.maxX + padXPx,
+    maxYPx: fitBoundingBoxPx.maxY + padYPx,
+  };
 }
 
 function asFiniteOrFallback(value, fallbackValue) {

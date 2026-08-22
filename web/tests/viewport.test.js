@@ -263,3 +263,44 @@ test('createDefaultMapViewport centers on the boundary box instead of the grid o
   assert.ok(Math.abs(visibleCenterX - boxCenterX) < 50);
   assert.ok(Math.abs(visibleCenterY - boxCenterY) < 50);
 });
+
+test('panning is held to the padded fit box, not the routing grid', () => {
+  // Portsmouth's grid spans a ferry route to France; the city sits in a small
+  // corner of it. Panning used to range over the whole grid, so you could
+  // scroll out along a line that leaves the map and find nothing there.
+  const graphHeader = { gridWidthPx: 20570, gridHeightPx: 24802 };
+  const fitBoundingBoxPx = { minX: 11000, minY: 23000, maxX: 12130, maxY: 24230 };
+  const options = { frameWidthPx: 800, frameHeightPx: 600, fitBoundingBoxPx };
+
+  // Try to pan far past the box, towards the far end of the ferry line.
+  const frame = resolveViewportFrame(
+    graphHeader,
+    { scale: 4, offsetXPx: 0, offsetYPx: 0 },
+    options,
+  );
+
+  assert.ok(frame.offsetXPx >= 10000, `panned off the box: ${frame.offsetXPx}`);
+  assert.ok(frame.offsetYPx >= 22000, `panned off the box: ${frame.offsetYPx}`);
+
+  const farFrame = resolveViewportFrame(
+    graphHeader,
+    { scale: 4, offsetXPx: 20000, offsetYPx: 24000 },
+    options,
+  );
+  assert.ok(farFrame.offsetXPx + farFrame.visibleWidthPx <= 12200);
+  assert.ok(farFrame.offsetYPx + farFrame.visibleHeightPx <= 24300);
+});
+
+test('without a fit box panning still ranges over the whole grid', () => {
+  const graphHeader = { gridWidthPx: 1000, gridHeightPx: 800 };
+  const options = { frameWidthPx: 400, frameHeightPx: 300 };
+
+  const frame = resolveViewportFrame(
+    graphHeader,
+    { scale: 4, offsetXPx: 100000, offsetYPx: 100000 },
+    options,
+  );
+
+  assert.ok(frame.offsetXPx + frame.visibleWidthPx <= 1000 + 1e-6);
+  assert.ok(frame.offsetYPx + frame.visibleHeightPx <= 800 + 1e-6);
+});
