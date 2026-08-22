@@ -10,6 +10,7 @@ import {
   computeExportDistanceScaleBar,
   createWebGlIsochroneRenderer,
   createNodeSpatialIndex,
+  clearTravelTimeGrid,
   createPixelGrid,
   createTravelTimeGrid,
   createWalkingSearchState,
@@ -48,6 +49,9 @@ import {
   rerenderIsochroneFromSnapshotWithStatus,
   renderIsochroneLegendIfNeeded,
   runSearchTimeSliced,
+  computeRenderGridExtent,
+  resolveSpatialIndexCellSizePx,
+  setTravelTimePixelMin,
   shouldUploadEdgeGeometry,
   updateDistanceScaleBar,
   timeToColour,
@@ -2152,4 +2156,104 @@ test('computeProjectedFeatureListBoundingBoxPx ignores non-finite points', () =>
   const bbox = computeProjectedFeatureListBoundingBoxPx(projectedFeatures);
 
   assert.deepEqual(bbox, { minX: 10, minY: 20, maxX: 10, maxY: 20 });
+});
+
+test('render grids are sized to the visible view, not the routing graph', () => {
+  // Portsmouth's routing grid is sized to a ferry route that reaches France:
+  // 20570 x 24802 cells, ~2 GB as floats for each of the two render grids,
+  // every cell of it written by the clears. The city is about 15 km across.
+  const portsmouthHeader = { gridWidthPx: 20570, gridHeightPx: 24802 };
+  const cityBoundingBox = { minX: 11000, minY: 23000, maxX: 12500, maxY: 24500 };
+
+  const extent = computeRenderGridExtent(portsmouthHeader, cityBoundingBox);
+
+  assert.ok(extent.widthPx * extent.heightPx < 5_000_000, 'must not allocate the ferry envelope');
+  assert.ok(extent.originXPx > 0 && extent.originYPx > 0, 'grid is offset to the city');
+  // Covers the boundary box with padding to match the viewport's own fit.
+  assert.ok(extent.originXPx <= cityBoundingBox.minX);
+  assert.ok(extent.originXPx + extent.widthPx >= cityBoundingBox.maxX);
+  assert.ok(extent.originYPx + extent.heightPx >= cityBoundingBox.maxY);
+});
+
+test('render grid extent stays within the GPU texture limit even without a boundary box', () => {
+  // The travel-time grid is uploaded as one texture, so an axis wider than
+  // GL_MAX_TEXTURE_SIZE could never be drawn however much memory existed.
+  const extent = computeRenderGridExtent({ gridWidthPx: 20570, gridHeightPx: 24802 }, null);
+
+  assert.ok(extent.widthPx <= 16384);
+  assert.ok(extent.heightPx <= 16384);
+  assert.ok(extent.widthPx * extent.heightPx <= 16_000_000);
+});
+
+test('a small region is unchanged by the render grid budget', () => {
+  const extent = computeRenderGridExtent({ gridWidthPx: 896, gridHeightPx: 958 }, null);
+
+  assert.deepEqual(extent, { originXPx: 0, originYPx: 0, widthPx: 896, heightPx: 958 });
+});
+
+test('grid writes use graph coordinates and clip outside the grid extent', () => {
+  // Painters are unaware of the offset: they write graph pixel coordinates and
+  // the grid subtracts its own origin, so anything off-extent falls out
+  // through the bounds check that was already there.
+  const grid = createTravelTimeGrid(4, 4, { originXPx: 100, originYPx: 200 });
+  clearTravelTimeGrid(grid);
+
+  assert.equal(setTravelTimePixelMin(grid, 100, 200, 30), true, 'grid origin maps to cell 0,0');
+  assert.equal(grid.seconds[0], 30);
+  assert.equal(setTravelTimePixelMin(grid, 103, 203, 45), true);
+  assert.equal(grid.seconds[3 * 4 + 3], 45);
+
+  assert.equal(setTravelTimePixelMin(grid, 99, 200, 10), false, 'left of the extent');
+  assert.equal(setTravelTimePixelMin(grid, 104, 200, 10), false, 'right of the extent');
+  assert.equal(setTravelTimePixelMin(grid, 100, 199, 10), false, 'above the extent');
+});
+
+test('spatial index buckets by node density instead of one cell per pixel', () => {
+  // Portsmouth's routing grid spans a ferry route to France. One bucket per
+  // 10 m pixel meant 20570 x 24802 Int32 cells - 2 GB, every byte written -
+  // to hold 22,024 nodes.
+  const portsmouthCellSize = resolveSpatialIndexCellSizePx(20570, 24802, 22024);
+  const cells = Math.ceil(20570 / portsmouthCellSize) * Math.ceil(24802 / portsmouthCellSize);
+  assert.ok(cells < 200_000, `expected a small bucket grid, got ${cells} cells`);
+
+  // A dense city gets finer buckets from the same rule.
+  const berlinCellSize = resolveSpatialIndexCellSizePx(4576, 3763, 600_000);
+  assert.ok(berlinCellSize < portsmouthCellSize);
+  assert.ok(berlinCellSize >= 1);
+});
+
+test('bucketed spatial index still returns the true nearest node', () => {
+  // The early-exit bound has to account for cell size, or the ring search can
+  // stop while a nearer node sits in an unvisited cell.
+  const graph = createFixtureGraph();
+  const nodePixels = precomputeNodePixelCoordinates(graph);
+  const nodeModeMask = precomputeNodeModeMask(graph);
+
+  for (const cellSizePx of [1, 2, 3, 8, 64]) {
+    const index = createNodeSpatialIndex(graph, nodePixels, { cellSizePx });
+    for (let xPx = 0; xPx < graph.header.gridWidthPx; xPx += 1) {
+      for (let yPx = 0; yPx < graph.header.gridHeightPx; yPx += 1) {
+        const found = findNearestNodeIndexForModeFromSpatialIndex(
+          index, nodePixels, nodeModeMask, xPx, yPx, EDGE_MODE_WALK_BIT,
+        );
+        // Brute force the same answer.
+        let best = -1;
+        let bestDistance = Infinity;
+        for (let i = 0; i < graph.header.nNodes; i += 1) {
+          if (!(nodeModeMask[i] & EDGE_MODE_WALK_BIT)) continue;
+          const dx = nodePixels.nodePixelX[i] - xPx;
+          const dy = nodePixels.nodePixelY[i] - yPx;
+          const d = dx * dx + dy * dy;
+          if (d < bestDistance) { bestDistance = d; best = i; }
+        }
+        const foundDx = nodePixels.nodePixelX[found] - xPx;
+        const foundDy = nodePixels.nodePixelY[found] - yPx;
+        assert.equal(
+          foundDx * foundDx + foundDy * foundDy,
+          bestDistance,
+          `cellSizePx=${cellSizePx} at (${xPx},${yPx}): got node ${found}, expected ${best}`,
+        );
+      }
+    }
+  }
 });

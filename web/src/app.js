@@ -101,6 +101,13 @@ import {
   getOrCreateIsochroneRenderer,
 } from './render/isochrone-renderer.js';
 import {
+  clearGrid,
+  clearTravelTimeGrid,
+  computeRenderGridExtent,
+  createPixelGrid,
+  createTravelTimeGrid,
+} from './render/pixel-grid.js';
+import {
 } from './core/graph-binary.js';
 import {
   buildTransitConnectionEdgeVertexData,
@@ -426,7 +433,7 @@ function getOrBuildModeSpecificKernelGraphViews(mapData, allowedModeMask, edgeCo
   return built;
 }
 
-export function createNodeSpatialIndex(graph, nodePixels) {
+export function createNodeSpatialIndex(graph, nodePixels, options = {}) {
   validateGraphForRouting(graph);
   validateNodePixels(nodePixels);
   if (nodePixels.nodePixelX.length < graph.header.nNodes || nodePixels.nodePixelY.length < graph.header.nNodes) {
@@ -435,16 +442,28 @@ export function createNodeSpatialIndex(graph, nodePixels) {
 
   const widthPx = graph.header.gridWidthPx;
   const heightPx = graph.header.gridHeightPx;
-  const cellCount = widthPx * heightPx;
-  const cellNodeHead = new Int32Array(cellCount);
+  // Buckets are sized to node density, not to the graph's pixel grid. One
+  // bucket per pixel meant Portsmouth allocated 20570 x 24802 Int32 cells -
+  // 2 GB, every byte of it written by the fill below - to hold 22,024 nodes,
+  // leaving 99.996% empty. It also made the ring search below step one 10 m
+  // pixel at a time across a 248 km extent.
+  const cellSizePx = resolveSpatialIndexCellSizePx(
+    widthPx,
+    heightPx,
+    graph.header.nNodes,
+    options.cellSizePx,
+  );
+  const cellsX = Math.max(1, Math.ceil(widthPx / cellSizePx));
+  const cellsY = Math.max(1, Math.ceil(heightPx / cellSizePx));
+  const cellNodeHead = new Int32Array(cellsX * cellsY);
   cellNodeHead.fill(-1);
   const nextNodeInCell = new Int32Array(graph.header.nNodes);
   nextNodeInCell.fill(-1);
 
   for (let nodeIndex = 0; nodeIndex < graph.header.nNodes; nodeIndex += 1) {
-    const xPx = nodePixels.nodePixelX[nodeIndex];
-    const yPx = nodePixels.nodePixelY[nodeIndex];
-    const cellIndex = yPx * widthPx + xPx;
+    const cellX = Math.min(cellsX - 1, Math.floor(nodePixels.nodePixelX[nodeIndex] / cellSizePx));
+    const cellY = Math.min(cellsY - 1, Math.floor(nodePixels.nodePixelY[nodeIndex] / cellSizePx));
+    const cellIndex = cellY * cellsX + cellX;
     nextNodeInCell[nodeIndex] = cellNodeHead[cellIndex];
     cellNodeHead[cellIndex] = nodeIndex;
   }
@@ -452,9 +471,31 @@ export function createNodeSpatialIndex(graph, nodePixels) {
   return {
     widthPx,
     heightPx,
+    cellSizePx,
+    cellsX,
+    cellsY,
     cellNodeHead,
     nextNodeInCell,
   };
+}
+
+/**
+ * Bucket size that keeps roughly a couple of nodes per cell.
+ *
+ * A sparse region - a port whose ferries reach another country - gets coarse
+ * buckets; a dense city gets fine ones. Either way the index is a few hundred
+ * thousand cells rather than one per 10 m pixel of a mostly-empty extent.
+ */
+export function resolveSpatialIndexCellSizePx(widthPx, heightPx, nodeCount, explicitCellSizePx) {
+  if (Number.isInteger(explicitCellSizePx) && explicitCellSizePx > 0) {
+    return explicitCellSizePx;
+  }
+  if (!Number.isInteger(nodeCount) || nodeCount <= 0) {
+    return 1;
+  }
+  const targetCells = Math.max(1, nodeCount / 2);
+  const cellSizePx = Math.round(Math.sqrt((widthPx * heightPx) / targetCells));
+  return clampInt(cellSizePx, 1, 4096);
 }
 
 function validateNodeSpatialIndex(spatialIndex, nodeCount, widthPx, heightPx) {
@@ -467,8 +508,9 @@ function validateNodeSpatialIndex(spatialIndex, nodeCount, widthPx, heightPx) {
   if (!(spatialIndex.nextNodeInCell instanceof Int32Array)) {
     throw new Error('spatialIndex.nextNodeInCell must be an Int32Array');
   }
-  const expectedCellCount = widthPx * heightPx;
-  if (spatialIndex.cellNodeHead.length < expectedCellCount) {
+  const cellsX = Number.isInteger(spatialIndex.cellsX) ? spatialIndex.cellsX : widthPx;
+  const cellsY = Number.isInteger(spatialIndex.cellsY) ? spatialIndex.cellsY : heightPx;
+  if (spatialIndex.cellNodeHead.length < cellsX * cellsY) {
     throw new Error('spatialIndex.cellNodeHead is too short');
   }
   if (spatialIndex.nextNodeInCell.length < nodeCount) {
@@ -565,8 +607,14 @@ export function findNearestNodeIndexForModeFromSpatialIndex(
   let nearestModeNodeIndex = -1;
   let nearestModeDistanceSquared = Infinity;
 
+  const cellSizePx = Number.isInteger(spatialIndex.cellSizePx) ? spatialIndex.cellSizePx : 1;
+  const cellsX = Number.isInteger(spatialIndex.cellsX) ? spatialIndex.cellsX : widthPx;
+  const cellsY = Number.isInteger(spatialIndex.cellsY) ? spatialIndex.cellsY : heightPx;
+  const queryCellX = clampInt(Math.floor(clampedXPx / cellSizePx), 0, cellsX - 1);
+  const queryCellY = clampInt(Math.floor(clampedYPx / cellSizePx), 0, cellsY - 1);
+
   const visitCell = (cellXPx, cellYPx) => {
-    const cellIndex = cellYPx * widthPx + cellXPx;
+    const cellIndex = cellYPx * cellsX + cellXPx;
     let nodeIndex = spatialIndex.cellNodeHead[cellIndex];
 
     while (nodeIndex >= 0) {
@@ -589,15 +637,15 @@ export function findNearestNodeIndexForModeFromSpatialIndex(
     }
   };
 
-  const maxRadius = Math.max(widthPx, heightPx);
+  const maxRadius = Math.max(cellsX, cellsY);
   for (let radius = 0; radius <= maxRadius; radius += 1) {
-    const minX = Math.max(0, clampedXPx - radius);
-    const maxX = Math.min(widthPx - 1, clampedXPx + radius);
-    const minY = Math.max(0, clampedYPx - radius);
-    const maxY = Math.min(heightPx - 1, clampedYPx + radius);
+    const minX = Math.max(0, queryCellX - radius);
+    const maxX = Math.min(cellsX - 1, queryCellX + radius);
+    const minY = Math.max(0, queryCellY - radius);
+    const maxY = Math.min(cellsY - 1, queryCellY + radius);
 
     if (radius === 0) {
-      visitCell(clampedXPx, clampedYPx);
+      visitCell(queryCellX, queryCellY);
     } else {
       for (let scanX = minX; scanX <= maxX; scanX += 1) {
         visitCell(scanX, minY);
@@ -613,8 +661,15 @@ export function findNearestNodeIndexForModeFromSpatialIndex(
       }
     }
 
-    const radiusSquared = radius * radius;
-    if (nearestModeNodeIndex >= 0 && nearestModeDistanceSquared <= radiusSquared) {
+    // Every cell within Chebyshev radius `radius` has been visited, so a node
+    // still unseen sits in a cell at least `radius + 1` away, whose nearest
+    // pixel is at least `radius * cellSizePx` from the query point. Stopping
+    // before that bound could return a node that is not the nearest.
+    const coveredRadiusPx = radius * cellSizePx;
+    if (
+      nearestModeNodeIndex >= 0
+      && nearestModeDistanceSquared <= coveredRadiusPx * coveredRadiusPx
+    ) {
       break;
     }
   }
@@ -1447,6 +1502,41 @@ function getOrBuildStaticEdgeNodeIndexedVertexDataForModeFromMapData(
   return edgeNodeIndexedVertexData;
 }
 
+/**
+ * Shifts a viewport and fit box from graph pixel space into a render grid's
+ * own space.
+ *
+ * Render grids cover only the most-zoomed-out view, so their origin is not the
+ * graph origin. Painters need no change - they write graph coordinates and the
+ * grid subtracts the origin - but a draw call maps grid cells to the screen,
+ * so it has to be told where the grid sits. Edge draws are unaffected: they
+ * work in graph space throughout.
+ */
+function translateViewportIntoGrid(viewport, fitBoundingBoxPx, grid) {
+  const originXPx = grid?.originXPx ?? 0;
+  const originYPx = grid?.originYPx ?? 0;
+  if (originXPx === 0 && originYPx === 0) {
+    return { viewport, fitBoundingBoxPx };
+  }
+  return {
+    viewport: viewport
+      ? {
+        ...viewport,
+        offsetXPx: (viewport.offsetXPx ?? 0) - originXPx,
+        offsetYPx: (viewport.offsetYPx ?? 0) - originYPx,
+      }
+      : viewport,
+    fitBoundingBoxPx: fitBoundingBoxPx
+      ? {
+        minX: fitBoundingBoxPx.minX - originXPx,
+        minY: fitBoundingBoxPx.minY - originYPx,
+        maxX: fitBoundingBoxPx.maxX - originXPx,
+        maxY: fitBoundingBoxPx.maxY - originYPx,
+      }
+      : fitBoundingBoxPx,
+  };
+}
+
 function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   if (!shell || typeof shell !== 'object' || !shell.isochroneCanvas) {
     return false;
@@ -1585,8 +1675,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
     renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
       cycleMinutes: colourCycleMinutes,
       colourTheme,
-      viewport,
-      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+      ...translateViewportIntoGrid(viewport, mapData.boundaryFitBoundingBoxPx, mapData.travelTimeGrid),
     });
     return true;
   }
@@ -1618,8 +1707,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
       },
     );
     blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
-      viewport,
-      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+      ...translateViewportIntoGrid(viewport, mapData.boundaryFitBoundingBoxPx, mapData.pixelGrid),
     });
     return true;
   }
@@ -2075,8 +2163,22 @@ export async function initializeMapData(shell, options = {}) {
     const nodePixels = precomputeNodePixelCoordinates(graph);
     const nodeModeMask = precomputeNodeModeMask(graph);
     const nodeSpatialIndex = createNodeSpatialIndex(graph, nodePixels);
-    const pixelGrid = createPixelGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
-    const travelTimeGrid = createTravelTimeGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
+    // Render grids cover the most-zoomed-out view, not the routing graph.
+    // Sizing them to the graph meant a region whose ferries reach another
+    // country allocated across that whole envelope: Portsmouth's grid is
+    // 20570 x 24802, so the pair cost ~4 GB - every cell written by the
+    // clears below - for a city about 15 km across.
+    const renderGridExtent = computeRenderGridExtent(graph.header, boundaryFitBoundingBoxPx);
+    const pixelGrid = createPixelGrid(
+      renderGridExtent.widthPx,
+      renderGridExtent.heightPx,
+      renderGridExtent,
+    );
+    const travelTimeGrid = createTravelTimeGrid(
+      renderGridExtent.widthPx,
+      renderGridExtent.heightPx,
+      renderGridExtent,
+    );
     clearGrid(pixelGrid);
     clearTravelTimeGrid(travelTimeGrid);
 
@@ -2091,6 +2193,7 @@ export async function initializeMapData(shell, options = {}) {
       nodeSpatialIndex,
       pixelGrid,
       travelTimeGrid,
+      renderGridExtent,
       viewport: createDefaultMapViewport({ fitBoundingBoxPx: boundaryFitBoundingBoxPx }),
       edgeCostPrecomputeKernel,
       lastRoutingSnapshot: null,
@@ -2179,80 +2282,15 @@ export function precomputeNodePixelCoordinates(graph) {
 }
 
 
-export function createPixelGrid(widthPx, heightPx) {
-  if (!Number.isInteger(widthPx) || widthPx <= 0) {
-    throw new Error('pixel grid width must be a positive integer');
-  }
-  if (!Number.isInteger(heightPx) || heightPx <= 0) {
-    throw new Error('pixel grid height must be a positive integer');
-  }
-
-  return {
-    widthPx,
-    heightPx,
-    rgba: new Uint8ClampedArray(widthPx * heightPx * 4),
-  };
-}
-
-export function clearGrid(pixelGrid) {
-  validatePixelGrid(pixelGrid);
-  for (let i = 3; i < pixelGrid.rgba.length; i += 4) {
-    pixelGrid.rgba[i] = 0;
-  }
-}
-
-export function setPixel(pixelGrid, xPx, yPx, r, g, b, a) {
-  validatePixelGrid(pixelGrid);
-
-  if (xPx < 0 || yPx < 0 || xPx >= pixelGrid.widthPx || yPx >= pixelGrid.heightPx) {
-    return false;
-  }
-
-  const offset = (yPx * pixelGrid.widthPx + xPx) * 4;
-  pixelGrid.rgba[offset] = r;
-  pixelGrid.rgba[offset + 1] = g;
-  pixelGrid.rgba[offset + 2] = b;
-  pixelGrid.rgba[offset + 3] = a;
-  return true;
-}
-
-export function createTravelTimeGrid(widthPx, heightPx) {
-  if (!Number.isInteger(widthPx) || widthPx <= 0) {
-    throw new Error('travel time grid width must be a positive integer');
-  }
-  if (!Number.isInteger(heightPx) || heightPx <= 0) {
-    throw new Error('travel time grid height must be a positive integer');
-  }
-
-  return {
-    widthPx,
-    heightPx,
-    seconds: new Float32Array(widthPx * heightPx),
-  };
-}
-
-export function clearTravelTimeGrid(travelTimeGrid) {
-  validateTravelTimeGrid(travelTimeGrid);
-  travelTimeGrid.seconds.fill(-1);
-}
-
-export function setTravelTimePixelMin(travelTimeGrid, xPx, yPx, seconds) {
-  validateTravelTimeGrid(travelTimeGrid);
-  if (!Number.isFinite(seconds) || seconds < 0) {
-    return false;
-  }
-  if (xPx < 0 || yPx < 0 || xPx >= travelTimeGrid.widthPx || yPx >= travelTimeGrid.heightPx) {
-    return false;
-  }
-
-  const offset = yPx * travelTimeGrid.widthPx + xPx;
-  const currentSeconds = travelTimeGrid.seconds[offset];
-  if (currentSeconds < 0 || seconds < currentSeconds) {
-    travelTimeGrid.seconds[offset] = seconds;
-    return true;
-  }
-  return false;
-}
+export {
+  clearGrid,
+  clearTravelTimeGrid,
+  computeRenderGridExtent,
+  createPixelGrid,
+  createTravelTimeGrid,
+  setPixel,
+  setTravelTimePixelMin,
+} from './render/pixel-grid.js';
 
 
 
@@ -2310,8 +2348,7 @@ export function renderReachableNodes(shell, mapData, distSeconds, options = {}) 
     options,
   );
   blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
-    viewport: mapData.viewport,
-    fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+    ...translateViewportIntoGrid(mapData.viewport, mapData.boundaryFitBoundingBoxPx, mapData.pixelGrid),
   });
   return paintedNodeCount;
 }
@@ -2453,14 +2490,12 @@ function renderInitialPassByBackend(renderContext) {
     renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
       cycleMinutes: getColourCycleMinutesFromShell(shell),
       colourTheme: renderContext.colourTheme,
-      viewport,
-      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+      ...translateViewportIntoGrid(viewport, mapData.boundaryFitBoundingBoxPx, mapData.travelTimeGrid),
     });
   } else {
     clearGrid(mapData.pixelGrid);
     blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
-      viewport,
-      fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+      ...translateViewportIntoGrid(viewport, mapData.boundaryFitBoundingBoxPx, mapData.pixelGrid),
     });
   }
 }
@@ -2542,8 +2577,7 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
       renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
         cycleMinutes: colourCycleMinutes,
         colourTheme,
-        viewport,
-        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+        ...translateViewportIntoGrid(viewport, mapData.boundaryFitBoundingBoxPx, mapData.travelTimeGrid),
       }),
     );
   } else {
@@ -2575,8 +2609,7 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
     );
     profileMs('onSliceDrawMs', () =>
       blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
-        viewport,
-        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+        ...translateViewportIntoGrid(viewport, mapData.boundaryFitBoundingBoxPx, mapData.pixelGrid),
       }),
     );
   }
@@ -2700,8 +2733,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
       renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
         cycleMinutes: colourCycleMinutes,
         colourTheme,
-        viewport,
-        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+        ...translateViewportIntoGrid(viewport, mapData.boundaryFitBoundingBoxPx, mapData.travelTimeGrid),
       }),
     );
   } else {
@@ -2734,8 +2766,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
     );
     profileMs('finalDrawMs', () =>
       blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
-        viewport,
-        fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+        ...translateViewportIntoGrid(viewport, mapData.boundaryFitBoundingBoxPx, mapData.pixelGrid),
       }),
     );
   }
@@ -3213,26 +3244,6 @@ function validatePixelGrid(pixelGrid) {
   }
 }
 
-function validateTravelTimeGrid(travelTimeGrid) {
-  if (!travelTimeGrid || typeof travelTimeGrid !== 'object') {
-    throw new Error('travelTimeGrid must be an object');
-  }
-  if (!Number.isInteger(travelTimeGrid.widthPx) || travelTimeGrid.widthPx <= 0) {
-    throw new Error('travelTimeGrid.widthPx must be a positive integer');
-  }
-  if (!Number.isInteger(travelTimeGrid.heightPx) || travelTimeGrid.heightPx <= 0) {
-    throw new Error('travelTimeGrid.heightPx must be a positive integer');
-  }
-  if (!(travelTimeGrid.seconds instanceof Float32Array)) {
-    throw new Error('travelTimeGrid.seconds must be a Float32Array');
-  }
-  const expectedLength = travelTimeGrid.widthPx * travelTimeGrid.heightPx;
-  if (travelTimeGrid.seconds.length !== expectedLength) {
-    throw new Error(
-      `travelTimeGrid.seconds length mismatch: got ${travelTimeGrid.seconds.length}, expected ${expectedLength}`,
-    );
-  }
-}
 
 
 
