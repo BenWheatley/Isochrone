@@ -454,6 +454,15 @@ def simplify_overpass_boundaries_for_canvas(
     features = extract_overpass_boundary_features(overpass_json, admin_level=admin_level)
     if not features:
         features = extract_overpass_boundary_features(overpass_json, admin_level=None)
+    # The region's own outline sits at a different admin_level from its
+    # subdivisions, so filtering to the subdivision level discarded it. That is
+    # harmless where subdivisions tile the region, but Mexico City's
+    # admin_level 8 turns up ten scattered colonias plus a smaller entity that
+    # merely shares the city's name, covering 36 x 37 km of a 45 x 60 km
+    # region: the map simply stopped a third of the way down. The outline is
+    # now always kept, and marked so the app can both draw it and use it for
+    # the zoom-out limit.
+    features = _with_region_outline_feature(features, overpass_json, admin_level)
     if not features:
         raise ValueError(
             "No administrative boundary geometry found. "
@@ -470,6 +479,7 @@ def simplify_overpass_boundaries_for_canvas(
     else:
         raise ValueError(f"unsupported units: {units}")
 
+    outline_relation_id = _resolve_region_outline_relation_id(features)
     boundary_bbox_lon_lat = _compute_feature_bbox_lon_lat(features)
     extent_points = _project_extent_points(boundary_bbox_lon_lat, transformer)
 
@@ -479,13 +489,14 @@ def simplify_overpass_boundaries_for_canvas(
                 "relation_id": feature.relation_id,
                 "name": feature.name,
                 "admin_level": feature.admin_level,
+                "is_region_outline": feature.relation_id == outline_relation_id,
                 "paths": feature.paths_lat_lon,
             }
             for feature in features
         ),
         transformer=transformer,
         tolerance=tolerance,
-        extra_field_names=("relation_id", "admin_level"),
+        extra_field_names=("relation_id", "admin_level", "is_region_outline"),
     )
 
     # Natural-feature context (forest, inland water, waterways) always uses its
@@ -738,6 +749,55 @@ def _filter_natural_polygon_features_by_area(
         if largest_ring_area >= min_area_m2:
             kept.append(feature)
     return tuple(kept)
+
+
+def _feature_bbox_area_deg2(feature: BoundaryFeature) -> float:
+    lons = [lon for path in feature.paths_lat_lon for _lat, lon in path]
+    lats = [lat for path in feature.paths_lat_lon for lat, _lon in path]
+    if not lons or not lats:
+        return 0.0
+    return (max(lons) - min(lons)) * (max(lats) - min(lats))
+
+
+def _resolve_region_outline_relation_id(features: tuple[BoundaryFeature, ...]) -> int | None:
+    """The region's own outline: the largest administrative boundary present.
+
+    The Overpass boundary query exports the place relation together with its
+    subdivisions, so the largest of them is the place relation by construction.
+    Comparing bounding-box area rather than ring area is deliberate - a coastal
+    region's outline can enclose less area than an inland subdivision while
+    still spanning far more of the map, and it is the span that decides both
+    what to draw and where to stop zooming out.
+    """
+    if not features:
+        return None
+    return max(features, key=_feature_bbox_area_deg2).relation_id
+
+
+def _with_region_outline_feature(
+    features: tuple[BoundaryFeature, ...],
+    overpass_json: dict[str, Any],
+    admin_level: str | None,
+) -> tuple[BoundaryFeature, ...]:
+    """Adds the region outline back if filtering to the subdivision level lost it."""
+    if admin_level is None or not features:
+        return features
+
+    all_features = extract_overpass_boundary_features(overpass_json, admin_level=None)
+    if not all_features:
+        return features
+
+    outline = max(all_features, key=_feature_bbox_area_deg2)
+    known_ids = {feature.relation_id for feature in features}
+    if outline.relation_id in known_ids:
+        return features
+    # Only if it actually encloses more than the subdivisions do; otherwise the
+    # subdivisions already cover the region and there is nothing to add.
+    if _feature_bbox_area_deg2(outline) <= max(
+        _feature_bbox_area_deg2(feature) for feature in features
+    ):
+        return features
+    return (outline, *features)
 
 
 def _compute_feature_bbox_lon_lat(

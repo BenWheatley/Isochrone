@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-08-22T17:10:01.629231+00:00",
+  "generated_at_utc": "2026-08-22T17:20:07.179703+00:00",
   "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/portsmouth-district-boundaries.osm.json",
   "format": "isochrone-canvas-boundaries-v1",
   "resolution": {
@@ -733,7 +733,8 @@
         ]
       ],
       "relation_id": 127167,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": true
     }
   ],
   "water_features": [

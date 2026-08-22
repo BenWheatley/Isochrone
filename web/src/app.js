@@ -2129,11 +2129,15 @@ export async function initializeMapData(shell, options = {}) {
     updateRenderBackendBadge(shell, renderer);
     layoutMapViewportToContainGraph(shell, graph.header);
     syncCanvasToDisplaySize(shell.isochroneCanvas);
-    // Default/max-zoom-out framing fits the district boundary (+5%) rather
-    // than the full routing grid, which can be dominated by far-flung
-    // ferry endpoints (see osm_graph_extract.py's grid-size-budgeted ferry
-    // inclusion) — the boundary is what a user actually expects to see on
-    // load. Panning still reaches the wider grid at that same zoom level.
+    // Default/max-zoom-out framing fits the boundary (+5%) rather than the
+    // routing grid, which can still run past it by the ferry margin (see
+    // osm_graph_extract.py) - the boundary is what a user expects to see on
+    // load. Panning is held to the same box, so the two agree.
+    //
+    // This spans every boundary feature, which is why the region's own
+    // outline has to be among them: where subdivisions do not tile the region
+    // (Mexico City's admin_level 8 is a handful of colonias) the box would
+    // otherwise stop partway across the map, and so would the zoom-out limit.
     const boundaryFitBoundingBoxPx = computeProjectedFeatureListBoundingBoxPx(
       projectBoundaryBasemapToGraphPaths(boundaryLoad.boundaryPayload, graph.header).features,
     );

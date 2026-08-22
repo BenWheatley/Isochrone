@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-08-20T20:02:58.781869+00:00",
+  "generated_at_utc": "2026-08-22T17:21:07.504851+00:00",
   "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/adelaide-district-boundaries.osm.json",
   "format": "isochrone-canvas-boundaries-v1",
   "resolution": {
@@ -119,7 +119,8 @@
         ]
       ],
       "relation_id": 3093825,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "Campbelltown City Council",
@@ -604,7 +605,8 @@
         ]
       ],
       "relation_id": 9107457,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "City of Burnside",
@@ -1255,7 +1257,8 @@
         ]
       ],
       "relation_id": 9105810,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "City of Charles Sturt",
@@ -2040,7 +2043,8 @@
         ]
       ],
       "relation_id": 9108013,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "City of Holdfast Bay",
@@ -2525,7 +2529,8 @@
         ]
       ],
       "relation_id": 9102763,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "City of Marion",
@@ -3186,7 +3191,8 @@
         ]
       ],
       "relation_id": 9102764,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "City of Mitcham",
@@ -4149,7 +4155,8 @@
         ]
       ],
       "relation_id": 9102859,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "City of Onkaparinga",
@@ -6430,7 +6437,8 @@
         ]
       ],
       "relation_id": 7262204,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": true
     },
     {
       "name": "City of Playford",
@@ -9191,7 +9199,8 @@
         ]
       ],
       "relation_id": 9108093,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "City of Port Adelaide Enfield",
@@ -10392,7 +10401,8 @@
         ]
       ],
       "relation_id": 9108064,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "City of Prospect",
@@ -10637,7 +10647,8 @@
         ]
       ],
       "relation_id": 9108032,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "City of Salisbury",
@@ -11782,7 +11793,8 @@
         ]
       ],
       "relation_id": 9108068,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "City of Tea Tree Gully",
@@ -13001,7 +13013,8 @@
         ]
       ],
       "relation_id": 9107506,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "City of Unley",
@@ -13206,7 +13219,8 @@
         ]
       ],
       "relation_id": 9106078,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "City of West Torrens",
@@ -13833,7 +13847,8 @@
         ]
       ],
       "relation_id": 9106092,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "The City of Norwood Payneham and St Peters",
@@ -14284,7 +14299,8 @@
         ]
       ],
       "relation_id": 9107444,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "The Corporation of the Town of Walkerville",
@@ -14585,7 +14601,8 @@
         ]
       ],
       "relation_id": 9108033,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     },
     {
       "name": "Town of Gawler",
@@ -15102,7 +15119,8 @@
         ]
       ],
       "relation_id": 9106057,
-      "admin_level": "6"
+      "admin_level": "6",
+      "is_region_outline": false
     }
   ],
   "water_features": [
