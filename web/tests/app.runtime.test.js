@@ -50,6 +50,7 @@ import {
   renderIsochroneLegendIfNeeded,
   runSearchTimeSliced,
   computeRenderGridExtent,
+  resolveRenderGridRequirements,
   resolveSpatialIndexCellSizePx,
   setTravelTimePixelMin,
   shouldUploadEdgeGeometry,
@@ -2256,4 +2257,33 @@ test('bucketed spatial index still returns the true nearest node', () => {
       }
     }
   }
+});
+
+test('a GPU renderer allocates neither raster fallback grid', () => {
+  // Every render path is
+  //   if (drawTravelTimeEdges) ... else if (drawTravelTimeGrid) ... else pixelGrid
+  // so a renderer that draws edges never reaches either grid. Allocating them
+  // anyway cost Berlin 61 MiB each - more than the canvas they would have been
+  // drawn into - for buffers nothing ever read.
+  const webglRenderer = {
+    drawTravelTimeEdges() {},
+    drawTravelTimeEdgesFromNodeTimes() {},
+    drawTravelTimeGrid() {},
+  };
+  const canvas2dRenderer = {};
+
+  assert.deepEqual(resolveRenderGridRequirements(webglRenderer), {
+    needsTravelTimeGrid: false,
+    needsPixelGrid: false,
+  });
+  // The 2D fallback has no edge drawing, so it does need one.
+  assert.deepEqual(resolveRenderGridRequirements(canvas2dRenderer), {
+    needsTravelTimeGrid: false,
+    needsPixelGrid: true,
+  });
+  // A renderer with only the grid path gets the grid, not the pixel buffer.
+  assert.deepEqual(resolveRenderGridRequirements({ drawTravelTimeGrid() {} }), {
+    needsTravelTimeGrid: true,
+    needsPixelGrid: false,
+  });
 });

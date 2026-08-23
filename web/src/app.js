@@ -1512,6 +1512,23 @@ function getOrBuildStaticEdgeNodeIndexedVertexDataForModeFromMapData(
  * so it has to be told where the grid sits. Edge draws are unaffected: they
  * work in graph space throughout.
  */
+/**
+ * Which raster fallback grids a renderer will actually reach.
+ *
+ * Every render path is the same ladder: draw edges if it can, else fill the
+ * travel-time grid, else the pixel grid. A WebGL renderer can draw edges, so
+ * it takes the first rung and touches neither grid - even though it also
+ * exposes drawTravelTimeGrid, which is why capability alone is the wrong test.
+ */
+export function resolveRenderGridRequirements(renderer) {
+  const drawsEdges = typeof renderer?.drawTravelTimeEdges === 'function';
+  const drawsTravelTimeGrid = typeof renderer?.drawTravelTimeGrid === 'function';
+  return {
+    needsTravelTimeGrid: !drawsEdges && drawsTravelTimeGrid,
+    needsPixelGrid: !drawsEdges && !drawsTravelTimeGrid,
+  };
+}
+
 function translateViewportIntoGrid(viewport, fitBoundingBoxPx, grid) {
   const originXPx = grid?.originXPx ?? 0;
   const originYPx = grid?.originYPx ?? 0;
@@ -2167,24 +2184,28 @@ export async function initializeMapData(shell, options = {}) {
     const nodePixels = precomputeNodePixelCoordinates(graph);
     const nodeModeMask = precomputeNodeModeMask(graph);
     const nodeSpatialIndex = createNodeSpatialIndex(graph, nodePixels);
-    // Render grids cover the most-zoomed-out view, not the routing graph.
-    // Sizing them to the graph meant a region whose ferries reach another
-    // country allocated across that whole envelope: Portsmouth's grid is
-    // 20570 x 24802, so the pair cost ~4 GB - every cell written by the
-    // clears below - for a city about 15 km across.
+    // Render grids are raster fallbacks, allocated only for a renderer that
+    // will actually reach them. Every render path is
+    //   if (drawTravelTimeEdges) ... else if (drawTravelTimeGrid) ... else pixelGrid
+    // and a WebGL renderer has drawTravelTimeEdges, so it always takes the
+    // first branch and touches neither grid. Allocating them regardless cost
+    // Berlin 61 MiB each - far more than the canvas they would have been
+    // drawn into - for buffers nothing read.
     const renderGridExtent = computeRenderGridExtent(graph.header, boundaryFitBoundingBoxPx);
-    const pixelGrid = createPixelGrid(
-      renderGridExtent.widthPx,
-      renderGridExtent.heightPx,
-      renderGridExtent,
-    );
-    const travelTimeGrid = createTravelTimeGrid(
-      renderGridExtent.widthPx,
-      renderGridExtent.heightPx,
-      renderGridExtent,
-    );
-    clearGrid(pixelGrid);
-    clearTravelTimeGrid(travelTimeGrid);
+    const { needsTravelTimeGrid, needsPixelGrid } = resolveRenderGridRequirements(renderer);
+
+    const pixelGrid = needsPixelGrid
+      ? createPixelGrid(renderGridExtent.widthPx, renderGridExtent.heightPx, renderGridExtent)
+      : null;
+    const travelTimeGrid = needsTravelTimeGrid
+      ? createTravelTimeGrid(renderGridExtent.widthPx, renderGridExtent.heightPx, renderGridExtent)
+      : null;
+    if (pixelGrid) {
+      clearGrid(pixelGrid);
+    }
+    if (travelTimeGrid) {
+      clearTravelTimeGrid(travelTimeGrid);
+    }
 
     return {
       boundarySummary: boundaryLoad.boundarySummary,
@@ -2794,7 +2815,9 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;
   const supportsGpuEdgeInterpolation = typeof renderer.drawTravelTimeEdges === 'function';
   const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
-  if (supportsGpuTravelTimeRendering && !mapData.travelTimeGrid) {
+  // Only the branch that actually runs needs its grid: a renderer that can
+  // draw edges never reaches the travel-time grid, whatever else it exposes.
+  if (!supportsGpuEdgeInterpolation && supportsGpuTravelTimeRendering && !mapData.travelTimeGrid) {
     throw new Error('mapData.travelTimeGrid is required for GPU travel-time rendering');
   }
 
@@ -3132,8 +3155,8 @@ export function runGpuCpuParityDiagnostic(renderer, mapData, searchState, option
   if (!mapData || typeof mapData !== 'object') {
     throw new Error('mapData must be an object');
   }
-  if (!mapData.graph || !mapData.nodePixels || !mapData.pixelGrid) {
-    throw new Error('mapData.graph, mapData.nodePixels, and mapData.pixelGrid are required');
+  if (!mapData.graph || !mapData.nodePixels) {
+    throw new Error('mapData.graph and mapData.nodePixels are required');
   }
   if (!searchState || typeof searchState !== 'object') {
     throw new Error('searchState must be an object');
@@ -3161,7 +3184,16 @@ export function runGpuCpuParityDiagnostic(renderer, mapData, searchState, option
   const sampleSeed = options.sampleSeed ?? 0x5f3759df;
   const perChannelThreshold = clampInt(Math.round(options.perChannelThreshold ?? 64), 0, 255);
 
-  const referenceGrid = createPixelGrid(mapData.pixelGrid.widthPx, mapData.pixelGrid.heightPx);
+  // Sized from the render extent rather than from mapData.pixelGrid, which a
+  // GPU renderer no longer allocates - this only ever needed the dimensions.
+  const referenceExtent = mapData.pixelGrid
+    ?? mapData.renderGridExtent
+    ?? computeRenderGridExtent(mapData.graph.header, mapData.boundaryFitBoundingBoxPx ?? null);
+  const referenceGrid = createPixelGrid(
+    referenceExtent.widthPx,
+    referenceExtent.heightPx,
+    referenceExtent,
+  );
   clearGrid(referenceGrid);
   paintAllReachableEdgeInterpolationsToGrid(
     referenceGrid,
