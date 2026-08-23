@@ -1,23 +1,19 @@
 # Isochrone
 
 An isochrone map shows how far one can travel in a given time. This
-application computes that reachable area across an entire road and public
-transport network, in the browser, from a point chosen on the map — and
-recomputes it in a fraction of a second as the departure point, transport
-mode, departure time or travelling speed is changed.
+web app computes that reachable area across an entire road, foot, cycle, and public
+transport network, in the browser, from wherever you choose in a map. It is designed with performance in mind, so will recompute this in milliseconds even on a normal laptop.
 
-**[Open the application](https://benwheatley.github.io/Isochrone/web/)**
+**[Open the web app](https://benwheatley.github.io/Isochrone/web/)**
 
-Sixteen regions are available, across five continents. Routing is exact
-rather than approximate: a full travel-time field is computed over every
-reachable node in the network, with no distance cut-off and no server round
-trip. Where a region carries timetable data, journeys combine walking with
-scheduled public transport at a departure time of the reader's choosing.
+Sixteen regions are available, across five continents. Routing is as exact as possible given the source data, not approximate, however this does mean that where the OpenStreetMap fails to join two roads or footpaths etc, this can look like an entire cul-de-sac is unable to reach anywhere else.
+
+The app runs entirely client side: There is no account, no tracking, and no analytics.
+
+Where it is available under an Open Source licence, public transit data has been included. At time of writing, this means just Berlin and Adelaide; as public transit is time-specific, it is possible to choose your date and time of departure.
 
 The result may be exported as vector artwork, or printed as a poster, with
 the map, legend, scale bar and data attributions laid out for the page.
-
-There is no account, no tracking, and no analytics.
 
 ## Contents
 
@@ -76,16 +72,9 @@ under **Options** in the header.
 
 ## How it works
 
-The application is built around the observation that an isochrone is a
-shortest-path problem over a network, not an image-processing problem over a
-grid. Travel times are therefore computed on the network itself and rendered
-from it directly.
+The application is built around the observation that an isochrone is a shortest-path problem over a graph (the travel network), not an image-processing problem over a grid. Travel times are therefore computed on the travel graph itself and rendered from it directly.
 
-**Preprocessing.** A Python pipeline retrieves OpenStreetMap extracts through
-the Overpass API, projects them into an appropriate metric coordinate system,
-simplifies degree-two chains, and emits a compact binary graph. Where a region
-carries timetable data, GTFS stops and connections are folded into the same
-file. The binary format is documented in
+**Preprocessing.** A Python pipeline retrieves OpenStreetMap extracts through the Overpass API, projects them into an appropriate metric coordinate system, simplifies degree-two chains, and emits a compact binary graph to minimise what the user has to download. Where a region carries timetable data, GTFS stops and connections are folded into the same file. The binary format is documented in
 [Graph Binary Schema v2](docs/graph-binary-schema-v2.md).
 
 **Routing.** A Rust kernel compiled to WebAssembly performs the search. For a
