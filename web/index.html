@@ -221,18 +221,18 @@
           </span>
           <span id="routing-disclaimer-transit" hidden>
             ;
-            <span data-i18n="body.disclaimer.transit">
-              Public transit data © VBB (Verkehrsverbund Berlin-Brandenburg), available under the
-              Creative Commons Attribution 4.0 licence (CC BY 4.0):
-            </span>
+            <!-- Operator, licence and link are filled in per region from the
+                 locations manifest by updateTransitControlAvailability: which
+                 body to credit is a property of the region's feed, not of the
+                 language the page is in. Deliberately no data-i18n here, or
+                 re-applying the locale would overwrite the filled text. -->
+            <span id="routing-disclaimer-transit-text"></span>
             <a
-              href="http://www.vbb.de/vbbgtfs"
+              id="routing-disclaimer-transit-link"
+              href=""
               target="_blank"
               rel="noopener noreferrer"
-              data-i18n="body.disclaimer.transit.link"
-            >
-              http://www.vbb.de/vbbgtfs
-            </a>
+            ></a>
           </span>
         </div>
       </footer>

@@ -11,6 +11,12 @@
       "epsg": 25833,
       "transitFeed": {
         "baseUrl": "https://vbb-gtfs.jannisr.de/latest",
+        "archiveFormat": "files",
+        "attribution": {
+          "operator": "VBB (Verkehrsverbund Berlin-Brandenburg)",
+          "licenceName": "Creative Commons Attribution 4.0 (CC BY 4.0)",
+          "url": "http://www.vbb.de/vbbgtfs"
+        },
         "licence": "CC BY 4.0 — VBB (Verkehrsverbund Berlin-Brandenburg); mirrored via vbb-gtfs.jannisr.de because VBB's directly-served gtfs.zip has a reproducibly corrupted stop_times.txt entry"
       }
     },
@@ -44,7 +50,7 @@
       },
       "graphFileName": "athens-graph.bin.gz",
       "boundaryFileName": "athens-district-boundaries-canvas.json",
-      "locationRelation": "rel(1370736)[\"name\"=\"Athens\"][\"wikidata\"=\"Q1524\"]",
+      "locationRelation": "rel(1370736)[\"wikidata\"=\"Q1224979\"]",
       "subdivisionAdminLevel": "10",
       "epsg": 2100
     },
@@ -74,6 +80,7 @@
       "graphFileName": "portsmouth-graph.bin.gz",
       "boundaryFileName": "portsmouth-district-boundaries-canvas.json",
       "locationRelation": "rel(127167)[\"name\"=\"Portsmouth\"][\"wikidata\"=\"Q72259\"]",
+      "coastal": true,
       "subdivisionAdminLevel": "10",
       "epsg": 27700
     },
@@ -115,8 +122,19 @@
       "name": "Adelaide",
       "graphFileName": "adelaide-graph.bin.gz",
       "boundaryFileName": "adelaide-district-boundaries-canvas.json",
-      "locationRelation": "rel[\"boundary\"=\"administrative\"][\"wikidata\"=\"Q1094063\"]",
-      "subdivisionAdminLevel": "10",
+      "transitFeed": {
+        "baseUrl": "https://gtfs.adelaidemetro.com.au/v1/static/latest/google_transit.zip",
+        "archiveFormat": "zip",
+        "attribution": {
+          "operator": "Adelaide Metro \u2014 Department for Infrastructure and Transport, South Australia",
+          "licenceName": "Creative Commons Attribution 4.0 (CC BY 4.0)",
+          "url": "https://data.sa.gov.au/data/dataset/https-gtfs-adelaidemetro-com-au"
+        },
+        "licence": "CC BY 4.0 \u2014 confirmed 2026-08-17 via data.sa.gov.au CKAN (license_id=cc-by, license_url=creativecommons.org/licenses/by/4.0, organization \"Department for Infrastructure and Transport\"). Feed URL taken from Adelaide Metro's own OpenAPI spec; guessed paths return 403. Feed is state-wide South Australia, so the build clips it to the region extent."
+      },
+      "locationRelation": "rel(11381689)[\"wikidata\"=\"Q5112\"]",
+      "subdivisionAdminLevel": "6",
+      "coastal": true,
       "epsg": 28354
     },
     {

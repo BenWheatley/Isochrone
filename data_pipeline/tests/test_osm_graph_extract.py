@@ -124,16 +124,19 @@ def test_extract_walkable_graph_input_drops_missing_node_ways(tmp_path: Path) ->
 
 
 def _write_ferry_fixture(path: Path) -> None:
-    # Footway (1, 2) and ferry (20, 21) both sit near Lake Zurich, modelling
-    # a real regional ferry that's walkably close to the core network -
-    # the case select_ferry_ways_within_grid_budget must keep.
+    # Footway network and ferry (20, 21) both sit around Lake Zurich. The
+    # footways span the canton (~40 km), as a real region's road network does,
+    # so the ~20 km lake boat is comfortably inside the region - the case
+    # select_ferry_ways_within_grid_budget must keep. A two-node core a few
+    # metres across would not model this: against that, every ferry looks
+    # like an international route.
     path.write_text(
         """
 {
   "version": 0.6,
   "elements": [
-    {"type": "node", "id": 1, "lat": 47.366, "lon": 8.545},
-    {"type": "node", "id": 2, "lat": 47.3665, "lon": 8.5455},
+    {"type": "node", "id": 1, "lat": 47.20, "lon": 8.40},
+    {"type": "node", "id": 2, "lat": 47.55, "lon": 8.85},
     {"type": "node", "id": 20, "lat": 47.36, "lon": 8.54},
     {"type": "node", "id": 21, "lat": 47.30, "lon": 8.75},
     {
@@ -240,16 +243,17 @@ def test_extract_walkable_graph_input_drops_excessively_long_ferry_ways(
 
 def _write_long_coastal_ferry_fixture(path: Path) -> None:
     # A ~90 km coastal ferry - longer than the old fixed 80 km cutoff would
-    # have allowed, but well within a large region's own extent (e.g. a
-    # real Cyprus coastal route). Must be kept: the region-size budget, not
-    # a fixed per-way distance, is what should decide this now.
+    # have allowed, but well within a large region's own extent: the footways
+    # here span Cyprus (~150 km), as the island's real road network does. Must
+    # be kept, because what decides this is the region's own size, not a fixed
+    # per-way distance.
     path.write_text(
         """
 {
   "version": 0.6,
   "elements": [
-    {"type": "node", "id": 1, "lat": 34.7, "lon": 33.0},
-    {"type": "node", "id": 2, "lat": 34.701, "lon": 33.001},
+    {"type": "node", "id": 1, "lat": 34.65, "lon": 32.30},
+    {"type": "node", "id": 2, "lat": 35.15, "lon": 33.95},
     {"type": "node", "id": 50, "lat": 34.7, "lon": 33.0},
     {"type": "node", "id": 51, "lat": 34.75, "lon": 32.0},
     {
@@ -309,6 +313,9 @@ def test_select_ferry_ways_within_grid_budget_prefers_nearest_ferries_first() ->
         node_coords,
         core_bbox,
         budget_meters=100_000.0,
+        # This test is about the grid budget and the near-first ordering; the
+        # region margin has its own test below.
+        margin_fraction=float("inf"),
     )
 
     accepted_ids = {way.osm_id for way in accepted}
@@ -359,3 +366,57 @@ def test_summarize_constraint_tag_coverage_counts_presence() -> None:
     assert coverage.tag_presence["maxspeed:backward"] == 0
     assert coverage.tag_coverage_ratio["foot"] == 1.0
     assert coverage.tag_coverage_ratio["maxspeed"] == 0.5
+
+
+def test_select_ferry_ways_rejects_routes_that_leave_the_region() -> None:
+    """Portsmouth's real shape: a small city with ferries to another country.
+
+    The map never zooms out past the region's own boundary, so a route
+    reaching far beyond it only ever draws a line off the edge of the view to
+    a destination that is never shown. Its grid came out 206 x 248 km for a
+    city 11 km across.
+    """
+    # Portsea Island, roughly 11 x 12 km.
+    core_bbox = (50.78, -1.11, 50.85, -1.03)
+    node_coords = {
+        # Gosport foot ferry: a few hundred metres across the harbour.
+        1: (50.795, -1.109),
+        2: (50.796, -1.117),
+        # Isle of Wight: outside the region, ~20 km south.
+        3: (50.79, -1.10),
+        4: (50.61, -1.16),
+        # Channel Islands: far outside, ~180 km south.
+        5: (50.79, -1.10),
+        6: (49.18, -2.11),
+    }
+    gosport = WayCandidate(osm_id=100, highway="ferry", node_ids=(1, 2), constraints={})
+    isle_of_wight = WayCandidate(osm_id=200, highway="ferry", node_ids=(3, 4), constraints={})
+    channel_islands = WayCandidate(osm_id=300, highway="ferry", node_ids=(5, 6), constraints={})
+
+    accepted = select_ferry_ways_within_grid_budget(
+        (channel_islands, isle_of_wight, gosport),
+        node_coords,
+        core_bbox,
+    )
+
+    assert {way.osm_id for way in accepted} == {100}
+
+
+def test_select_ferry_ways_margin_floor_keeps_a_crossing_in_a_compact_region() -> None:
+    """A small region must not be held so tightly it loses its own ferry.
+
+    The margin is a fraction of the region's span, which for a compact region
+    is small in absolute terms - hence the floor.
+    """
+    # A town about 1 km across.
+    core_bbox = (51.500, -0.100, 51.509, -0.090)
+    node_coords = {
+        # A crossing just outside it, well within the floor.
+        1: (51.504, -0.089),
+        2: (51.504, -0.080),
+    }
+    crossing = WayCandidate(osm_id=100, highway="ferry", node_ids=(1, 2), constraints={})
+
+    accepted = select_ferry_ways_within_grid_budget((crossing,), node_coords, core_bbox)
+
+    assert {way.osm_id for way in accepted} == {100}

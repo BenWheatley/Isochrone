@@ -10,10 +10,13 @@ from pathlib import Path
 import pytest
 from isochrone_pipeline.region_pipeline import (
     DEFAULT_LOCATIONS_FILE,
+    REQUIRED_GTFS_TRANSIT_FILE_NAMES,
     RegionSpec,
     TransitFeedSpec,
     build_arg_parser,
     build_location_manifest,
+    extract_gtfs_tables_from_archive,
+    fetch_gtfs_transit_files,
     fetch_overpass_json,
     load_region_specs,
     main,
@@ -265,7 +268,7 @@ def test_run_fetch_pipeline_fetches_transit_only_when_component_and_feed_present
 ) -> None:
     input_dir = tmp_path / "input"
     stderr = StringIO()
-    fetch_calls: list[tuple[str, Path]] = []
+    fetch_calls: list[tuple[str, Path, str]] = []
     spec_with_feed = dataclasses.replace(
         _make_region_spec(region_id="berlin", name="Berlin"),
         transit_feed=TransitFeedSpec(
@@ -282,10 +285,15 @@ def test_run_fetch_pipeline_fetches_transit_only_when_component_and_feed_present
         del kwargs
 
     def fake_fetch_gtfs_transit_files(
-        *, base_url: str, output_dir: Path, max_time_seconds: int, stderr=None
+        *,
+        base_url: str,
+        output_dir: Path,
+        max_time_seconds: int,
+        archive_format: str = "files",
+        stderr=None,
     ) -> None:
         del max_time_seconds, stderr
-        fetch_calls.append((base_url, output_dir))
+        fetch_calls.append((base_url, output_dir, archive_format))
 
     run_fetch_pipeline(
         [spec_with_feed, spec_without_feed],
@@ -300,7 +308,7 @@ def test_run_fetch_pipeline_fetches_transit_only_when_component_and_feed_present
     )
 
     assert fetch_calls == [
-        ("https://example.test/gtfs", input_dir / "berlin-transit-gtfs"),
+        ("https://example.test/gtfs", input_dir / "berlin-transit-gtfs", "files"),
     ]
 
 
@@ -351,9 +359,12 @@ def test_committed_region_config_marks_rhode_island_coastal() -> None:
 def test_committed_region_config_uses_deterministic_athens_relation_selector() -> None:
     specs_by_id = {spec.id: spec for spec in load_region_specs(DEFAULT_LOCATIONS_FILE)}
 
-    assert specs_by_id["athens"].location_relation == (
-        'rel(1370736)["name"="Athens"]["wikidata"="Q1524"]'
-    )
+    # The tag filters must match what rel(1370736) actually carries. They did
+    # not until 2026-08-17: the relation is name="Δήμος Αθηναίων" /
+    # wikidata=Q1224979, so filtering on name="Athens"/Q1524 selected nothing
+    # and every routing fetch came back with an empty elements array. Verified
+    # against Overpass; the corrected selector returns 73,846 elements.
+    assert specs_by_id["athens"].location_relation == ('rel(1370736)["wikidata"="Q1224979"]')
 
 
 def test_committed_region_config_uses_deterministic_portsmouth_relation_selector() -> None:
@@ -1049,3 +1060,116 @@ def test_fetch_overpass_json_empty_success_response_writes_debug_bundle(
         == '{"elements":[]}\n'
     )
     assert not output_path.exists()
+
+
+def _write_gtfs_zip(path: Path, tables: dict[str, str]) -> None:
+    import zipfile
+
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, body in tables.items():
+            archive.writestr(name, body)
+
+
+def test_extract_gtfs_tables_from_archive_unpacks_a_zip_feed(tmp_path: Path) -> None:
+    """Most agencies publish one zip; only the Berlin mirror serves loose CSVs."""
+    archive_path = tmp_path / "feed.zip"
+    _write_gtfs_zip(
+        archive_path,
+        {f"{name}.txt": f"{name}-body" for name in REQUIRED_GTFS_TRANSIT_FILE_NAMES},
+    )
+
+    output_dir = tmp_path / "out"
+    extracted = extract_gtfs_tables_from_archive(archive_path=archive_path, output_dir=output_dir)
+
+    for name in REQUIRED_GTFS_TRANSIT_FILE_NAMES:
+        assert (output_dir / f"{name}.txt").read_text() == f"{name}-body"
+    # transfers.txt is optional in GTFS; its absence must not fail the fetch.
+    assert "transfers" not in extracted
+    assert not (output_dir / "transfers.txt").exists()
+
+
+def test_extract_gtfs_tables_from_archive_reads_tables_nested_in_a_folder(
+    tmp_path: Path,
+) -> None:
+    """Some publishers wrap the tables in a directory inside the archive."""
+    archive_path = tmp_path / "feed.zip"
+    _write_gtfs_zip(
+        archive_path,
+        {f"gtfs/{name}.txt": f"{name}-body" for name in REQUIRED_GTFS_TRANSIT_FILE_NAMES},
+    )
+
+    output_dir = tmp_path / "out"
+    extract_gtfs_tables_from_archive(archive_path=archive_path, output_dir=output_dir)
+
+    assert (output_dir / "stop_times.txt").read_text() == "stop_times-body"
+
+
+def test_extract_gtfs_tables_from_archive_rejects_missing_required_tables(
+    tmp_path: Path,
+) -> None:
+    archive_path = tmp_path / "feed.zip"
+    _write_gtfs_zip(archive_path, {"agency.txt": "a", "stops.txt": "s"})
+
+    with pytest.raises(RuntimeError) as excinfo:
+        extract_gtfs_tables_from_archive(archive_path=archive_path, output_dir=tmp_path / "out")
+
+    message = str(excinfo.value)
+    # One run should name every missing table, not just the first.
+    assert "stop_times" in message
+    assert "trips" in message
+
+
+def test_extract_gtfs_tables_from_archive_rejects_a_corrupt_archive(tmp_path: Path) -> None:
+    archive_path = tmp_path / "feed.zip"
+    archive_path.write_bytes(b"not a zip at all")
+
+    with pytest.raises(RuntimeError, match="not a valid zip file"):
+        extract_gtfs_tables_from_archive(archive_path=archive_path, output_dir=tmp_path / "out")
+
+
+def test_fetch_gtfs_transit_files_rejects_an_unknown_archive_format(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="archive_format"):
+        fetch_gtfs_transit_files(
+            base_url="https://example.test/feed",
+            output_dir=tmp_path / "out",
+            max_time_seconds=30,
+            archive_format="tarball",
+        )
+
+
+def test_committed_region_config_wires_adelaide_transit_as_a_zip_feed() -> None:
+    specs_by_id = {spec.id: spec for spec in load_region_specs(DEFAULT_LOCATIONS_FILE)}
+    feed = specs_by_id["adelaide"].transit_feed
+
+    assert feed is not None
+    # Adelaide publishes a single archive, unlike the Berlin mirror's CSVs.
+    assert feed.archive_format == "zip"
+    assert feed.base_url.endswith("google_transit.zip")
+
+
+def test_committed_region_config_carries_attribution_for_every_transit_feed() -> None:
+    """Every feed we ingest is licensed on condition of attribution.
+
+    A feed configured without one would silently ship uncredited data, so this
+    is a licence-compliance gate rather than a style check.
+    """
+    for spec in load_region_specs(DEFAULT_LOCATIONS_FILE):
+        if spec.transit_feed is None:
+            continue
+        attribution = spec.transit_feed.attribution
+        assert attribution is not None, f"{spec.id} has a transit feed but no attribution"
+        assert attribution.operator
+        assert attribution.licence_name
+        assert attribution.url.startswith("http")
+
+
+def test_manifest_entry_carries_transit_attribution_to_the_web_app() -> None:
+    specs_by_id = {spec.id: spec for spec in load_region_specs(DEFAULT_LOCATIONS_FILE)}
+    manifest = build_location_manifest(
+        [specs_by_id["adelaide"]],
+        transit_date_ranges={"adelaide": {"min": "2026-08-20", "max": "2026-10-11"}},
+    )
+
+    entry = manifest["locations"][0]
+    assert entry["transitAttribution"]["operator"].startswith("Adelaide Metro")
+    assert "CC BY 4.0" in entry["transitAttribution"]["licenceName"]

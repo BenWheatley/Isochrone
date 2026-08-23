@@ -32,6 +32,7 @@ import {
 } from './units.js';
 import {
   applyCommonMessagesToDocument,
+  formatCommonMessage,
   getCommonMessage,
 } from './localization.js';
 
@@ -65,6 +66,12 @@ export function initializeAppShell(doc, options = {}) {
   const routingDisclaimer = resolvedDocument.getElementById('routing-disclaimer');
   const routingDisclaimerOsm = resolvedDocument.getElementById('routing-disclaimer-osm');
   const routingDisclaimerTransit = resolvedDocument.getElementById('routing-disclaimer-transit');
+  const routingDisclaimerTransitText = resolvedDocument.getElementById(
+    'routing-disclaimer-transit-text',
+  );
+  const routingDisclaimerTransitLink = resolvedDocument.getElementById(
+    'routing-disclaimer-transit-link',
+  );
   const themeRadios = Array.from(resolvedDocument.querySelectorAll('input[name="theme"]'));
   const unitSystemRadios = Array.from(
     resolvedDocument.querySelectorAll('input[name="unit-system"]'),
@@ -272,6 +279,8 @@ export function initializeAppShell(doc, options = {}) {
     routingDisclaimer,
     routingDisclaimerOsm,
     routingDisclaimerTransit,
+    routingDisclaimerTransitText,
+    routingDisclaimerTransitLink,
     themeRadios,
     unitSystemRadios,
     speedUnitLabelElement,
@@ -926,6 +935,55 @@ function parsePositiveFloatOrNull(rawValue) {
  * defaults to "now" clamped into that range. options.nowIsoDatetime
  * overrides "now" for deterministic tests.
  */
+/**
+ * Fills the transit credit line from the region's own attribution.
+ *
+ * The surrounding sentence is translated; the operator name and licence are
+ * not, because they are the legal identity of the data source rather than
+ * prose. Passing null clears the line, so a region without transit data can
+ * never show the previous region's credit.
+ */
+export function applyTransitAttributionToShell(shell, attribution, messages = null) {
+  const textNode = shell?.routingDisclaimerTransitText ?? null;
+  const linkNode = shell?.routingDisclaimerTransitLink ?? null;
+  if (!textNode && !linkNode) {
+    return false;
+  }
+
+  const operator = typeof attribution?.operator === 'string' ? attribution.operator.trim() : '';
+  const licence = typeof attribution?.licenceName === 'string' ? attribution.licenceName.trim() : '';
+  const url = typeof attribution?.url === 'string' ? attribution.url.trim() : '';
+
+  if (operator.length === 0) {
+    if (textNode) {
+      textNode.textContent = '';
+    }
+    if (linkNode) {
+      linkNode.textContent = '';
+      linkNode.removeAttribute('href');
+    }
+    return false;
+  }
+
+  if (textNode) {
+    textNode.textContent = formatCommonMessage(
+      messages,
+      'body.disclaimer.transit',
+      { operator, licence },
+      `Public transit data © ${operator}, available under the ${licence} licence:`,
+    );
+  }
+  if (linkNode) {
+    linkNode.textContent = url;
+    if (url.length > 0) {
+      linkNode.setAttribute('href', url);
+    } else {
+      linkNode.removeAttribute('href');
+    }
+  }
+  return true;
+}
+
 export function updateTransitControlAvailability(shell, hasTransitData, options = {}) {
   if (!shell || typeof shell !== 'object') {
     throw new Error('shell is required');
@@ -940,6 +998,11 @@ export function updateTransitControlAvailability(shell, hasTransitData, options 
   if (shell.routingDisclaimerTransit) {
     shell.routingDisclaimerTransit.hidden = !hasTransitData;
   }
+  applyTransitAttributionToShell(
+    shell,
+    hasTransitData ? options.transitAttribution : null,
+    options.messages,
+  );
   if (shell.departureDatetimeRow) {
     shell.departureDatetimeRow.hidden = !hasTransitData;
   }

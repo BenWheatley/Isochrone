@@ -58,6 +58,27 @@ function normalizeLocalizedNames(value, fieldName) {
   return Object.fromEntries(normalizedEntries);
 }
 
+/**
+ * Who to credit for a region's transit data, and under what licence.
+ *
+ * Validated rather than passed through: a feed whose credit is malformed must
+ * fail loudly at load, because the alternative is shipping CC BY data with no
+ * visible attribution, which breaches the licence silently.
+ */
+function normalizeTransitAttribution(value, fieldName) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an object when provided`);
+  }
+  return {
+    operator: normalizeNonEmptyString(value.operator, `${fieldName}.operator`),
+    licenceName: normalizeNonEmptyString(value.licenceName, `${fieldName}.licenceName`),
+    url: normalizeNonEmptyString(value.url, `${fieldName}.url`),
+  };
+}
+
 function compareLocationEntriesAlphabetically(left, right) {
   const nameOrder = left.name.localeCompare(right.name, undefined, {
     sensitivity: 'base',
@@ -111,6 +132,10 @@ export function parseLocationRegistry(payload) {
       entry?.transitDateRange,
       `locations[${index}].transitDateRange`,
     );
+    const transitAttribution = normalizeTransitAttribution(
+      entry?.transitAttribution,
+      `locations[${index}].transitAttribution`,
+    );
     if (seenLocationIds.has(id)) {
       throw new Error(`duplicate location id: ${id}`);
     }
@@ -120,6 +145,7 @@ export function parseLocationRegistry(payload) {
       ...base,
       ...(localizedNames === undefined ? null : { localizedNames }),
       ...(transitDateRange === undefined ? null : { transitDateRange }),
+      ...(transitAttribution === undefined ? null : { transitAttribution }),
     };
   });
 

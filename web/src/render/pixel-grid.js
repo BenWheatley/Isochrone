@@ -67,7 +67,102 @@ export function validateTravelTimeGrid(travelTimeGrid) {
   }
 }
 
-export function createPixelGrid(widthPx, heightPx) {
+// Render grids are sized to what can actually be shown, not to the routing
+// graph. Those differ wildly: a region whose ferries reach another country has
+// a routing grid hundreds of kilometres across, while the map never zooms out
+// past its own boundary. Portsmouth's graph is 20570 x 24802 cells - 2 GB as
+// floats, and wider than any GPU will accept as a texture - for a city about
+// 15 km across.
+//
+// Writes still arrive in graph pixel coordinates; the grid subtracts its
+// origin, and anything outside falls out through the bounds check that was
+// already there.
+
+/** Largest render grid we will allocate, in cells (~64 MB as Float32). */
+export const MAX_RENDER_GRID_CELLS = 16_000_000;
+
+/**
+ * Conservative cap on one grid axis. GL_MAX_TEXTURE_SIZE is 16384 on most
+ * hardware and the travel-time grid is uploaded as a single texture, so a
+ * wider grid could never be drawn even if it fitted in memory.
+ */
+export const MAX_RENDER_GRID_AXIS = 16_384;
+
+function normalizeGridOrigin(options = {}) {
+  const originXPx = Number.isInteger(options.originXPx) ? options.originXPx : 0;
+  const originYPx = Number.isInteger(options.originYPx) ? options.originYPx : 0;
+  return { originXPx, originYPx };
+}
+
+/**
+ * The slice of graph pixel space a render grid needs to cover: the map's
+ * most-zoomed-out view, clipped to the graph and to the budget above.
+ *
+ * Returns graph-pixel origin and size, so a caller can both allocate the grid
+ * and translate draw coordinates into it.
+ */
+export function computeRenderGridExtent(graphHeader, fitBoundingBoxPx = null, options = {}) {
+  const gridWidthPx = graphHeader?.gridWidthPx;
+  const gridHeightPx = graphHeader?.gridHeightPx;
+  if (!Number.isInteger(gridWidthPx) || gridWidthPx <= 0) {
+    throw new Error('graphHeader.gridWidthPx must be a positive integer');
+  }
+  if (!Number.isInteger(gridHeightPx) || gridHeightPx <= 0) {
+    throw new Error('graphHeader.gridHeightPx must be a positive integer');
+  }
+  const maxCells = Number.isFinite(options.maxCells) && options.maxCells > 0
+    ? options.maxCells
+    : MAX_RENDER_GRID_CELLS;
+  const maxAxis = Number.isFinite(options.maxAxis) && options.maxAxis > 0
+    ? options.maxAxis
+    : MAX_RENDER_GRID_AXIS;
+
+  let originXPx = 0;
+  let originYPx = 0;
+  let widthPx = gridWidthPx;
+  let heightPx = gridHeightPx;
+
+  if (
+    fitBoundingBoxPx
+    && Number.isFinite(fitBoundingBoxPx.minX)
+    && Number.isFinite(fitBoundingBoxPx.minY)
+    && Number.isFinite(fitBoundingBoxPx.maxX)
+    && Number.isFinite(fitBoundingBoxPx.maxY)
+  ) {
+    // Pad to match the viewport's own fit padding, so the grid covers
+    // everything the default view shows rather than stopping at its edge.
+    const padding = Number.isFinite(options.paddingFactor) ? options.paddingFactor : 0.1;
+    const boxWidth = Math.max(1, fitBoundingBoxPx.maxX - fitBoundingBoxPx.minX);
+    const boxHeight = Math.max(1, fitBoundingBoxPx.maxY - fitBoundingBoxPx.minY);
+    const padX = boxWidth * padding;
+    const padY = boxHeight * padding;
+    const minX = Math.max(0, Math.floor(fitBoundingBoxPx.minX - padX));
+    const minY = Math.max(0, Math.floor(fitBoundingBoxPx.minY - padY));
+    const maxX = Math.min(gridWidthPx, Math.ceil(fitBoundingBoxPx.maxX + padX));
+    const maxY = Math.min(gridHeightPx, Math.ceil(fitBoundingBoxPx.maxY + padY));
+    if (maxX > minX && maxY > minY) {
+      originXPx = minX;
+      originYPx = minY;
+      widthPx = maxX - minX;
+      heightPx = maxY - minY;
+    }
+  }
+
+  // Budget. Clipping rather than downsampling keeps grid coordinates equal to
+  // graph coordinates minus the origin, which is what lets every existing
+  // painter carry on unchanged.
+  widthPx = Math.min(widthPx, maxAxis);
+  heightPx = Math.min(heightPx, maxAxis);
+  if (widthPx * heightPx > maxCells) {
+    const shrink = Math.sqrt(maxCells / (widthPx * heightPx));
+    widthPx = Math.max(1, Math.floor(widthPx * shrink));
+    heightPx = Math.max(1, Math.floor(heightPx * shrink));
+  }
+
+  return { originXPx, originYPx, widthPx, heightPx };
+}
+
+export function createPixelGrid(widthPx, heightPx, options = {}) {
   if (!Number.isInteger(widthPx) || widthPx <= 0) {
     throw new Error('pixel grid width must be a positive integer');
   }
@@ -78,6 +173,7 @@ export function createPixelGrid(widthPx, heightPx) {
   return {
     widthPx,
     heightPx,
+    ...normalizeGridOrigin(options),
     rgba: new Uint8ClampedArray(widthPx * heightPx * 4),
   };
 }
@@ -92,11 +188,13 @@ export function clearGrid(pixelGrid) {
 export function setPixel(pixelGrid, xPx, yPx, r, g, b, a) {
   validatePixelGrid(pixelGrid);
 
-  if (xPx < 0 || yPx < 0 || xPx >= pixelGrid.widthPx || yPx >= pixelGrid.heightPx) {
+  const localX = xPx - (pixelGrid.originXPx ?? 0);
+  const localY = yPx - (pixelGrid.originYPx ?? 0);
+  if (localX < 0 || localY < 0 || localX >= pixelGrid.widthPx || localY >= pixelGrid.heightPx) {
     return false;
   }
 
-  const offset = (yPx * pixelGrid.widthPx + xPx) * 4;
+  const offset = (localY * pixelGrid.widthPx + localX) * 4;
   pixelGrid.rgba[offset] = r;
   pixelGrid.rgba[offset + 1] = g;
   pixelGrid.rgba[offset + 2] = b;
@@ -104,7 +202,7 @@ export function setPixel(pixelGrid, xPx, yPx, r, g, b, a) {
   return true;
 }
 
-export function createTravelTimeGrid(widthPx, heightPx) {
+export function createTravelTimeGrid(widthPx, heightPx, options = {}) {
   if (!Number.isInteger(widthPx) || widthPx <= 0) {
     throw new Error('travel time grid width must be a positive integer');
   }
@@ -115,6 +213,7 @@ export function createTravelTimeGrid(widthPx, heightPx) {
   return {
     widthPx,
     heightPx,
+    ...normalizeGridOrigin(options),
     seconds: new Float32Array(widthPx * heightPx),
   };
 }
@@ -129,11 +228,18 @@ export function setTravelTimePixelMin(travelTimeGrid, xPx, yPx, seconds) {
   if (!Number.isFinite(seconds) || seconds < 0) {
     return false;
   }
-  if (xPx < 0 || yPx < 0 || xPx >= travelTimeGrid.widthPx || yPx >= travelTimeGrid.heightPx) {
+  const localX = xPx - (travelTimeGrid.originXPx ?? 0);
+  const localY = yPx - (travelTimeGrid.originYPx ?? 0);
+  if (
+    localX < 0
+    || localY < 0
+    || localX >= travelTimeGrid.widthPx
+    || localY >= travelTimeGrid.heightPx
+  ) {
     return false;
   }
 
-  const offset = yPx * travelTimeGrid.widthPx + xPx;
+  const offset = localY * travelTimeGrid.widthPx + localX;
   const currentSeconds = travelTimeGrid.seconds[offset];
   if (currentSeconds < 0 || seconds < currentSeconds) {
     travelTimeGrid.seconds[offset] = seconds;
