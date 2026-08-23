@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "isochrone"
 version = "0.1.0"
-description = "Berlin isochrone preprocessing pipeline"
+description = "Multi-region isochrone preprocessing pipeline"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

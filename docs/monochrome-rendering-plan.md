@@ -4,7 +4,8 @@ Making the isochrone read correctly on devices with no colour: black-and-white
 printers, basic e-Ink, and for viewers with total colourblindness
 (achromatopsia).
 
-Status: **plan only, nothing implemented.** Written 2026-08-21.
+Status: **plan only, nothing implemented.** Written 2026-08-21; grid
+allocation section revised 2026-08-23 once that work landed.
 
 ## Why the current output fails
 
@@ -119,12 +120,19 @@ significant piece of work on its own and materially changes the estimate.
 
 ## Interaction with grid allocation
 
-`initializeMapData` currently allocates two full-graph-sized grids eagerly and
-writes to every cell. For Portsmouth, whose grid is sized to its ferry extent
-(20570 x 24802), that is ~4 GB touched on every load. That is being fixed
-separately, and this plan must not reintroduce it: the contouring raster is
-**transient, sized to the output, and discarded**, never a persistent
-graph-sized buffer.
+When this plan was written, `initializeMapData` allocated two
+full-graph-sized grids eagerly and wrote to every cell - about 4 GB on
+Portsmouth, whose grid was then sized to a ferry route reaching France. That
+has since been fixed on three fronts: ferries no longer inflate a region's
+extent, the grids are sized to the visible view rather than the graph, and
+they are allocated only for a renderer that will actually read them, which a
+WebGL renderer never does.
+
+The constraint that fix implies for this plan still stands, and is the reason
+the contouring raster must be **transient, sized to the output, and
+discarded** rather than a persistent graph-sized buffer. A contouring pass
+that allocated per region, at graph resolution, for the lifetime of the map
+would reintroduce exactly what was removed.
 
 ## Verification
 

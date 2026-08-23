@@ -1,224 +1,178 @@
 # Isochrone
 
-Isochrone (equal-time) map renderer, as a single-page web app.
+An isochrone map shows how far one can travel in a given time. This
+application computes that reachable area across an entire road and public
+transport network, in the browser, from a point chosen on the map — and
+recomputes it in a fraction of a second as the departure point, transport
+mode, departure time or travelling speed is changed.
 
-Front end: minimal web application, aiming for performance and usability, no analytics etc.
+**[Open the application](https://benwheatley.github.io/Isochrone/web/)**
 
-Back end: a Python preprocessing pipeline
+Sixteen regions are available, across five continents. Routing is exact
+rather than approximate: a full travel-time field is computed over every
+reachable node in the network, with no distance cut-off and no server round
+trip. Where a region carries timetable data, journeys combine walking with
+scheduled public transport at a departure time of the reader's choosing.
 
-Data: OpenStreetMap, regional public transport (at time of writing, that's just VBB for the Berlin map)
+The result may be exported as vector artwork, or printed as a poster, with
+the map, legend, scale bar and data attributions laid out for the page.
 
-[Live App](https://benwheatley.github.io/Isochrone/web/)
+There is no account, no tracking, and no analytics.
 
-## Quick start
+## Contents
+
+- [Capabilities](#capabilities)
+- [Using the map](#using-the-map)
+- [How it works](#how-it-works)
+- [Regions and data](#regions-and-data)
+- [Development](#development)
+- [Repository structure](#repository-structure)
+- [Third-party licences](#third-party-licences)
+- [Project licence](#project-licence)
+
+## Capabilities
+
+**Transport modes.** Walking, cycling, driving, ferry and public transport,
+selectable in combination. Walking and cycling speeds are adjustable. A ferry
+requires both the ferry mode and a mode in which its vessel may be boarded, so
+a foot-passenger service is available to a pedestrian and a vehicle service is
+not.
+
+**Public transport.** Where a region carries a GTFS feed, the isochrone
+accounts for scheduled services from a chosen departure date and time, subject
+to a configurable limit on the walking distance permitted at either end of a
+transit leg.
+
+**Presentation.** Light and dark themes; metric and imperial units, defaulting
+to the reader's own locale rather than the region displayed; an adjustable
+colour period, the interval after which the isochrone's colour bands repeat.
+
+**Localisation.** English, German and French.
+
+**Export.** Vector SVG and print output, both laid out as a poster rather than
+as a screen capture: title, colour legend, scale bar and the required data
+attributions are composed for the page, and the map is drawn as vector
+geometry throughout.
+
+## Using the map
+
+| Action | Desktop | Touch |
+| --- | --- | --- |
+| Choose an origin | Primary click | Single tap |
+| Pan | Primary drag | Two-finger drag |
+| Zoom | Mouse wheel | Two-finger pinch |
+| Move the origin | Secondary drag | — |
+
+Panning and zooming redraw the existing result; neither begins a new
+calculation.
+
+The region, origin node, transport modes, speeds, departure time, colour
+period and interface language are all held in the URL, so that any particular
+view may be bookmarked or shared. For example,
+`?region=berlin&modes=walk,transit&cycle=60&lang=de`.
+
+Themes, units, pointer-button assignment and the remaining controls are found
+under **Options** in the header.
+
+## How it works
+
+The application is built around the observation that an isochrone is a
+shortest-path problem over a network, not an image-processing problem over a
+grid. Travel times are therefore computed on the network itself and rendered
+from it directly.
+
+**Preprocessing.** A Python pipeline retrieves OpenStreetMap extracts through
+the Overpass API, projects them into an appropriate metric coordinate system,
+simplifies degree-two chains, and emits a compact binary graph. Where a region
+carries timetable data, GTFS stops and connections are folded into the same
+file. The binary format is documented in
+[Graph Binary Schema v2](docs/graph-binary-schema-v2.md).
+
+**Routing.** A Rust kernel compiled to WebAssembly performs the search. For a
+region with public transport this runs in three stages: a pedestrian search
+from the origin, a Connection Scan over the timetable seeded from the stops
+that search reached, and a second multi-source search reseeded at every stop
+the timetable improved. The kernel is required; there is no JavaScript
+fallback for routing.
+
+**Rendering.** Edges are drawn by the GPU, with each endpoint's travel time
+interpolated along the edge, so a road crossed midway is shaded accordingly.
+A 2D canvas path exists for browsers without WebGL.
+
+Edge traversal costs are derived at query time from a single stored length per
+edge, which is why changing a walking speed or a transport mode re-renders
+without returning to the network.
+
+## Regions and data
+
+Sixteen regions are configured: Adelaide, Athens, Berlin, Canton of Zurich,
+Cologne, Cyprus, London, Luxembourg, Mexico City, Nairobi, Ottawa, Paris,
+Portsmouth, Rhode Island, Rome and Singapore.
+
+Berlin and Adelaide additionally carry public transport timetables. Further
+regions may be added; the procedure, and a survey of candidate timetable feeds
+together with their licensing, are set out in
+[Setup and Region Onboarding](docs/setup-and-regions.md) and the
+[Transit Feed Registry](docs/transit_feed_registry.md).
+
+## Development
+
+Installation, routine commands, the data pipeline, benchmarking, deployment
+and the procedure for adding a region are documented separately in
+[Setup and Region Onboarding](docs/setup-and-regions.md).
+
+In brief:
 
 ```bash
 make bootstrap
-make precommit-install
 make check
 python -m http.server 8000
 ```
 
-## Daily commands
+Further reading:
 
-```bash
-make lint
-make test
-make review
-```
+- [Delivery plan and architecture roadmap](PLAN.md)
+- [Graph Binary Schema v2](docs/graph-binary-schema-v2.md)
+- [WASM Routing Kernel](docs/wasm-routing-kernel.md)
+- [Region Data Pipeline](docs/region-data-pipeline.md)
+- [Monochrome rendering plan](docs/monochrome-rendering-plan.md)
+- [Agentic Coding Guidelines](docs/agentic-coding-guidelines.md)
 
-## OSM data pipeline
-
-```bash
-./data_pipeline/region-data.py fetch
-```
-
-- For the current CLI options and examples, run `./data_pipeline/region-data.py --help` or `./data_pipeline/region-data.py <subcommand> --help`.
-- The executable script prefers the repo's `.venv/bin/python` when that virtualenv exists, so `./data_pipeline/region-data.py ...` works after `make bootstrap` even if your interactive shell is using a different Python.
-- Region configuration lives in `data_pipeline/regions.json`.
-- Default configured locations are: Berlin, Paris, London, Rome, and Luxembourg (country).
-- `subdivisionDiscoveryModes` in `data_pipeline/regions.json` controls how boundary subdivisions are discovered for each region. The default is `["area", "subarea"]`; regions such as London can use `["subarea"]` to avoid expensive area scans.
-- Fetch writes raw Overpass JSON under `data_pipeline/input/`, for example:
-  - `berlin-routing.osm.json`
-  - `berlin-district-boundaries.osm.json`
-  - `luxembourg-country-routing.osm.json`
-- Each fetch prints the rendered Overpass QL plus request metadata before `curl` runs.
-- If a fetch fails, or if Overpass returns HTTP 200 with an empty `elements` list, the pipeline treats that as a failed fetch and writes debug artifacts next to the intended output path:
-  - `<output>.failed-query.ql`
-  - `<output>.failed-curl-stderr.txt`
-  - `<output>.failed-response-body.txt`
-  - `<output>.failed-response-headers.txt`
-  - `<output>.failed-curl-stdout.txt` when curl emitted stdout
-- The query renderer templates live at:
-  - `docs/overpass_routing_query.sh`
-  - `docs/overpass_boundary_query.sh`
-- Boundary extracts are intentionally download-friendly: relation members, way node refs, and node coordinates. The build step reconstructs polylines from those refs instead of relying on inline way geometry.
-- Boundary fetches always include the selected place relation itself as well as any discovered subdivisions, so regions without matching child districts can still build a fallback outer-boundary basemap.
-- To avoid hitting every configured region, filter with `--only`, for example:
-
-```bash
-./data_pipeline/region-data.py fetch --only paris
-```
-
-- Fetch routing ways only:
-
-```bash
-./data_pipeline/region-data.py fetch --only luxembourg-country --components ways
-```
-
-- Fetch subdivision boundaries only:
-
-```bash
-./data_pipeline/region-data.py fetch --only luxembourg-country --components boundaries
-```
-
-- Build canvas basemaps, binary graphs, and `.bin.gz` artifacts from the fetched inputs with:
-
-```bash
-./data_pipeline/region-data.py build > web/src/data/locations.json
-```
-
-- Build the routing graph only from an already-fetched routing extract:
-
-```bash
-./data_pipeline/region-data.py build --only luxembourg-country --components graph
-```
-
-- Build the boundary canvas JSON only from an already-fetched boundary extract:
-
-```bash
-./data_pipeline/region-data.py build --only luxembourg-country --components boundary
-```
-
-- For an opt-in coast/water context layer in the same boundary output JSON, use the lower-level boundary simplifier directly:
-
-```bash
-./data_pipeline/scripts/simplify_boundary_json.py \
-  --input data_pipeline/input/rhode-island-district-boundaries.osm.json \
-  --output data_pipeline/output/rhode-island-district-boundaries-canvas.json \
-  --resolution 25 \
-  --units meters \
-  --include-coast
-```
-
-- `--include-coast` downloads and clips the OSM-derived water polygons dataset from [osmdata.openstreetmap.de water polygons](https://osmdata.openstreetmap.de/data/water-polygons.html) and stores the resulting water polygons in the same output JSON as the administrative boundaries.
-- Use `--coast-source <local.zip|local.shp>` to override the default source for debugging or offline runs.
-
-- If a boundary input file exists but contains zero Overpass elements, `build` now fails explicitly and tells you to rerun the fetch step for that region.
-
-- Or fetch and build in one run with:
-
-```bash
-./data_pipeline/region-data.py all > web/src/data/locations.json
-```
-
-- `all` also supports partial runs via `--fetch-components` and `--build-components`.
-
-- `build` and `all` print the UI-ready location manifest JSON to stdout.
-- Full end-to-end process for turning a fetched region into web-loadable assets is documented in [Region Data Pipeline](docs/region-data-pipeline.md).
-
-## Headless routing benchmark
-
-```bash
-npm run --silent bench:routing -- \
-  --graph data_pipeline/output/graph-walk.bin \
-  --samples 24 \
-  --modes walk,bike,car,all \
-  --output-json data_pipeline/output/routing-benchmark.json
-```
-
-- Uses deterministic random source-node sampling (`--seed`, default `1337`).
-- Runs routing headlessly in Node to isolate CPU/search behavior from browser rendering.
-- Requires the WASM routing kernel (`web/wasm/routing-kernel.wasm`) for routing/search and edge-cost precompute.
-- Reports per-mode phase timings: `precompute`, `tick-pack`, `search`, `dist-output`, and `total`.
-
-Stable/low-variance benchmark mode:
-
-```bash
-npm run --silent bench:routing -- \
-  --graph data_pipeline/output/graph-walk.bin \
-  --samples 24 \
-  --modes walk,bike,car,all \
-  --stable \
-  --warmup-rounds 3 \
-  --measurement-rounds 5 \
-  --max-relative-mad 0.05 \
-  --output-json data_pipeline/output/routing-benchmark-stable.json
-```
-
-- Reuses the exact same sampled source nodes for all rounds.
-- Discards warmup rounds and evaluates measured-round stability with median absolute deviation (MAD).
-- Emits a `Stability gate: PASS|FAIL` summary per run and in JSON output.
-- Optional paired baseline comparison: `--baseline-json <stable-report.json>`.
-
-## WASM runtime build
-
-```bash
-make wasm-build
-```
-
-- Builds and post-optimizes Rust routing-kernel crate to `web/wasm/routing-kernel.wasm` (`wasm-opt -O4 --all-features`).
-- Requires `wasm-opt` (`binaryen`) on PATH; install with `brew install binaryen` on macOS.
-- Browser runtime requires this WASM kernel for routing/search execution.
-- Browsers without WASM support are shown: `Your browser does not support WASM, this app requires WASM for performance reasons`.
-- Interface and milestones are documented in [WASM Routing Kernel](docs/wasm-routing-kernel.md).
-
-## Runtime data
-- Web runtime loads `data_pipeline/output/graph-walk.bin.gz` by default.
-- Top-bar location selector is populated from `web/src/data/locations.json`, where each entry defines a stable location id, canonical display name, optional localized display-name overrides, plus the graph and boundary asset filenames to load.
-- `data_pipeline/regions.json` is the source of truth for region display names and localized variants; `web/src/data/locations.json` is generated from it by `./data_pipeline/region-data.py build` or `./data_pipeline/region-data.py all` and should not be hand-maintained for naming changes.
-- The graph payload is gzip-compressed and decompressed in-browser before parsing.
-- When present in the boundary payload, clipped water polygons render behind the administrative boundaries in the basemap layer.
-- Clicking the map computes a full travel-time field across all reachable graph nodes (no walk-time cap).
-- Desktop controls:
-  - Primary click selects a new origin.
-  - Primary drag pans the map.
-  - Mouse wheel zooms at the pointer.
-  - Secondary drag moves the selection point.
-- Touch controls:
-  - Single tap selects a new origin.
-  - Two-finger pinch zooms.
-  - Two-finger drag pans the map.
-- Zoom/pan redraw the current routing snapshot; camera movement does not start a new route solve.
-- Selected region is persisted in URL query params as `region=<locationId>`.
-- Last selected start node is persisted in URL query params as `node=<graphNodeId>` and restored on reload; switching region clears `node` while preserving the other URL params.
-- Selected transport modes and colour-cycle duration are also persisted in the URL as `modes=` and `cycle=`.
-- UI language can be forced from the URL as `lang=en`, `lang=de`, or `lang=fr`.
-- Theme, pointer-button inversion, transport modes, and colour cycle controls are in the header **Options** menu.
-- Page scrolling is disabled while interacting with the map viewport so touch gestures stay attached to the map.
-- Current binary schema details and compatibility policy: [Graph Binary Schema v2](docs/graph-binary-schema-v2.md).
-
-## SVG export
-- Export uses vector isochrone edge lines and vector boundary geometry.
-- Export uses the full region extent from the graph/boundary data, not the current zoomed viewport.
-- Export background is set to the current map background colour (same palette context as the canvas view).
-
-## Deployment (GitHub Pages)
-- Workflow: `.github/workflows/pages.yml`
-- Trigger: push to `main` or manual dispatch (`workflow_dispatch`)
-- Published artifact includes:
-  - `web/index.html`
-  - `web/src/*`
-  - `data_pipeline/output/berlin-district-boundaries-canvas.json`
-  - `data_pipeline/output/graph-walk.bin.gz`
-- In repository settings, set Pages source to **GitHub Actions**.
+This repository is configured for autonomous-agent workflows: a single quality
+gate (`make check`) covering Python, JavaScript and Rust; explicit agent rules
+in `AGENTS.md`; continuous integration on pull requests; and pre-commit hooks
+for local feedback.
 
 ## Repository structure
-- `data_pipeline/`: Graph preprocessing and binary export logic
-- `web/`: Browser app source (vanilla JS modules, no bundler)
-- `docs/`: Design and process documentation
-- `PLAN.md`: Delivery plan and architecture roadmap
-- `THIRD_PARTY_NOTICES.md`: Licences for redistributed assets and data
+
+| Path | Contents |
+| --- | --- |
+| `data_pipeline/` | Preprocessing pipeline, region configuration, and generated artifacts |
+| `wasm/routing-kernel/` | Rust routing kernel |
+| `web/` | Browser application (vanilla JavaScript modules, no bundler) |
+| `docs/` | Design and process documentation |
+| `PLAN.md` | Delivery plan and architecture roadmap |
+| `THIRD_PARTY_NOTICES.md` | Licences for redistributed assets and data |
 
 ## Third-party licences
-Map data © OpenStreetMap contributors (ODbL); Berlin transit data © VBB
-(CC BY 4.0); transport-mode icons from Google's Material Symbols (Apache-2.0,
-subset and self-hosted). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## Agentic coding baseline
-This repo is configured for autonomous-agent workflows with:
-- single-command quality gates (`make check`)
-- JS static analysis (`ESLint`) and runtime tests (`node --test`) included in `make check`
-- explicit agent rules in `AGENTS.md`
-- CI for Python + JS quality gates
-- pre-commit hooks for fast local feedback
+- Map data © OpenStreetMap contributors, available under the Open Database
+  License (ODbL).
+- Berlin public transport data © VBB (Verkehrsverbund Berlin-Brandenburg),
+  available under CC BY 4.0.
+- Adelaide public transport data © Adelaide Metro — Department for
+  Infrastructure and Transport, South Australia, available under CC BY 4.0.
+- Transport-mode icons from Google's Material Symbols, available under the
+  Apache License 2.0, subset and self-hosted.
+
+Full notices, including the obligations each licence imposes, are recorded in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Attribution is carried in the
+application footer and in every exported and printed document, and is drawn
+from the region's own configuration rather than being fixed in the interface.
+
+## Project licence
+
+No licence has yet been declared for the source code in this repository. In the
+absence of one, default copyright applies and no permission to use, modify or
+redistribute the code is granted. This is distinct from the third-party data
+and assets above, which carry their own licences and obligations.

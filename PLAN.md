@@ -1,10 +1,28 @@
-# PLAN.md — Berlin Isochrone Web App (Revised)
+# PLAN.md — Isochrone Web App (Revised)
 
-**Goal:** A client-side web app that computes walking isochrones for Berlin using a preprocessed OpenStreetMap walking graph. All data loads as a compact binary graph. Rendering uses a 10 m/pixel raster painted onto an HTML canvas, overlaid on a preprocessed Berlin district-boundary basemap JSON.
+**Goal:** A client-side web app that computes isochrones from a preprocessed
+OpenStreetMap graph, loaded as a compact binary. Originally scoped to walking
+in Berlin; as delivered it covers sixteen regions, the walk, cycle, drive,
+ferry and public-transport modes, and renders isochrone edges on the GPU with
+per-endpoint time interpolation, over a preprocessed district-boundary
+basemap. The 10 m/pixel raster described in the earlier phases below survives
+only as the fallback for browsers without WebGL.
 
-Transit (GTFS/CSA) support is fully architected and stubbed, but real schedule data is deferred to post-MVP phases. The system is designed to accept any GTFS feed for any region, not just Berlin or Germany.
+**Status of the transit work.** Phase 11 was written when GTFS/CSA support was
+architected but stubbed. It has since shipped: Berlin (VBB) and Adelaide
+(Adelaide Metro) both carry timetables, and the Connection Scan runs at query
+time in the browser. The individual checkboxes below record what did and did
+not land.
 
-The coordinate projection used throughout is **UTM zone 33N (EPSG:25833)**. This projection is conformal and preserves local angles; for Berlin's latitude (~52.5 °N), the scale factor at the central meridian is 0.9996, meaning 1 projected meter = 1.0004 m of true surface travel — an error well under 0.1 % across the city. Crucially, the scale distortion is symmetric in both axes within the city extent, so N pixels horizontally ≈ N×10 m of surface travel, and likewise vertically, with sub-pixel error across the entire Berlin bounding box. For any future region whose extent crosses a UTM zone boundary, the pipeline script will accept a user-specified EPSG code; the projection maths are isolated to a single module.
+**Projection.** Each region declares its own projected EPSG code in
+`data_pipeline/regions.json`, and the code is stored in the binary header so
+the client knows what it is reading. Berlin uses UTM zone 33N (EPSG:25833),
+whose scale factor at the central meridian is 0.9996 — 1 projected metre =
+1.0004 m of true surface travel, an error well under 0.1% across the city, and
+symmetric in both axes, so N pixels horizontally is N×10 m of surface travel
+to sub-pixel accuracy across the whole extent. The same reasoning governs the
+choice made for each other region; the projection maths are isolated to a
+single module.
 
 Estimates assume a **junior developer familiar with JavaScript and basic GIS concepts**.
 
@@ -839,7 +857,7 @@ Tasks
 Estimated time: 45 min
 
 Tasks
-- [x] Add a feed registry file (`docs/transit_feed_registry.md` or JSON) with per-region metadata: provider, licence URL, update cadence, timezone, and feed format — `docs/transit_feed_registry.md` surveys candidate GTFS sources and expected licences for all 16 configured regions, ranks them, and records the one-feed-per-region structural limit. Entries are unverified leads, explicitly flagged as needing confirmation at fetch time; only Berlin's has actually been fetched.
+- [x] Add a feed registry file (`docs/transit_feed_registry.md` or JSON) with per-region metadata: provider, licence URL, update cadence, timezone, and feed format — `docs/transit_feed_registry.md` surveys candidate GTFS sources and expected licences for all 16 configured regions, ranks them, and records the one-feed-per-region structural limit. Entries are unverified leads, explicitly flagged as needing confirmation at fetch time; Berlin's and Adelaide's have been fetched and verified against their publishers.
 - [x] Add pipeline config inputs so the same scripts run for any city — done as a per-region optional `transitFeed` block in `regions.json` (`RegionSpec.transit_feed`) plus a `transit`/`gtfs` fetch+build component (`region-data.py fetch|build --components transit`), rather than the originally-sketched `--region`/`--transit-feed`/`--transit-format` CLI flags.
 - [ ] Define licence gate rules (allowed for local processing, allowed for redistribution, attribution requirements) and fail export when redistribution is disallowed.
 
