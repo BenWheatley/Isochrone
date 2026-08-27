@@ -18,14 +18,22 @@ jobs:
   build-pages:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
 
       - name: Install Rust toolchain for WASM kernel
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+
+      # wasm-opt ships in binaryen and is not on the runner image. Without it
+      # the build script exits 1 and make reports 2, which is what this job
+      # had been doing since the step was introduced.
+      - name: Install Binaryen for wasm-opt
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y binaryen
 
       - name: Build routing kernel WASM
         run: make wasm-build
