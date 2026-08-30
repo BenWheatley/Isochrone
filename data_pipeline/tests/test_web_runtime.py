@@ -140,17 +140,27 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
 
     assert parsed.elements_by_id["location-select"].tag == "select"
     assert parsed.elements_by_id["location-select"].attrs["name"] == "location-select"
-    # Every group of related controls is a <fieldset> with a <legend>, so that
-    # a screen reader announces what "Auto" or "Metric" is a choice *about*
-    # rather than reading the options bare.
+    # Every group of related controls carries an accessible name, so that a
+    # screen reader announces what "Auto" or "Metric" is a choice *about*
+    # rather than reading the options bare. A <fieldset> gets that from its
+    # <legend>; #speed-group cannot be a fieldset - subgrid resolves to zero
+    # columns through a fieldset's anonymous content box, which is what aligns
+    # its label/input/unit columns - so it uses the role=group/aria-labelledby
+    # spelling of the same thing.
     for group_id in (
         "mode-checkbox-group",
-        "speed-group",
         "theme-radio-group",
         "unit-system-radio-group",
         "primary-mouse-button-group",
     ):
         assert parsed.elements_by_id[group_id].tag == "fieldset", group_id
+
+    speed_group = parsed.elements_by_id["speed-group"]
+    assert speed_group.attrs.get("role") == "group"
+    labelled_by = speed_group.attrs.get("aria-labelledby", "")
+    assert (
+        labelled_by in parsed.elements_by_id
+    ), f"#speed-group is labelled by {labelled_by!r}, which no element carries"
 
     colour_cycle_input = parsed.elements_by_id["colour-cycle-minutes"]
     assert colour_cycle_input.tag == "input"

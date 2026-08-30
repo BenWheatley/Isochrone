@@ -62,13 +62,20 @@ geometry throughout.
 Panning and zooming redraw the existing result; neither begins a new
 calculation.
 
+The two mouse buttons may be exchanged, under **Primary mouse button** in the
+options, so that the primary button moves the origin and the secondary one
+pans. The setting governs mouse input alone; touch gestures are unaffected by
+it, and the control is therefore not offered on a device having no pointing
+device other than the screen.
+
 The region, origin node, transport modes, speeds, departure time, colour
 period and interface language are all held in the URL, so that any particular
 view may be bookmarked or shared. For example,
 `?region=berlin&modes=walk,transit&cycle=60&lang=de`.
 
-Themes, units, pointer-button assignment and the remaining controls are found
-under **Options** in the header.
+The remaining controls are found under **Options** in the header, arranged in
+titled groups: transport modes, speed settings, theme, units and the mouse
+button assignment described above.
 
 ## How it works
 

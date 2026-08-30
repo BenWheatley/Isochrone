@@ -90,11 +90,26 @@
               <input id="departure-datetime" name="departure-datetime" type="datetime-local" step="60" />
             </div>
             <hr class="control-divider" />
-            <fieldset class="control-group" id="speed-group">
-              <legend class="control-title" data-i18n="body.options.speedSettings">Speed settings</legend>
-              <div class="control-row">
-                <label for="walk-speed-kph" data-i18n="body.options.walkSpeed">Walking speed</label>
-                <span class="control-row-value">
+            <!-- One <div class="control-section"> so the four numeric rows can
+                 share a single label/input/unit grid: columns only line up
+                 between rows that live in the same grid. The section, not the
+                 panel, owns those columns - the datetime picker is far wider
+                 than any number input and would stretch the input column for
+                 everyone. Colour repeating period stays outside the Speed
+                 settings fieldset because it is not a speed. -->
+            <div class="control-section">
+              <!-- role="group" + aria-labelledby rather than <fieldset>/<legend>,
+                   which is what every other group here uses. A fieldset renders
+                   through an anonymous content box, so grid-template-columns:
+                   subgrid resolves to zero columns inside one and the rows lose
+                   their alignment. The mapping is the same either way: fieldset
+                   exposes role=group, and the title supplies the same accessible
+                   name a legend would. Do not "tidy" this back to a fieldset
+                   without also giving up the shared column grid. -->
+              <div class="control-group" id="speed-group" role="group" aria-labelledby="speed-group-title">
+                <span class="control-title" id="speed-group-title" data-i18n="body.options.speedSettings">Speed settings</span>
+                <div class="control-row">
+                  <label for="walk-speed-kph" data-i18n="body.options.walkSpeed">Walking speed</label>
                   <input
                     id="walk-speed-kph"
                     name="walk-speed-kph"
@@ -106,11 +121,9 @@
                     aria-describedby="walk-speed-unit-label"
                   />
                   <span class="control-unit speed-unit-label" id="walk-speed-unit-label">km/h</span>
-                </span>
-              </div>
-              <div class="control-row">
-                <label for="bike-speed-kph" data-i18n="body.options.bikeSpeed">Cycling speed</label>
-                <span class="control-row-value">
+                </div>
+                <div class="control-row">
+                  <label for="bike-speed-kph" data-i18n="body.options.bikeSpeed">Cycling speed</label>
                   <input
                     id="bike-speed-kph"
                     name="bike-speed-kph"
@@ -122,14 +135,12 @@
                     aria-describedby="bike-speed-unit-label"
                   />
                   <span class="control-unit speed-unit-label" id="bike-speed-unit-label">km/h</span>
-                </span>
+                </div>
               </div>
-            </fieldset>
-            <div class="control-row" id="transit-walk-budget-row" hidden>
-              <label for="transit-walk-budget-minutes" data-i18n="body.options.transitWalkBudget">
-                Most walking per transit leg
-              </label>
-              <span class="control-row-value">
+              <div class="control-row" id="transit-walk-budget-row" hidden>
+                <label for="transit-walk-budget-minutes" data-i18n="body.options.transitWalkBudget">
+                  Most walking per transit leg
+                </label>
                 <input
                   id="transit-walk-budget-minutes"
                   name="transit-walk-budget-minutes"
@@ -146,13 +157,11 @@
                   id="transit-walk-budget-unit"
                   data-i18n="body.options.minutesUnit"
                 >min</span>
-              </span>
-            </div>
-            <div class="control-row">
-              <label for="colour-cycle-minutes" data-i18n="body.options.colourCycle">
-                Colour repeating period
-              </label>
-              <span class="control-row-value">
+              </div>
+              <div class="control-row">
+                <label for="colour-cycle-minutes" data-i18n="body.options.colourCycle">
+                  Colour repeating period
+                </label>
                 <input
                   id="colour-cycle-minutes"
                   name="colour-cycle-minutes"
@@ -168,7 +177,7 @@
                   id="colour-cycle-unit"
                   data-i18n="body.options.minutesUnit"
                 >min</span>
-              </span>
+              </div>
             </div>
             <hr class="control-divider" />
             <fieldset class="control-group" id="theme-radio-group">

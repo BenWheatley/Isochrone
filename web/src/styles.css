@@ -406,10 +406,40 @@ body {
   width: 3.5rem;
 }
 
-.control-row-value {
-  display: inline-flex;
+/* Columns line up only between rows of the same grid, so the section owns the
+   three columns (label / input / unit) and every row below it - including the
+   ones nested in the Speed settings fieldset - is a subgrid of them. One
+   row-gap here also spaces all four rows evenly, fieldset boundary or not. */
+.control-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 0.3rem;
+  gap: var(--title-content-gap) 0.5rem;
+}
+
+.control-section > *,
+.control-section > .control-group,
+.control-section .control-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  row-gap: var(--title-content-gap);
+}
+
+.control-section > .control-group {
+  align-items: center;
+}
+
+.control-section .control-group > .control-title {
+  grid-column: 1 / -1;
+}
+
+/* Reinstated because the rule above replaces the UA stylesheet's display:none
+   for [hidden] - the transit rows would otherwise show on every region. */
+.control-section > [hidden],
+.control-section .control-row[hidden] {
+  display: none;
 }
 
 /* canvas-routing.js applies this setting to mouse pointers only - touch gets
@@ -470,7 +500,16 @@ body {
   gap: var(--title-content-gap);
 }
 
+/* A <legend> is rendered outside its fieldset's content box, so it is not a
+   flex/grid item and the group's own gap never reaches it - it has to be
+   spaced by margin. A .control-title span is an ordinary item and is spaced
+   by the gap like everything else. */
 .control-group > legend {
+  padding: 0;
+  margin-bottom: var(--title-content-gap);
+}
+
+.control-group > .control-title {
   padding: 0;
 }
 
@@ -484,6 +523,12 @@ body {
 /* A single horizontal strip of icon buttons (Google Maps' mode picker
    style) rather than a stacked checkbox list - the panel is wide enough
    now that "Transport modes" fits on one row. */
+/* Wider than --title-content-gap: the icons are 2.6rem hit targets, so the
+   same gap that suits a text row reads as crowding under a title here. */
+.mode-icon-group > legend {
+  margin-bottom: 0.6rem;
+}
+
 .mode-icon-row {
   display: flex;
   gap: 0.35rem;
@@ -892,7 +937,6 @@ body {
   }
 
   .mode-icon-option,
-  .control-group > legend,
   .radio-option,
   .control-title,
   .control-unit {
