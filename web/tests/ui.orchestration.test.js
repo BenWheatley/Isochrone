@@ -726,9 +726,10 @@ test('bindThemeControl re-notifies on OS colour-scheme changes while "auto" is s
   assert.equal(mediaListeners.size, 0);
 });
 
-test('bindPointerButtonInversionControl restores persisted checkbox state and persists changes', () => {
-  const invertPointerButtonsInput = createCheckbox(false);
-  const shell = { invertPointerButtonsInput };
+test('bindPointerButtonInversionControl restores persisted state onto the radio group', () => {
+  const panRadio = { ...createCheckbox(false), value: 'pan' };
+  const startRadio = { ...createCheckbox(false), value: 'start' };
+  const shell = { primaryMouseButtonRadios: [panRadio, startRadio] };
   let storedValue = '1';
   const storage = {
     getItem(key) {
@@ -742,15 +743,21 @@ test('bindPointerButtonInversionControl restores persisted checkbox state and pe
   };
 
   const binding = bindPointerButtonInversionControl(shell, { storage });
-  assert.equal(invertPointerButtonsInput.checked, true);
+  // The persisted '1' predates the radio group: it must still select "start".
+  assert.equal(startRadio.checked, true);
+  assert.equal(panRadio.checked, false);
+  assert.equal(binding.isInverted(), true);
 
-  invertPointerButtonsInput.checked = false;
-  invertPointerButtonsInput.emit('change');
+  startRadio.checked = false;
+  panRadio.checked = true;
+  panRadio.emit('change');
   assert.equal(storedValue, '0');
+  assert.equal(binding.isInverted(), false);
 
   binding.dispose();
-  invertPointerButtonsInput.checked = true;
-  invertPointerButtonsInput.emit('change');
+  panRadio.checked = false;
+  startRadio.checked = true;
+  startRadio.emit('change');
   assert.equal(storedValue, '0');
 });
 

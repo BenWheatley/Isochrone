@@ -339,8 +339,11 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     }
   };
 
+  const primaryMouseButtonMovesStart = () => (shell.primaryMouseButtonRadios ?? [])
+    .some((radio) => radio?.checked === true && radio.value === 'start');
+
   const getPointerActions = () =>
-    shell.invertPointerButtonsInput?.checked === true
+    primaryMouseButtonMovesStart()
       ? { navigateButton: 2, selectButton: 0 }
       : { navigateButton: 0, selectButton: 2 };
 

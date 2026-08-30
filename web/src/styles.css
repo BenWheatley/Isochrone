@@ -1,5 +1,5 @@
 /* Material Symbols (Apache-2.0, © Google) - self-hosted and subset to only
-   the five transport glyphs this app uses, so there's no runtime dependency
+   the six glyphs this app uses, so there's no runtime dependency
    on Google Fonts (and no third-party request from users' browsers). See
    THIRD_PARTY_NOTICES.md. font-display:block avoids briefly painting the raw
    ligature text ("directions_walk") before the font arrives. */
@@ -272,7 +272,11 @@ body {
   background: var(--chrome-bg);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   display: grid;
-  gap: 0.5rem;
+  /* Deliberately wider than --title-content-gap: a group's title has to sit
+     closer to the controls it names than to the group above it, or three
+     stacked radio groups read as one undifferentiated block - which is
+     exactly what titling them was meant to fix. */
+  gap: 0.85rem;
 }
 
 /* Shared vertical rhythm: the gap between a row's title/label and its
@@ -280,7 +284,7 @@ body {
    labels, the Transport modes legend, the Speed settings summary) so
    spacing reads as one consistent system instead of several ad hoc values. */
 .controls-menu-panel {
-  --title-content-gap: 0.5rem;
+  --title-content-gap: 0.25rem;
 }
 
 .control-row {
@@ -380,9 +384,10 @@ body {
 /* Theme radios render as two plain options on one row, no separate title -
    the option labels ("Light mode" / "Dark mode") are self-explanatory. */
 .control-row-radio-group {
-  grid-template-columns: auto auto auto;
-  justify-content: start;
-  gap: 1.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 0.4rem 1.25rem;
 }
 
 .radio-option {
@@ -402,12 +407,58 @@ body {
   grid-template-columns: none;
   justify-content: flex-start;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
 }
 
 .control-row-speeds input {
-  width: 3rem;
+  width: 3.5rem;
+}
+
+.control-row-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* canvas-routing.js applies this setting to mouse pointers only - touch gets
+   its own one-finger-pan/tap-to-move gestures regardless. On a device with no
+   fine pointer at all the control therefore does nothing, so don't offer it.
+   The query is live: plugging a mouse into a tablet brings the group back. */
+@media not all and (any-pointer: fine) {
+  #primary-mouse-button-group {
+    display: none;
+  }
+}
+
+/* The panel is width:max-content, sized by its longest nowrap label, capped at
+   the viewport. Past that cap the labels stop yielding and the inputs are
+   simply clipped off the right edge - so below it, let labels wrap and give
+   every row the same label/value grid instead. */
+@media (max-width: 32rem) {
+  .control-row,
+  .control-row-speeds {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    justify-content: stretch;
+    align-items: center;
+    gap: 0.4rem 0.5rem;
+  }
+
+  .control-row label {
+    white-space: normal;
+  }
+
+  .control-row-radio-group,
+  .control-row-actions {
+    display: flex;
+  }
+
+  .controls-menu-panel input[type='datetime-local'] {
+    max-width: 100%;
+    min-width: 0;
+  }
 }
 
 .control-unit {
@@ -416,7 +467,7 @@ body {
   white-space: nowrap;
 }
 
-.mode-icon-group {
+.control-group {
   border: none;
   margin: 0;
   padding: 0;
@@ -425,9 +476,16 @@ body {
   align-items: flex-start;
 }
 
-.mode-icon-group > legend {
+.control-group > legend {
   padding: 0;
   margin-bottom: var(--title-content-gap);
+}
+
+/* A <legend> is not a grid/flex item of its fieldset, so a group whose body is
+   a .control-row needs the row to span the full width itself, or the row's
+   space-between has nothing to spread across. */
+.control-group > .control-row {
+  width: 100%;
 }
 
 /* A single horizontal strip of icon buttons (Google Maps' mode picker
@@ -841,7 +899,7 @@ body {
   }
 
   .mode-icon-option,
-  .mode-icon-group > legend,
+  .control-group > legend,
   .radio-option,
   .control-title,
   .control-unit {
