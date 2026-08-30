@@ -12,7 +12,7 @@ def test_pages_workflow_uses_actions_pages_flow() -> None:
     workflow = PAGES_WORKFLOW.read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in workflow
-    assert "actions/configure-pages@v5" in workflow
+    assert "actions/configure-pages@v6" in workflow
     assert "actions/upload-pages-artifact@v3" in workflow
     assert "actions/deploy-pages@v4" in workflow
 
@@ -22,7 +22,12 @@ def test_pages_workflow_packages_required_runtime_files() -> None:
 
     assert "cp web/index.html site/index.html" in workflow
     assert "cp -R web/src/. site/src/" in workflow
+    # Globs rather than one line per region: the deploy must not need editing
+    # every time a region is added, which is how four regions once shipped
+    # configured-but-unserved.
     assert (
-        "cp data_pipeline/output/berlin-district-boundaries-canvas.json site/data_pipeline/output/"
+        "cp data_pipeline/output/*-district-boundaries-canvas.json site/data_pipeline/output/"
     ) in workflow
-    assert "cp data_pipeline/output/graph-walk.bin.gz site/data_pipeline/output/" in workflow
+    assert "cp data_pipeline/output/*.bin.gz site/data_pipeline/output/" in workflow
+    assert "cp -R web/locales/. site/locales/" in workflow
+    assert "cp -R web/fonts/. site/fonts/" in workflow
