@@ -284,7 +284,7 @@ body {
    labels, the Transport modes legend, the Speed settings summary) so
    spacing reads as one consistent system instead of several ad hoc values. */
 .controls-menu-panel {
-  --title-content-gap: 0.25rem;
+  --title-content-gap: 0.4rem;
 }
 
 .control-row {
@@ -400,19 +400,9 @@ body {
   white-space: nowrap;
 }
 
-/* Walking/cycling speed share one row (label, input, label, input) with a
-   single trailing unit instead of repeating "km/h" on each - there's
-   enough width for both once the panel sizes to its content. */
-.control-row-speeds {
-  grid-template-columns: none;
-  justify-content: flex-start;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.control-row-speeds input {
+/* One width for every number input, so the four label/value rows read as a
+   column of values rather than four independently sized boxes. */
+.controls-menu-panel input[type='number'] {
   width: 3.5rem;
 }
 
@@ -437,8 +427,7 @@ body {
    simply clipped off the right edge - so below it, let labels wrap and give
    every row the same label/value grid instead. */
 @media (max-width: 32rem) {
-  .control-row,
-  .control-row-speeds {
+  .control-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     justify-content: stretch;
@@ -474,11 +463,15 @@ body {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  /* Narrower than the panel's own gap: rows inside a group have to bind to
+     each other, and to their legend, more tightly than groups bind to one
+     another - otherwise "Speed settings" looks like it titles the two
+     rows below the group as well. */
+  gap: var(--title-content-gap);
 }
 
 .control-group > legend {
   padding: 0;
-  margin-bottom: var(--title-content-gap);
 }
 
 /* A <legend> is not a grid/flex item of its fieldset, so a group whose body is
