@@ -4,8 +4,10 @@ Making the isochrone read correctly on devices with no colour: black-and-white
 printers, basic e-Ink, and for viewers with total colourblindness
 (achromatopsia).
 
-Status: **plan only, nothing implemented.** Written 2026-08-21; grid
-allocation section revised 2026-08-23 once that work landed.
+Status: **in progress on branch `true-monochrome`.** Written 2026-08-21; grid
+allocation section revised 2026-08-23 once that work landed; the cyclic
+question settled 2026-08-31 (see "The cyclic problem"), and contour extraction
+implemented.
 
 ## Why the current output fails
 
@@ -113,10 +115,30 @@ Bands repeat every `cycleMinutes`. Filled and hatched, band 6 is
 indistinguishable from band 1 - worse than with colour, where repetition at
 least reads as repetition.
 
-**Contour labels ("36 min") are mandatory here, not optional.** The alternative
-is capping monochrome output at a single cycle. This decision should be made
-before implementation starts, because label placement along contours is a
-significant piece of work on its own and materially changes the estimate.
+**Decided 2026-08-31: labels, and the cycle stays.**
+
+Contour labels ("36 min") are mandatory, on the same footing as isobar values
+on a weather chart or height figures on an Ordnance Survey sheet - and for the
+same reason. A contour map without values on the contours is a picture of a
+gradient, not a measurement. Capping at a single cycle was rejected outright:
+an OS sheet does not stop drawing at 500 m, and neither should this.
+
+An intermediate proposal - drop the modulo in monochrome so that bands run
+monotonically over one cycle with an open-ended top band - was also rejected.
+It buys unambiguity at the price of the map's range, which is the wrong trade
+when labels can buy the same unambiguity and keep the range.
+
+So monochrome keeps the cyclic structure the colour palette has: a repeating
+cycle of *n* fill patterns, with the labels telling you which cycle you are
+in. Both attached references do exactly this - Paullin's "Rates of Travel"
+plates label every contour ("6wks.", "1 day", "36hrs.") and a two-tone
+alternating fill with numbered regions carries the repeat.
+
+`n` is deliberately not fixed here. Patterns need high contrast between
+neighbours, and it may turn out that the honest answer at 1 bit is n=2 -
+literally "none" and "some". That is not guessable from first principles, so
+the encoding takes `n` as a parameter and the number is settled by looking at
+real output on real paper.
 
 ## Interaction with grid allocation
 
