@@ -264,7 +264,7 @@ def test_readme_links_live_app_and_discussed_docs() -> None:
     markdown_links = parse_markdown_links(readme)
     assert markdown_links["Region Data Pipeline"] == "docs/region-data-pipeline.md"
     assert markdown_links["WASM Routing Kernel"] == "docs/wasm-routing-kernel.md"
-    assert markdown_links["Graph Binary Schema v2"] == "docs/graph-binary-schema-v2.md"
+    assert markdown_links["Graph Binary Schema v3"] == "docs/graph-binary-schema-v3.md"
 
 
 def collect_i18n_keys_from_index_html() -> set[str]:

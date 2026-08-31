@@ -1,96 +1,9 @@
-import {
-  TRANSIT_MIN_TRANSFER_SECONDS,
-  TRANSIT_TRANSFER_RADIUS_M,
-  WALKING_SPEED_M_S,
-} from '../config/constants.js';
+import { TRANSIT_MIN_TRANSFER_SECONDS, WALKING_SPEED_M_S } from '../config/constants.js';
 import { validateGraphForRouting } from './graph-validation.js';
 import { validateNodePixels } from './routing-validation.js';
 
 // Connection Scan Algorithm pass over the graph's transit tables, plus the
 // line geometry it produces for rendering.
-
-const TRANSFER_INDEX_PROPERTY = '__transitTransferIndex';
-
-/**
- * Stops within TRANSIT_TRANSFER_RADIUS_M of one another, as a flat CSR-style
- * pair of arrays (offsets into a neighbour list), built once per graph and
- * cached on it.
- *
- * Distances are straight-line rather than routed over the walk graph. Routing
- * each of them properly would mean a Dijkstra per stop; over a radius this
- * short the two rarely disagree, and where they do - a stop on the far side of
- * a railway - the error is bounded by the radius. It is a far smaller error
- * than the alternative the code had before, which was to assume no two stops
- * are ever walkable and so forbid changing vehicle at all.
- */
-export function getOrBuildStopTransferIndex(graph, options = {}) {
-  const radiusM =
-    Number.isFinite(options.transferRadiusM) && options.transferRadiusM > 0
-      ? options.transferRadiusM
-      : TRANSIT_TRANSFER_RADIUS_M;
-  const cached = graph[TRANSFER_INDEX_PROPERTY];
-  if (cached && cached.radiusM === radiusM) {
-    return cached;
-  }
-
-  const nStops = graph.header.nStops;
-  const cellSizeM = Math.max(1, radiusM);
-  const buckets = new Map();
-  const bucketKey = (cellX, cellY) => `${cellX},${cellY}`;
-  for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
-    const key = bucketKey(
-      Math.floor(graph.stopX[stopIndex] / cellSizeM),
-      Math.floor(graph.stopY[stopIndex] / cellSizeM),
-    );
-    const bucket = buckets.get(key);
-    if (bucket === undefined) {
-      buckets.set(key, [stopIndex]);
-    } else {
-      bucket.push(stopIndex);
-    }
-  }
-
-  const neighbourStops = [];
-  const neighbourDistancesM = [];
-  const offsets = new Uint32Array(nStops + 1);
-  const radiusSquared = radiusM * radiusM;
-  for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
-    offsets[stopIndex] = neighbourStops.length;
-    const cellX = Math.floor(graph.stopX[stopIndex] / cellSizeM);
-    const cellY = Math.floor(graph.stopY[stopIndex] / cellSizeM);
-    for (let dx = -1; dx <= 1; dx += 1) {
-      for (let dy = -1; dy <= 1; dy += 1) {
-        const bucket = buckets.get(bucketKey(cellX + dx, cellY + dy));
-        if (bucket === undefined) {
-          continue;
-        }
-        for (const otherStopIndex of bucket) {
-          if (otherStopIndex === stopIndex) {
-            continue;
-          }
-          const deltaX = graph.stopX[stopIndex] - graph.stopX[otherStopIndex];
-          const deltaY = graph.stopY[stopIndex] - graph.stopY[otherStopIndex];
-          const distanceSquared = deltaX * deltaX + deltaY * deltaY;
-          if (distanceSquared > radiusSquared) {
-            continue;
-          }
-          neighbourStops.push(otherStopIndex);
-          neighbourDistancesM.push(Math.sqrt(distanceSquared));
-        }
-      }
-    }
-  }
-  offsets[nStops] = neighbourStops.length;
-
-  const index = {
-    radiusM,
-    offsets,
-    neighbourStops: Uint32Array.from(neighbourStops),
-    neighbourDistancesM: Float64Array.from(neighbourDistancesM),
-  };
-  graph[TRANSFER_INDEX_PROPERTY] = index;
-  return index;
-}
 
 export function runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, options = {}) {
   validateGraphForRouting(graph);
@@ -171,25 +84,42 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
   }
 
   // A change of vehicle is a walk between two stop ids plus the time it takes
-  // to alight, cross to the next platform and board. Relaxed one hop at a
-  // time, on each improvement, rather than over a transitive closure: a rider
-  // walking from stop to stop to stop is a rider walking, not changing, and
-  // the walk graph already models that.
-  const transferIndex = getOrBuildStopTransferIndex(graph, options);
+  // to alight, cross to the next platform and board. The walk is read from the
+  // graph, where the pipeline stored it having routed it over the pedestrian
+  // network and unioned it with the feed's own transfers.txt - so a stop on
+  // the far bank of a river is not a 100 m walk, and an interchange OSM has
+  // failed to join is not lost.
+  //
+  // Relaxed one hop at a time, on each improvement, rather than over a
+  // transitive closure: a rider walking from stop to stop to stop is a rider
+  // walking, not changing, and the walk graph already models that.
+  const hasTransferTable =
+    graph.stopFirstTransferIndex instanceof Uint32Array
+    && graph.stopTransferCount instanceof Uint16Array
+    && graph.transferToStopIndex instanceof Uint32Array;
   const relaxTransfersFromStop = (fromStopIndex, arrivalSeconds) => {
-    const firstNeighbour = transferIndex.offsets[fromStopIndex];
-    const endNeighbour = transferIndex.offsets[fromStopIndex + 1];
-    for (let n = firstNeighbour; n < endNeighbour; n += 1) {
-      const transferWalkSeconds = transferIndex.neighbourDistancesM[n] / walkingSpeedMps;
+    if (!hasTransferTable) {
+      return;
+    }
+    const firstTransfer = graph.stopFirstTransferIndex[fromStopIndex];
+    const endTransfer = firstTransfer + graph.stopTransferCount[fromStopIndex];
+    for (let t = firstTransfer; t < endTransfer; t += 1) {
+      const transferWalkSeconds = graph.transferWalkDistanceM[t] / walkingSpeedMps;
       if (transferWalkSeconds > walkBudgetSeconds) {
         continue;
       }
-      const candidateSeconds =
-        arrivalSeconds + Math.max(transferWalkSeconds, minTransferSeconds);
+      // The feed's own minimum for this interchange where it declares one,
+      // which is routinely five minutes rather than the generic floor; zero
+      // means it said nothing, so fall back to the floor.
+      const declaredMinimumSeconds = graph.transferMinSeconds[t];
+      const changeSeconds = declaredMinimumSeconds > 0
+        ? declaredMinimumSeconds
+        : minTransferSeconds;
+      const candidateSeconds = arrivalSeconds + Math.max(transferWalkSeconds, changeSeconds);
       if (candidateSeconds > budgetEndSeconds) {
         continue;
       }
-      const toStopIndex = transferIndex.neighbourStops[n];
+      const toStopIndex = graph.transferToStopIndex[t];
       if (candidateSeconds < earliestArrivalSeconds[toStopIndex]) {
         earliestArrivalSeconds[toStopIndex] = candidateSeconds;
         improvedByTransit[toStopIndex] = 1;

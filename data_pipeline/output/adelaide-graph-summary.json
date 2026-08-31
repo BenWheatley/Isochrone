@@ -1,8 +1,8 @@
 {
-  "generated_at_utc": "2026-08-20T20:04:16.770933+00:00",
+  "generated_at_utc": "2026-08-31T19:17:35.184263+00:00",
   "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/adelaide-routing.osm.json",
   "binary_output": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/output/adelaide-graph.bin",
-  "binary_size_bytes": 29005324,
+  "binary_size_bytes": 29376612,
   "before_node_count": 681377,
   "before_edge_count": 1505024,
   "after_node_count": 220780,
@@ -76,11 +76,17 @@
       "max": "2026-10-11"
     },
     "final_stop_count": 7353,
-    "final_connection_count": 917563
+    "final_connection_count": 917563,
+    "transfer_count": 46411,
+    "transfer_radius_m": 500.0,
+    "routed_transfer_pair_count": 46164,
+    "declared_transfer_pair_count": 634,
+    "declared_only_transfer_pair_count": 247,
+    "forbidden_transfer_pair_count": 0
   },
   "header": {
     "magic": "0x49534F43",
-    "version": 2,
+    "version": 3,
     "flags": 1,
     "n_nodes": 220780,
     "n_edges": 578754,

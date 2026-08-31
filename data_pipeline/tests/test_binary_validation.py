@@ -50,7 +50,7 @@ def test_validate_binary_graph_payload_accepts_valid_payload() -> None:
 
     result = validate_binary_graph_payload(payload, node_sample_count=2, random_seed=1)
 
-    assert result.header.version == 2
+    assert result.header.version == 3
     assert result.sampled_node_count == 2
     assert result.edge_target_violations == 0
     assert all(

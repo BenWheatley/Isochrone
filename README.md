@@ -83,7 +83,7 @@ button assignment described above.
 The application is built around the observation that an isochrone is a shortest-path problem over a graph (the travel network), not an image-processing problem over a grid. Travel times are therefore computed on the travel graph itself and rendered from it directly.
 
 **Preprocessing.** A Python pipeline retrieves OpenStreetMap extracts through the Overpass API, projects them into an appropriate metric coordinate system, simplifies degree-two chains, and emits a compact binary graph to minimise what the user has to download. Where a region carries timetable data, GTFS stops and connections are folded into the same file. The binary format is documented in
-[Graph Binary Schema v2](docs/graph-binary-schema-v2.md).
+[Graph Binary Schema v3](docs/graph-binary-schema-v3.md).
 
 **Routing.** A Rust kernel compiled to WebAssembly performs the search. For a
 region with public transport this runs in three stages: a pedestrian search
@@ -94,14 +94,16 @@ quicker of that and walking the whole way. The kernel is required; there is no
 JavaScript fallback for routing.
 
 A timetable names each platform and each direction of travel as a separate
-stop, so the scan also treats stops within a short distance of one another as
-walkable between, charging the walk plus a fixed minimum for alighting and
-boarding again. Without that, a rider can never change vehicle, and the
-timetable collapses to whichever single service happens to pass the origin.
-The distances are straight-line rather than routed, and the minimum change
-time is a constant rather than the per-interchange figure a feed's
-`transfers.txt` would give, so an interchange is modelled slightly
-optimistically.
+stop, so the scan also needs to know which stops are walkable from one
+another; without that a rider can never change vehicle, and the timetable
+collapses to whichever single service happens to pass the origin. Those
+connections are computed when the region is built, by routing over the
+pedestrian network rather than by measuring straight-line distance between
+stop coordinates — two stops facing each other across a river are metres apart
+and a long walk from one another. Routing has the opposite failure, in that an
+interchange OpenStreetMap has not joined up simply disappears, so the routed
+connections are combined with the operator's own `transfers.txt`, which
+declares which changes exist, how long they take, and which are impossible.
 
 **Rendering.** Edges are drawn by the GPU, with each endpoint's travel time
 interpolated along the edge, so a road crossed midway is shaded accordingly.
@@ -140,7 +142,7 @@ python -m http.server 8000
 Further reading:
 
 - [Delivery plan and architecture roadmap](PLAN.md)
-- [Graph Binary Schema v2](docs/graph-binary-schema-v2.md)
+- [Graph Binary Schema v3](docs/graph-binary-schema-v3.md)
 - [WASM Routing Kernel](docs/wasm-routing-kernel.md)
 - [Region Data Pipeline](docs/region-data-pipeline.md)
 - [Monochrome rendering plan](docs/monochrome-rendering-plan.md)

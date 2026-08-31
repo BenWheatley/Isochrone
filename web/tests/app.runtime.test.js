@@ -25,7 +25,6 @@ import {
   parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
   parseWalkSpeedKphFromLocationSearch,
-  getOrBuildStopTransferIndex,
   runConnectionScanFromWalkingReachableStops,
   buildTransitConnectionEdgeVertexData,
   runWalkingIsochroneFromSourceNode,
@@ -338,22 +337,31 @@ function createFixtureBinaryBuffer() {
 // several transit tests below don't each repeat ~60 lines of DataView offset
 // arithmetic. Nodes are laid out in a line 100m apart along y=0, joined by
 // walk/car edges costing 72s each (100m / WALKING_SPEED_M_S).
-function createTransitGraphBuffer({ nodeCount = 3, stops, tedges }) {
+function createTransitGraphBuffer({ nodeCount = 3, stops, tedges, transfers = [] }) {
   const headerSize = 64;
   const nodeRecordSize = 16;
   const edgeRecordSize = 12;
   const stopRecordSize = 24;
   const tedgeRecordSize = 20;
+  const transferRecordSize = 8;
   const nEdges = nodeCount - 1;
   const nodeTableOffset = headerSize;
   const edgeTableOffset = nodeTableOffset + nodeCount * nodeRecordSize;
   const stopTableOffset = edgeTableOffset + nEdges * edgeRecordSize;
   const tedgeTableOffset = stopTableOffset + stops.length * stopRecordSize;
-  const buffer = new ArrayBuffer(tedgeTableOffset + tedges.length * tedgeRecordSize);
+  const transferTableOffset = tedgeTableOffset + tedges.length * tedgeRecordSize;
+  // Sorted by from-stop, so each stop's range is contiguous - the same
+  // requirement the writer enforces.
+  const sortedTransfers = [...transfers].sort(
+    (a, b) => a.fromStop - b.fromStop || a.toStop - b.toStop,
+  );
+  const buffer = new ArrayBuffer(
+    transferTableOffset + sortedTransfers.length * transferRecordSize,
+  );
   const view = new DataView(buffer);
 
   view.setUint32(0, GRAPH_MAGIC, true);
-  view.setUint8(4, 2);
+  view.setUint8(4, transfers.length > 0 ? 3 : 2);
   view.setUint8(5, 1); // flags: has_transit
   view.setUint32(8, nodeCount, true);
   view.setUint32(12, nEdges, true);
@@ -393,7 +401,20 @@ function createTransitGraphBuffer({ nodeCount = 3, stops, tedges }) {
     view.setInt32(base, stop.xM, true);
     view.setInt32(base + 4, stop.yM ?? 0, true);
     view.setUint32(base + 8, stop.nearestNodeIndex, true);
+    // Running offset even where the count is zero, matching the writer's CSR
+    // invariant - the reader derives the table length from it.
+    const firstTransfer = sortedTransfers.filter((t) => t.fromStop < stopIndex).length;
+    const transferCount = sortedTransfers.filter((t) => t.fromStop === stopIndex).length;
+    view.setUint32(base + 12, firstTransfer, true);
+    view.setUint16(base + 16, transferCount, true);
     view.setUint8(base + 18, stop.transportType ?? 2);
+  });
+
+  sortedTransfers.forEach((transfer, transferIndex) => {
+    const base = transferTableOffset + transferIndex * transferRecordSize;
+    view.setUint32(base, transfer.toStop, true);
+    view.setUint16(base + 4, transfer.walkDistanceM, true);
+    view.setUint16(base + 6, transfer.minTransferSeconds ?? 0, true);
   });
 
   tedges.forEach((tedge, tedgeIndex) => {
@@ -2291,25 +2312,22 @@ test('a GPU renderer allocates neither raster fallback grid', () => {
 
 test('runConnectionScanFromWalkingReachableStops changes vehicle between two stops a short walk apart', () => {
   // A GTFS feed names each platform separately, so an interchange is two stop
-  // ids metres apart rather than one. Stop 1 and stop 2 are 60 m apart at the
-  // same interchange: the rider arrives on the first service and leaves on the
-  // second, which is impossible unless stop ids are connected on foot.
-  const graph = parseGraphBinary(createTransitGraphBuffer({
-    nodeCount: 4,
-    stops: [
-      { xM: 0, nearestNodeIndex: 0 },
-      { xM: 100, nearestNodeIndex: 1 },
-      { xM: 160, nearestNodeIndex: 2 },
-      { xM: 300, nearestNodeIndex: 3 },
-    ],
-    tedges: [
-      { fromStop: 0, toStop: 1, departureSeconds: 1000, travelSeconds: 10 },
-      { fromStop: 2, toStop: 3, departureSeconds: 1200, travelSeconds: 10 },
-    ],
-  }));
+  // ids metres apart rather than one. The pipeline stores the walk between
+  // them, routed over the pedestrian network; the rider arrives on the first
+  // service and leaves on the second.
+  const stops = [
+    { xM: 0, nearestNodeIndex: 0 },
+    { xM: 100, nearestNodeIndex: 1 },
+    { xM: 160, nearestNodeIndex: 2 },
+    { xM: 300, nearestNodeIndex: 3 },
+  ];
+  const tedges = [
+    { fromStop: 0, toStop: 1, departureSeconds: 1000, travelSeconds: 10 },
+    { fromStop: 2, toStop: 3, departureSeconds: 1200, travelSeconds: 10 },
+  ];
   // Nodes 2 and 3 are off the walk graph, so the interchange stop is reachable
-  // only by crossing to it from stop 1, and stop 3 only by the service that
-  // leaves from there.
+  // only by crossing to it from stop 1, and stop 3 only by the service leaving
+  // from there.
   const walkDistSeconds = new Float32Array([
     0,
     72,
@@ -2324,6 +2342,15 @@ test('runConnectionScanFromWalkingReachableStops changes vehicle between two sto
     minTransferSeconds: 60,
   };
 
+  const graph = parseGraphBinary(createTransitGraphBuffer({
+    nodeCount: 4,
+    stops,
+    tedges,
+    transfers: [
+      { fromStop: 1, toStop: 2, walkDistanceM: 60 },
+      { fromStop: 2, toStop: 1, walkDistanceM: 60 },
+    ],
+  }));
   const result = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, scanOptions);
   // Ride to stop 1 (20 s), cross to stop 2 - a 60 m walk, but no change is
   // quicker than the 60 s floor - and wait for the 1200 departure, reaching
@@ -2333,18 +2360,25 @@ test('runConnectionScanFromWalkingReachableStops changes vehicle between two sto
   assert.equal(result.stopElapsedSeconds[3], 220);
   assert.ok(Array.from(result.seedNodeIndices).includes(3));
 
-  // The same graph with the stops too far apart to walk between: the second
+  // The same two stops with no walkable connection stored between them -
+  // which is what a river, a railway or a v2 graph looks like. The second
   // service still runs and is still on time, and is now unreachable.
-  const withoutTransfers = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
-    ...scanOptions,
-    transferRadiusM: 1,
-  });
-  assert.equal(withoutTransfers.stopElapsedSeconds[3], Number.POSITIVE_INFINITY);
-  assert.ok(!Array.from(withoutTransfers.seedNodeIndices).includes(3));
+  const withoutTransfers = parseGraphBinary(createTransitGraphBuffer({
+    nodeCount: 4,
+    stops,
+    tedges,
+  }));
+  const unreachable = runConnectionScanFromWalkingReachableStops(
+    withoutTransfers,
+    walkDistSeconds,
+    scanOptions,
+  );
+  assert.equal(unreachable.stopElapsedSeconds[3], Number.POSITIVE_INFINITY);
+  assert.ok(!Array.from(unreachable.seedNodeIndices).includes(3));
 });
 
-test('runConnectionScanFromWalkingReachableStops charges a minimum time for changing vehicle', () => {
-  const graph = parseGraphBinary(createTransitGraphBuffer({
+test('runConnectionScanFromWalkingReachableStops prefers the feed\'s own minimum change time', () => {
+  const build = (minTransferSeconds) => parseGraphBinary(createTransitGraphBuffer({
     nodeCount: 3,
     stops: [
       { xM: 0, nearestNodeIndex: 0 },
@@ -2352,21 +2386,31 @@ test('runConnectionScanFromWalkingReachableStops charges a minimum time for chan
       { xM: 110, nearestNodeIndex: 2 },
     ],
     tedges: [{ fromStop: 0, toStop: 1, departureSeconds: 1000, travelSeconds: 10 }],
+    transfers: [{ fromStop: 1, toStop: 2, walkDistanceM: 10, minTransferSeconds }],
   }));
   const walkDistSeconds = new Float32Array([0, 1e9, 1e9]);
-
-  const result = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
+  const scanOptions = {
     departureSecondsOfDay: 990,
     departureWeekdayIndex: 2,
     timeLimitSeconds: 400,
     walkingSpeedMps: 1,
-    minTransferSeconds: 120,
-  });
+    minTransferSeconds: 60,
+  };
 
-  // Arrives stop 1 at 20 s elapsed; the 10 m walk to stop 2 takes 10 s, but
+  // Arrives stop 1 at 20 s elapsed. The 10 m walk to stop 2 takes 10 s, but
   // alighting and boarding again cannot happen in less than the floor.
-  assert.equal(result.stopElapsedSeconds[1], 20);
-  assert.equal(result.stopElapsedSeconds[2], 140);
+  const generic = runConnectionScanFromWalkingReachableStops(build(0), walkDistSeconds, scanOptions);
+  assert.equal(generic.stopElapsedSeconds[1], 20);
+  assert.equal(generic.stopElapsedSeconds[2], 80);
+
+  // Where the feed declares a real figure for this interchange - Berlin's
+  // routinely says five minutes - that is used in place of the floor.
+  const declared = runConnectionScanFromWalkingReachableStops(
+    build(300),
+    walkDistSeconds,
+    scanOptions,
+  );
+  assert.equal(declared.stopElapsedSeconds[2], 320);
 });
 
 test('runConnectionScanFromWalkingReachableStops will not walk past the budget to reach a first stop', () => {
@@ -2402,27 +2446,4 @@ test('runConnectionScanFromWalkingReachableStops will not walk past the budget t
     walkBudgetSeconds: 120,
   });
   assert.equal(beyondBudget.seedNodeIndices.length, 0);
-});
-
-test('getOrBuildStopTransferIndex pairs only stops inside the radius, and caches per graph', () => {
-  const graph = parseGraphBinary(createTransitGraphBuffer({
-    nodeCount: 3,
-    stops: [
-      { xM: 0, nearestNodeIndex: 0 },
-      { xM: 60, nearestNodeIndex: 1 },
-      { xM: 5000, nearestNodeIndex: 2 },
-    ],
-    tedges: [{ fromStop: 0, toStop: 1, departureSeconds: 1000, travelSeconds: 10 }],
-  }));
-
-  const index = getOrBuildStopTransferIndex(graph, { transferRadiusM: 100 });
-  const neighboursOf = (stopIndex) => Array.from(
-    index.neighbourStops.subarray(index.offsets[stopIndex], index.offsets[stopIndex + 1]),
-  );
-  assert.deepEqual(neighboursOf(0), [1]);
-  assert.deepEqual(neighboursOf(1), [0]);
-  assert.deepEqual(neighboursOf(2), []);
-
-  assert.equal(getOrBuildStopTransferIndex(graph, { transferRadiusM: 100 }), index);
-  assert.notEqual(getOrBuildStopTransferIndex(graph, { transferRadiusM: 10 }), index);
 });

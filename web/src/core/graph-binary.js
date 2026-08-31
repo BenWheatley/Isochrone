@@ -7,6 +7,7 @@ import {
   STOP_RECORD_SIZE,
   SUPPORTED_GRAPH_VERSIONS,
   TEDGE_RECORD_SIZE,
+  TRANSFER_RECORD_SIZE,
 } from '../config/constants.js';
 
 // Fetching and decoding the preprocessed graph binary produced by
@@ -208,11 +209,17 @@ export function parseGraphBinary(buffer) {
   const stopY = new Int32Array(nStops);
   const stopNearestNodeIndex = new Uint32Array(nStops);
   const stopTransportType = new Uint8Array(nStops);
+  // CSR range into the transfer table. Zero in a v2 payload, which is exactly
+  // the right reading: that region has no walkable connections between stops.
+  const stopFirstTransferIndex = new Uint32Array(nStops);
+  const stopTransferCount = new Uint16Array(nStops);
   for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
     const recordOffset = stopTableOffset + stopIndex * STOP_RECORD_SIZE;
     stopX[stopIndex] = view.getInt32(recordOffset, true);
     stopY[stopIndex] = view.getInt32(recordOffset + 4, true);
     stopNearestNodeIndex[stopIndex] = view.getUint32(recordOffset + 8, true);
+    stopFirstTransferIndex[stopIndex] = view.getUint32(recordOffset + 12, true);
+    stopTransferCount[stopIndex] = view.getUint16(recordOffset + 16, true);
     stopTransportType[stopIndex] = view.getUint8(recordOffset + 18);
   }
 
@@ -230,6 +237,34 @@ export function parseGraphBinary(buffer) {
     tedgeServiceDayMask[tedgeIndex] = view.getUint32(recordOffset + 16, true);
   }
 
+  // Walkable connections between stops, so a rider can change vehicle. The
+  // table's offset is derived like the transit-edge table's, and its length
+  // from the last stop's CSR range, because the 64-byte header is full.
+  const transferTableOffset = tedgeTableOffset + nTedges * TEDGE_RECORD_SIZE;
+  // The writer gives even an empty stop its running offset, so the last stop's
+  // first+count is the total. Taken as a maximum rather than read off that one
+  // stop so that a malformed table is caught by the bounds check below instead
+  // of silently truncating.
+  let nTransfers = 0;
+  for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
+    const end = stopFirstTransferIndex[stopIndex] + stopTransferCount[stopIndex];
+    if (end > nTransfers) {
+      nTransfers = end;
+    }
+  }
+  if (transferTableOffset + nTransfers * TRANSFER_RECORD_SIZE > buffer.byteLength) {
+    throw new Error('graph binary transfer table exceeds file size');
+  }
+  const transferToStopIndex = new Uint32Array(nTransfers);
+  const transferWalkDistanceM = new Uint16Array(nTransfers);
+  const transferMinSeconds = new Uint16Array(nTransfers);
+  for (let transferIndex = 0; transferIndex < nTransfers; transferIndex += 1) {
+    const recordOffset = transferTableOffset + transferIndex * TRANSFER_RECORD_SIZE;
+    transferToStopIndex[transferIndex] = view.getUint32(recordOffset, true);
+    transferWalkDistanceM[transferIndex] = view.getUint16(recordOffset + 4, true);
+    transferMinSeconds[transferIndex] = view.getUint16(recordOffset + 6, true);
+  }
+
   return {
     header,
     nodeI32,
@@ -244,6 +279,11 @@ export function parseGraphBinary(buffer) {
     stopY,
     stopNearestNodeIndex,
     stopTransportType,
+    stopFirstTransferIndex,
+    stopTransferCount,
+    transferToStopIndex,
+    transferWalkDistanceM,
+    transferMinSeconds,
     tedgeFromStop,
     tedgeToStop,
     tedgeDepartureSeconds,

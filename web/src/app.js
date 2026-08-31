@@ -121,7 +121,6 @@ import {
 } from './core/routing-validation.js';
 export {
   buildTransitConnectionEdgeVertexData,
-  getOrBuildStopTransferIndex,
   runConnectionScanFromWalkingReachableStops,
 } from './core/transit-csa.js';
 import {

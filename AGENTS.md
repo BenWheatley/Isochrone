@@ -63,7 +63,7 @@ region pipeline, and WASM routing kernel.
   Python implementation). Use local fixtures or monkeypatch the network
   boundary (see `test_water_polygons.py` for the pattern) instead of hitting
   Overpass or the water-polygon archive in tests.
-- **The binary graph format is versioned** (`docs/graph-binary-schema-v2.md`).
+- **The binary graph format is versioned** (`docs/graph-binary-schema-v3.md`).
   If you touch the schema, update both the Python writer/reader and the JS
   parser together, and bump the version if the layout changes.
 
