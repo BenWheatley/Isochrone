@@ -158,9 +158,9 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
     speed_group = parsed.elements_by_id["speed-group"]
     assert speed_group.attrs.get("role") == "group"
     labelled_by = speed_group.attrs.get("aria-labelledby", "")
-    assert (
-        labelled_by in parsed.elements_by_id
-    ), f"#speed-group is labelled by {labelled_by!r}, which no element carries"
+    assert labelled_by in parsed.elements_by_id, (
+        f"#speed-group is labelled by {labelled_by!r}, which no element carries"
+    )
 
     colour_cycle_input = parsed.elements_by_id["colour-cycle-minutes"]
     assert colour_cycle_input.tag == "input"
