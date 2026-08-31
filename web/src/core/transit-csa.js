@@ -1,9 +1,96 @@
-import { WALKING_SPEED_M_S } from '../config/constants.js';
+import {
+  TRANSIT_MIN_TRANSFER_SECONDS,
+  TRANSIT_TRANSFER_RADIUS_M,
+  WALKING_SPEED_M_S,
+} from '../config/constants.js';
 import { validateGraphForRouting } from './graph-validation.js';
 import { validateNodePixels } from './routing-validation.js';
 
 // Connection Scan Algorithm pass over the graph's transit tables, plus the
 // line geometry it produces for rendering.
+
+const TRANSFER_INDEX_PROPERTY = '__transitTransferIndex';
+
+/**
+ * Stops within TRANSIT_TRANSFER_RADIUS_M of one another, as a flat CSR-style
+ * pair of arrays (offsets into a neighbour list), built once per graph and
+ * cached on it.
+ *
+ * Distances are straight-line rather than routed over the walk graph. Routing
+ * each of them properly would mean a Dijkstra per stop; over a radius this
+ * short the two rarely disagree, and where they do - a stop on the far side of
+ * a railway - the error is bounded by the radius. It is a far smaller error
+ * than the alternative the code had before, which was to assume no two stops
+ * are ever walkable and so forbid changing vehicle at all.
+ */
+export function getOrBuildStopTransferIndex(graph, options = {}) {
+  const radiusM =
+    Number.isFinite(options.transferRadiusM) && options.transferRadiusM > 0
+      ? options.transferRadiusM
+      : TRANSIT_TRANSFER_RADIUS_M;
+  const cached = graph[TRANSFER_INDEX_PROPERTY];
+  if (cached && cached.radiusM === radiusM) {
+    return cached;
+  }
+
+  const nStops = graph.header.nStops;
+  const cellSizeM = Math.max(1, radiusM);
+  const buckets = new Map();
+  const bucketKey = (cellX, cellY) => `${cellX},${cellY}`;
+  for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
+    const key = bucketKey(
+      Math.floor(graph.stopX[stopIndex] / cellSizeM),
+      Math.floor(graph.stopY[stopIndex] / cellSizeM),
+    );
+    const bucket = buckets.get(key);
+    if (bucket === undefined) {
+      buckets.set(key, [stopIndex]);
+    } else {
+      bucket.push(stopIndex);
+    }
+  }
+
+  const neighbourStops = [];
+  const neighbourDistancesM = [];
+  const offsets = new Uint32Array(nStops + 1);
+  const radiusSquared = radiusM * radiusM;
+  for (let stopIndex = 0; stopIndex < nStops; stopIndex += 1) {
+    offsets[stopIndex] = neighbourStops.length;
+    const cellX = Math.floor(graph.stopX[stopIndex] / cellSizeM);
+    const cellY = Math.floor(graph.stopY[stopIndex] / cellSizeM);
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dy = -1; dy <= 1; dy += 1) {
+        const bucket = buckets.get(bucketKey(cellX + dx, cellY + dy));
+        if (bucket === undefined) {
+          continue;
+        }
+        for (const otherStopIndex of bucket) {
+          if (otherStopIndex === stopIndex) {
+            continue;
+          }
+          const deltaX = graph.stopX[stopIndex] - graph.stopX[otherStopIndex];
+          const deltaY = graph.stopY[stopIndex] - graph.stopY[otherStopIndex];
+          const distanceSquared = deltaX * deltaX + deltaY * deltaY;
+          if (distanceSquared > radiusSquared) {
+            continue;
+          }
+          neighbourStops.push(otherStopIndex);
+          neighbourDistancesM.push(Math.sqrt(distanceSquared));
+        }
+      }
+    }
+  }
+  offsets[nStops] = neighbourStops.length;
+
+  const index = {
+    radiusM,
+    offsets,
+    neighbourStops: Uint32Array.from(neighbourStops),
+    neighbourDistancesM: Float64Array.from(neighbourDistancesM),
+  };
+  graph[TRANSFER_INDEX_PROPERTY] = index;
+  return index;
+}
 
 export function runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, options = {}) {
   validateGraphForRouting(graph);
@@ -39,6 +126,21 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
     Number.isFinite(options.walkingSpeedMps) && options.walkingSpeedMps > 0
       ? options.walkingSpeedMps
       : WALKING_SPEED_M_S;
+  const minTransferSeconds =
+    Number.isFinite(options.minTransferSeconds) && options.minTransferSeconds >= 0
+      ? options.minTransferSeconds
+      : TRANSIT_MIN_TRANSFER_SECONDS;
+
+  // How far the rider will walk on any one leg - to the first stop, between
+  // stops when changing, and away from the last one. Passed explicitly rather
+  // than inferred from walkDistSeconds's own limit, because when Walk is a
+  // selected mode that field is deliberately unbounded: the walking isochrone
+  // is a legitimate result in its own right, but it must not let someone walk
+  // an hour to a station and call it a transit journey.
+  const walkBudgetSeconds =
+    Number.isFinite(options.walkBudgetSeconds) && options.walkBudgetSeconds >= 0
+      ? options.walkBudgetSeconds
+      : Number.POSITIVE_INFINITY;
 
   const earliestArrivalSeconds = new Float64Array(nStops).fill(Number.POSITIVE_INFINITY);
   const walkAttachCostSeconds = new Float64Array(nStops);
@@ -51,19 +153,49 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
     const attachCostSeconds = Math.sqrt(dx * dx + dy * dy) / walkingSpeedMps;
     walkAttachCostSeconds[stopIndex] = attachCostSeconds;
 
-    // Reaching a stop means walking to it on the walk graph - walkDistSeconds
-    // comes from a pedestrian search the caller already bounded by the walk
-    // budget - and then covering the short fixed offset between the graph
-    // node the stop is pinned to and the platform itself.
+    // Reaching a stop means walking to it on the walk graph and then covering
+    // the short fixed offset between the graph node the stop is pinned to and
+    // the platform itself. The whole of that is the access leg, so the whole
+    // of it is what the budget applies to.
     let bestArrivalSeconds = Number.POSITIVE_INFINITY;
     const walkElapsedSeconds = walkDistSeconds[nodeIndex];
-    if (Number.isFinite(walkElapsedSeconds)) {
+    if (
+      Number.isFinite(walkElapsedSeconds)
+      && walkElapsedSeconds + attachCostSeconds <= walkBudgetSeconds
+    ) {
       bestArrivalSeconds = departureSecondsOfDay + walkElapsedSeconds + attachCostSeconds;
     }
     if (bestArrivalSeconds <= budgetEndSeconds) {
       earliestArrivalSeconds[stopIndex] = bestArrivalSeconds;
     }
   }
+
+  // A change of vehicle is a walk between two stop ids plus the time it takes
+  // to alight, cross to the next platform and board. Relaxed one hop at a
+  // time, on each improvement, rather than over a transitive closure: a rider
+  // walking from stop to stop to stop is a rider walking, not changing, and
+  // the walk graph already models that.
+  const transferIndex = getOrBuildStopTransferIndex(graph, options);
+  const relaxTransfersFromStop = (fromStopIndex, arrivalSeconds) => {
+    const firstNeighbour = transferIndex.offsets[fromStopIndex];
+    const endNeighbour = transferIndex.offsets[fromStopIndex + 1];
+    for (let n = firstNeighbour; n < endNeighbour; n += 1) {
+      const transferWalkSeconds = transferIndex.neighbourDistancesM[n] / walkingSpeedMps;
+      if (transferWalkSeconds > walkBudgetSeconds) {
+        continue;
+      }
+      const candidateSeconds =
+        arrivalSeconds + Math.max(transferWalkSeconds, minTransferSeconds);
+      if (candidateSeconds > budgetEndSeconds) {
+        continue;
+      }
+      const toStopIndex = transferIndex.neighbourStops[n];
+      if (candidateSeconds < earliestArrivalSeconds[toStopIndex]) {
+        earliestArrivalSeconds[toStopIndex] = candidateSeconds;
+        improvedByTransit[toStopIndex] = 1;
+      }
+    }
+  };
 
   // Every connection whose boarding stop is reachable in time is renderable,
   // not just the one that happens to win each stop's earliest-arrival race -
@@ -102,6 +234,11 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
     if (candidateArrivalSeconds < earliestArrivalSeconds[toStopIndex]) {
       earliestArrivalSeconds[toStopIndex] = candidateArrivalSeconds;
       improvedByTransit[toStopIndex] = 1;
+      // Immediately, not in a later sweep: connections are scanned in
+      // departure order, so a stop made reachable now can only ever be
+      // boarded by a connection this loop has not reached yet. That is what
+      // keeps one forward pass correct.
+      relaxTransfersFromStop(toStopIndex, candidateArrivalSeconds);
     }
   }
 

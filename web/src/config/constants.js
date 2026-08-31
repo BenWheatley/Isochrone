@@ -55,7 +55,26 @@ export const DEFAULT_WALK_SPEED_KPH = 4;
 // stop, between stops when changing, and away from the last one. Bounds the
 // walking that public-transit routing is allowed to add on top of the
 // vehicle legs themselves.
-export const DEFAULT_TRANSIT_WALK_BUDGET_MINUTES = 5;
+//
+// 15 minutes is roughly a kilometre, which is the outer edge of the catchment
+// journey planners generally assume for reaching a station. It was 5 minutes
+// (about 330 m) while the budget was inert for every mode combination except
+// "transit and nothing else"; once it actually bounds the access leg, 5
+// minutes is short enough to leave a rider with no service at all - measured
+// against Berlin, the nearest stop to a Märkisches Viertel origin is a 6
+// minute walk, so a 5 minute budget silently returned a walking isochrone.
+export const DEFAULT_TRANSIT_WALK_BUDGET_MINUTES = 15;
+// A GTFS feed names each platform and each direction of travel separately, so
+// the bus stop and the underground station it feeds are different stop ids a
+// few dozen metres apart. Without a foot connection between them a rider can
+// never change vehicle, and the timetable is reduced to whatever single
+// service happens to pass the origin. Two stops within this distance are
+// treated as walkable from one another.
+export const TRANSIT_TRANSFER_RADIUS_M = 250;
+// Charged for every change, over and above the walk itself: alighting,
+// finding the next platform and boarding is never instantaneous, and without
+// a floor the scan will happily change vehicles in zero seconds.
+export const TRANSIT_MIN_TRANSFER_SECONDS = 60;
 export const CAR_FALLBACK_SPEED_KPH = 30;
 // Kept numerically identical to FERRY_FALLBACK_SPEED_KPH in
 // data_pipeline/src/isochrone_pipeline/adjacency.py.

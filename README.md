@@ -35,9 +35,10 @@ a foot-passenger service is available to a pedestrian and a vehicle service is
 not.
 
 **Public transport.** Where a region carries a GTFS feed, the isochrone
-accounts for scheduled services from a chosen departure date and time, subject
-to a configurable limit on the walking distance permitted at either end of a
-transit leg.
+accounts for scheduled services from a chosen departure date and time,
+including changes of vehicle, subject to a configurable limit on how far the
+rider will walk on any one leg — to the first stop, between stops when
+changing, and away from the last one.
 
 **Presentation.** Light and dark themes; metric and imperial units, defaulting
 to the reader's own locale rather than the region displayed; an adjustable
@@ -87,9 +88,20 @@ The application is built around the observation that an isochrone is a shortest-
 **Routing.** A Rust kernel compiled to WebAssembly performs the search. For a
 region with public transport this runs in three stages: a pedestrian search
 from the origin, a Connection Scan over the timetable seeded from the stops
-that search reached, and a second multi-source search reseeded at every stop
-the timetable improved. The kernel is required; there is no JavaScript
-fallback for routing.
+that search reached within the walking budget, and a second multi-source
+search reseeded at every stop the timetable improved. The result is the
+quicker of that and walking the whole way. The kernel is required; there is no
+JavaScript fallback for routing.
+
+A timetable names each platform and each direction of travel as a separate
+stop, so the scan also treats stops within a short distance of one another as
+walkable between, charging the walk plus a fixed minimum for alighting and
+boarding again. Without that, a rider can never change vehicle, and the
+timetable collapses to whichever single service happens to pass the origin.
+The distances are straight-line rather than routed, and the minimum change
+time is a constant rather than the per-interchange figure a feed's
+`transfers.txt` would give, so an interchange is modelled slightly
+optimistically.
 
 **Rendering.** Edges are drawn by the GPU, with each endpoint's travel time
 interpolated along the edge, so a road crossed midway is shaded accordingly.

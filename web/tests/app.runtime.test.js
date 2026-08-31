@@ -25,6 +25,7 @@ import {
   parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
   parseWalkSpeedKphFromLocationSearch,
+  getOrBuildStopTransferIndex,
   runConnectionScanFromWalkingReachableStops,
   buildTransitConnectionEdgeVertexData,
   runWalkingIsochroneFromSourceNode,
@@ -2286,4 +2287,142 @@ test('a GPU renderer allocates neither raster fallback grid', () => {
     needsTravelTimeGrid: true,
     needsPixelGrid: false,
   });
+});
+
+test('runConnectionScanFromWalkingReachableStops changes vehicle between two stops a short walk apart', () => {
+  // A GTFS feed names each platform separately, so an interchange is two stop
+  // ids metres apart rather than one. Stop 1 and stop 2 are 60 m apart at the
+  // same interchange: the rider arrives on the first service and leaves on the
+  // second, which is impossible unless stop ids are connected on foot.
+  const graph = parseGraphBinary(createTransitGraphBuffer({
+    nodeCount: 4,
+    stops: [
+      { xM: 0, nearestNodeIndex: 0 },
+      { xM: 100, nearestNodeIndex: 1 },
+      { xM: 160, nearestNodeIndex: 2 },
+      { xM: 300, nearestNodeIndex: 3 },
+    ],
+    tedges: [
+      { fromStop: 0, toStop: 1, departureSeconds: 1000, travelSeconds: 10 },
+      { fromStop: 2, toStop: 3, departureSeconds: 1200, travelSeconds: 10 },
+    ],
+  }));
+  // Nodes 2 and 3 are off the walk graph, so the interchange stop is reachable
+  // only by crossing to it from stop 1, and stop 3 only by the service that
+  // leaves from there.
+  const walkDistSeconds = new Float32Array([
+    0,
+    72,
+    Number.POSITIVE_INFINITY,
+    Number.POSITIVE_INFINITY,
+  ]);
+  const scanOptions = {
+    departureSecondsOfDay: 990,
+    departureWeekdayIndex: 2,
+    timeLimitSeconds: 400,
+    walkingSpeedMps: 1,
+    minTransferSeconds: 60,
+  };
+
+  const result = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, scanOptions);
+  // Ride to stop 1 (20 s), cross to stop 2 - a 60 m walk, but no change is
+  // quicker than the 60 s floor - and wait for the 1200 departure, reaching
+  // stop 3 at 1210, which is 220 s after setting out.
+  assert.equal(result.stopElapsedSeconds[1], 20);
+  assert.equal(result.stopElapsedSeconds[2], 80);
+  assert.equal(result.stopElapsedSeconds[3], 220);
+  assert.ok(Array.from(result.seedNodeIndices).includes(3));
+
+  // The same graph with the stops too far apart to walk between: the second
+  // service still runs and is still on time, and is now unreachable.
+  const withoutTransfers = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
+    ...scanOptions,
+    transferRadiusM: 1,
+  });
+  assert.equal(withoutTransfers.stopElapsedSeconds[3], Number.POSITIVE_INFINITY);
+  assert.ok(!Array.from(withoutTransfers.seedNodeIndices).includes(3));
+});
+
+test('runConnectionScanFromWalkingReachableStops charges a minimum time for changing vehicle', () => {
+  const graph = parseGraphBinary(createTransitGraphBuffer({
+    nodeCount: 3,
+    stops: [
+      { xM: 0, nearestNodeIndex: 0 },
+      { xM: 100, nearestNodeIndex: 1 },
+      { xM: 110, nearestNodeIndex: 2 },
+    ],
+    tedges: [{ fromStop: 0, toStop: 1, departureSeconds: 1000, travelSeconds: 10 }],
+  }));
+  const walkDistSeconds = new Float32Array([0, 1e9, 1e9]);
+
+  const result = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
+    departureSecondsOfDay: 990,
+    departureWeekdayIndex: 2,
+    timeLimitSeconds: 400,
+    walkingSpeedMps: 1,
+    minTransferSeconds: 120,
+  });
+
+  // Arrives stop 1 at 20 s elapsed; the 10 m walk to stop 2 takes 10 s, but
+  // alighting and boarding again cannot happen in less than the floor.
+  assert.equal(result.stopElapsedSeconds[1], 20);
+  assert.equal(result.stopElapsedSeconds[2], 140);
+});
+
+test('runConnectionScanFromWalkingReachableStops will not walk past the budget to reach a first stop', () => {
+  const graph = parseGraphBinary(createTransitGraphBuffer({
+    nodeCount: 3,
+    stops: [
+      { xM: 0, nearestNodeIndex: 0 },
+      { xM: 200, nearestNodeIndex: 2 },
+    ],
+    tedges: [{ fromStop: 0, toStop: 1, departureSeconds: 1200, travelSeconds: 10 }],
+  }));
+  // Stop 0 sits on node 0, a 200 s walk from the origin; the service leaves
+  // at 1200, ten seconds after the rider could be standing there.
+  const walkDistSeconds = new Float32Array([200, 272, Number.POSITIVE_INFINITY]);
+  const scanOptions = {
+    departureSecondsOfDay: 990,
+    departureWeekdayIndex: 2,
+    timeLimitSeconds: 2000,
+    walkingSpeedMps: 1,
+  };
+
+  const withinBudget = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
+    ...scanOptions,
+    walkBudgetSeconds: 300,
+  });
+  assert.equal(withinBudget.seedNodeIndices.length, 1);
+  assert.equal(withinBudget.seedNodeIndices[0], 2);
+
+  // The same walk, now longer than the rider is willing to do in one leg: the
+  // service exists and departs in time, and they never reach it.
+  const beyondBudget = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
+    ...scanOptions,
+    walkBudgetSeconds: 120,
+  });
+  assert.equal(beyondBudget.seedNodeIndices.length, 0);
+});
+
+test('getOrBuildStopTransferIndex pairs only stops inside the radius, and caches per graph', () => {
+  const graph = parseGraphBinary(createTransitGraphBuffer({
+    nodeCount: 3,
+    stops: [
+      { xM: 0, nearestNodeIndex: 0 },
+      { xM: 60, nearestNodeIndex: 1 },
+      { xM: 5000, nearestNodeIndex: 2 },
+    ],
+    tedges: [{ fromStop: 0, toStop: 1, departureSeconds: 1000, travelSeconds: 10 }],
+  }));
+
+  const index = getOrBuildStopTransferIndex(graph, { transferRadiusM: 100 });
+  const neighboursOf = (stopIndex) => Array.from(
+    index.neighbourStops.subarray(index.offsets[stopIndex], index.offsets[stopIndex + 1]),
+  );
+  assert.deepEqual(neighboursOf(0), [1]);
+  assert.deepEqual(neighboursOf(1), [0]);
+  assert.deepEqual(neighboursOf(2), []);
+
+  assert.equal(getOrBuildStopTransferIndex(graph, { transferRadiusM: 100 }), index);
+  assert.notEqual(getOrBuildStopTransferIndex(graph, { transferRadiusM: 10 }), index);
 });

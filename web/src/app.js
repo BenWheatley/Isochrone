@@ -121,6 +121,7 @@ import {
 } from './core/routing-validation.js';
 export {
   buildTransitConnectionEdgeVertexData,
+  getOrBuildStopTransferIndex,
   runConnectionScanFromWalkingReachableStops,
 } from './core/transit-csa.js';
 import {
@@ -269,6 +270,7 @@ export {
 export { timeToColour } from './render/colour.js';
 
 const TRANSIT_WALK_BUDGET_SCRATCH_PROPERTY = '__transitWalkBudgetDistSeconds';
+const WALK_ONLY_SNAPSHOT_SCRATCH_PROPERTY = '__walkOnlyDistSecondsSnapshot';
 const WASM_EDGE_COST_TICK_SCALE = 1_000;
 const EDGE_TRAVERSAL_COST_TICK_CACHE_PROPERTY = '__edgeTraversalCostTicksByModeMask';
 const MODE_SPECIFIC_KERNEL_GRAPH_VIEWS_CACHE_PROPERTY = '__modeSpecificKernelGraphViewsByModeMask';
@@ -919,6 +921,7 @@ export async function runWalkingIsochroneFromSourceNode(
           departureWeekdayIndex: options.departureWeekdayIndex,
           timeLimitSeconds,
           walkingSpeedMps,
+          walkBudgetSeconds: transitWalkBudgetSeconds,
         },
       );
       if (csaResult.renderableTedgeIndices.length > 0) {
@@ -931,12 +934,30 @@ export async function runWalkingIsochroneFromSourceNode(
         transitAugmented = transitEdgeVertexData.length > 0;
       }
       if (csaResult.seedNodeIndices.length > 0) {
-        const seedNodeIndices = new Uint32Array(csaResult.seedNodeIndices.length + 1);
-        const seedStartDistSeconds = new Float32Array(csaResult.seedStartDistSeconds.length + 1);
-        seedNodeIndices[0] = sourceNodeIndex;
-        seedStartDistSeconds[0] = 0;
-        seedNodeIndices.set(csaResult.seedNodeIndices, 1);
-        seedStartDistSeconds.set(csaResult.seedStartDistSeconds, 1);
+        // Seeded from the stops alone, with the origin folded back in by the
+        // elementwise minimum below rather than as a seed here. Keeping the
+        // two fields separate is what lets the walk budget bound the walk
+        // *away from a stop* without also bounding the walk away from the
+        // origin, which is a plain walking journey and no business of the
+        // transit budget's.
+        const seedNodeIndices = Uint32Array.from(csaResult.seedNodeIndices);
+        const seedStartDistSeconds = Float32Array.from(csaResult.seedStartDistSeconds);
+
+        // Pass 1 may have handed back a view straight into the kernel's
+        // output region rather than a JS-owned buffer, and every later kernel
+        // call reuses that same region - so the walk-only field has to be
+        // copied out now, before the two calls below overwrite it. Reading it
+        // afterwards would silently be reading pass 2's own output.
+        const nodeCount = mapData.graph.header.nNodes;
+        let walkOnlyDistSeconds = mapData[WALK_ONLY_SNAPSHOT_SCRATCH_PROPERTY];
+        if (
+          !(walkOnlyDistSeconds instanceof Float32Array)
+          || walkOnlyDistSeconds.length !== nodeCount
+        ) {
+          walkOnlyDistSeconds = new Float32Array(nodeCount);
+          mapData[WALK_ONLY_SNAPSHOT_SCRATCH_PROPERTY] = walkOnlyDistSeconds;
+        }
+        walkOnlyDistSeconds.set(finalDistSeconds.subarray(0, nodeCount));
 
         const transitDistSeconds = getOrRotateRoutingDistScratchBuffer(
           mapData,
@@ -957,23 +978,36 @@ export async function runWalkingIsochroneFromSourceNode(
           timeLimitSeconds,
         });
         void multiSourceResult;
-        finalDistSeconds = transitDistSeconds;
 
-        if (isTransitOnlyRouting) {
-          // Pass 2 spreads outward from every stop the rider could reach, but
-          // a plain Dijkstra has no notion of "walking since I last got off",
-          // so left alone it would happily walk for hours from a stop reached
-          // early. Recompute how far a walker can get from *any* reached stop
-          // within one budget and drop everything beyond that, which is what
-          // bounds the final leg.
-          applyTransitWalkBudgetReachability(
-            mapData,
-            finalDistSeconds,
-            seedNodeIndices,
-            transitWalkBudgetSeconds,
-            { edgeCostPrecomputeKernel, kernelGraphViews },
-          );
+        // Pass 2 spreads outward from every stop the rider could reach, but a
+        // plain Dijkstra has no notion of "walking since I last got off", so
+        // left alone it would happily walk for hours from a stop reached
+        // early. Recompute how far a walker can get from *any* reached stop
+        // within one budget and drop everything beyond that, which is what
+        // bounds the final leg. Applied whatever the mode selection: the
+        // budget describes the transit journey, and used to be skipped
+        // entirely unless transit was the only mode selected - which left the
+        // control inert in the Walk + Public transit case that is the normal
+        // way to use it.
+        applyTransitWalkBudgetReachability(
+          mapData,
+          transitDistSeconds,
+          seedNodeIndices,
+          transitWalkBudgetSeconds,
+          { edgeCostPrecomputeKernel, kernelGraphViews },
+        );
+
+        // Whichever is quicker: walking the whole way, or riding and walking
+        // the bounded legs at each end. The walk-only field is unbounded when
+        // Walk is a selected mode, and bounded to the budget when transit is
+        // the only mode, in which case it is exactly the access leg.
+        for (let nodeIndex = 0; nodeIndex < transitDistSeconds.length; nodeIndex += 1) {
+          const walkOnlySeconds = walkOnlyDistSeconds[nodeIndex];
+          if (walkOnlySeconds < transitDistSeconds[nodeIndex]) {
+            transitDistSeconds[nodeIndex] = walkOnlySeconds;
+          }
         }
+        finalDistSeconds = transitDistSeconds;
         // Edge-interpolation vertex buffers were built from the walk-only
         // pass; invalidate so the next render lazily rebuilds them from
         // the transit-augmented distances (getOrBuildSnapshotEdgeVertexData
