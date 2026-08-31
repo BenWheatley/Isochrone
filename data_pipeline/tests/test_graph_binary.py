@@ -5,18 +5,23 @@ from isochrone_pipeline.binary_reader import (
     HEADER_SIZE,
     NODE_RECORD_SIZE,
     STOP_RECORD_SIZE,
+    TRANSFER_RECORD_SIZE,
     TRANSIT_FLAG_BIT,
+    count_transfers,
     parse_edge_record,
     parse_header,
     parse_node_record,
     parse_stop_record,
+    parse_transfer_record,
     parse_transit_edge_record,
+    transfer_table_offset,
     transit_edge_table_offset,
     validate_offsets,
 )
 from isochrone_pipeline.graph_binary import export_graph_binary_bytes
 from isochrone_pipeline.gtfs_transit import TransitConnection, TransitStop
 from isochrone_pipeline.projection import ProjectionResult
+from isochrone_pipeline.transit_transfers import TransitTransfer
 
 
 def _projection() -> ProjectionResult:
@@ -66,7 +71,7 @@ def test_export_graph_binary_bytes_writes_header_nodes_and_edges() -> None:
     payload = export_graph_binary_bytes(graph, projection=_projection())
 
     header = parse_header(payload)
-    assert header.version == 2
+    assert header.version == 3
     assert header.flags == 0
     assert header.n_nodes == 3
     assert header.n_edges == 2
@@ -238,4 +243,98 @@ def test_export_graph_binary_bytes_rejects_transit_edge_with_bad_stop_index() ->
     with pytest.raises(ValueError, match="to_stop_index"):
         export_graph_binary_bytes(
             _small_graph(), projection=_projection(), stops=stops, transit_edges=connections
+        )
+
+
+def test_export_graph_binary_bytes_writes_the_transfer_table() -> None:
+    graph = AdjacencyGraph(
+        nodes=(
+            GraphNode(osm_id=1, x_m=0, y_m=0, first_edge_index=0, edge_count=0, flags=0),
+            GraphNode(osm_id=2, x_m=10, y_m=0, first_edge_index=0, edge_count=0, flags=0),
+        ),
+        edges=(),
+        skipped_constraint_way_count=0,
+    )
+    stops = (
+        TransitStop(
+            stop_id="a",
+            name="A",
+            x_m=0,
+            y_m=0,
+            nearest_node_index=0,
+            walk_attach_cost_seconds=0,
+            transport_type=2,
+        ),
+        # Deliberately carries no transfers, and is the *last* stop: the reader
+        # derives the table length from its CSR range, so it has to hold the
+        # running offset rather than zero.
+        TransitStop(
+            stop_id="b",
+            name="B",
+            x_m=10,
+            y_m=0,
+            nearest_node_index=1,
+            walk_attach_cost_seconds=0,
+            transport_type=2,
+        ),
+    )
+    transfers = (
+        TransitTransfer(
+            from_stop_index=0, to_stop_index=1, walk_distance_m=120, min_transfer_seconds=300
+        ),
+    )
+
+    payload = export_graph_binary_bytes(
+        graph, projection=_projection(), stops=stops, transit_edges=(), transfers=transfers
+    )
+    header = parse_header(payload)
+    validate_offsets(header, len(payload))
+    assert header.version == 3
+
+    first_stop = parse_stop_record(payload, header.stop_table_offset)
+    last_stop = parse_stop_record(payload, header.stop_table_offset + STOP_RECORD_SIZE)
+    assert (first_stop.first_transfer_index, first_stop.transfer_count) == (0, 1)
+    assert (last_stop.first_transfer_index, last_stop.transfer_count) == (1, 0)
+    assert count_transfers(payload, header) == 1
+
+    record = parse_transfer_record(payload, transfer_table_offset(header))
+    assert record.to_stop_index == 1
+    assert record.walk_distance_m == 120
+    assert record.min_transfer_seconds == 300
+    assert len(payload) == transfer_table_offset(header) + TRANSFER_RECORD_SIZE
+
+
+def test_export_graph_binary_bytes_rejects_unsorted_transfers() -> None:
+    graph = AdjacencyGraph(
+        nodes=(GraphNode(osm_id=1, x_m=0, y_m=0, first_edge_index=0, edge_count=0, flags=0),),
+        edges=(),
+        skipped_constraint_way_count=0,
+    )
+    stops = tuple(
+        TransitStop(
+            stop_id=stop_id,
+            name=stop_id,
+            x_m=0,
+            y_m=0,
+            nearest_node_index=0,
+            walk_attach_cost_seconds=0,
+            transport_type=2,
+        )
+        for stop_id in ("a", "b")
+    )
+    unsorted_transfers = (
+        TransitTransfer(
+            from_stop_index=1, to_stop_index=0, walk_distance_m=10, min_transfer_seconds=0
+        ),
+        TransitTransfer(
+            from_stop_index=0, to_stop_index=1, walk_distance_m=10, min_transfer_seconds=0
+        ),
+    )
+    with pytest.raises(ValueError, match="sorted by from_stop_index"):
+        export_graph_binary_bytes(
+            graph,
+            projection=_projection(),
+            stops=stops,
+            transit_edges=(),
+            transfers=unsorted_transfers,
         )

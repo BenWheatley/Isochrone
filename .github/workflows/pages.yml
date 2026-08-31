@@ -18,14 +18,22 @@ jobs:
   build-pages:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
 
       - name: Install Rust toolchain for WASM kernel
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+
+      # wasm-opt ships in binaryen and is not on the runner image. Without it
+      # the build script exits 1 and make reports 2, which is what this job
+      # had been doing since the step was introduced.
+      - name: Install Binaryen for wasm-opt
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y binaryen
 
       - name: Build routing kernel WASM
         run: make wasm-build
@@ -41,8 +49,12 @@ jobs:
           # since serving the site redistributes it (see THIRD_PARTY_NOTICES.md).
           cp -R web/fonts/. site/fonts/
           cp web/wasm/routing-kernel.wasm site/wasm/
-          cp data_pipeline/output/berlin-district-boundaries-canvas.json site/data_pipeline/output/
-          cp data_pipeline/output/graph-walk.bin.gz site/data_pipeline/output/
+          # Every region the picker offers, not just Berlin: web/src/data/
+          # locations.json lists 16, and each needs its gzipped graph and its
+          # boundary canvas. Shipping only Berlin's left the other fifteen
+          # entries selectable but 404ing.
+          cp data_pipeline/output/*.bin.gz site/data_pipeline/output/
+          cp data_pipeline/output/*-district-boundaries-canvas.json site/data_pipeline/output/
 
       - uses: actions/upload-pages-artifact@v3
         with:

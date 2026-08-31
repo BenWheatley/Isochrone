@@ -1,4 +1,6 @@
-#!/bin/zsh
+#!/usr/bin/env bash
+# bash, not zsh: this also runs on the Linux CI runner, which has no zsh, and
+# a missing interpreter surfaces only as make exiting 2.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

@@ -23,41 +23,62 @@
           </select>
         </div>
         <details id="controls-menu" class="controls-menu">
-          <summary
-            id="controls-menu-summary"
-            aria-label="Open options menu"
-            data-i18n-attr-aria-label="body.options.open"
-          >
-            <span aria-hidden="true">☰</span>
+          <summary id="controls-menu-summary">
+            <span class="material-symbols-outlined" aria-hidden="true">menu</span>
             <span data-i18n="body.options">Options</span>
           </summary>
           <div class="controls-menu-panel">
-            <fieldset class="mode-icon-group" id="mode-checkbox-group">
+            <fieldset class="control-group mode-icon-group" id="mode-checkbox-group">
               <legend class="control-title" data-i18n="body.options.mode">Transport modes</legend>
               <div class="mode-icon-row">
                 <label class="mode-icon-option">
                   <input class="mode-checkbox" type="checkbox" name="mode" value="walk" />
-                  <span class="mode-icon material-symbols-outlined" aria-hidden="true">directions_walk</span>
+                  <span
+                    class="mode-icon material-symbols-outlined"
+                    aria-hidden="true"
+                    title="Walk"
+                    data-i18n-attr-title="body.options.mode.walk"
+                  >directions_walk</span>
                   <span class="sr-only" data-i18n="body.options.mode.walk">Walk</span>
                 </label>
                 <label class="mode-icon-option">
                   <input class="mode-checkbox" type="checkbox" name="mode" value="bike" />
-                  <span class="mode-icon material-symbols-outlined" aria-hidden="true">directions_bike</span>
+                  <span
+                    class="mode-icon material-symbols-outlined"
+                    aria-hidden="true"
+                    title="Bike"
+                    data-i18n-attr-title="body.options.mode.bike"
+                  >directions_bike</span>
                   <span class="sr-only" data-i18n="body.options.mode.bike">Bike</span>
                 </label>
                 <label class="mode-icon-option">
                   <input class="mode-checkbox" type="checkbox" name="mode" value="car" checked />
-                  <span class="mode-icon material-symbols-outlined" aria-hidden="true">directions_car</span>
+                  <span
+                    class="mode-icon material-symbols-outlined"
+                    aria-hidden="true"
+                    title="Car"
+                    data-i18n-attr-title="body.options.mode.car"
+                  >directions_car</span>
                   <span class="sr-only" data-i18n="body.options.mode.car">Car</span>
                 </label>
                 <label class="mode-icon-option">
                   <input class="mode-checkbox" type="checkbox" name="mode" value="water" />
-                  <span class="mode-icon material-symbols-outlined" aria-hidden="true">directions_boat</span>
+                  <span
+                    class="mode-icon material-symbols-outlined"
+                    aria-hidden="true"
+                    title="Ferry"
+                    data-i18n-attr-title="body.options.mode.water"
+                  >directions_boat</span>
                   <span class="sr-only" data-i18n="body.options.mode.water">Ferry</span>
                 </label>
                 <label class="mode-icon-option" id="transit-enabled-row" hidden>
                   <input class="mode-checkbox" id="transit-enabled" name="transit-enabled" type="checkbox" value="transit" />
-                  <span class="mode-icon material-symbols-outlined" aria-hidden="true">directions_bus</span>
+                  <span
+                    class="mode-icon material-symbols-outlined"
+                    aria-hidden="true"
+                    title="Public transit"
+                    data-i18n-attr-title="body.options.transit"
+                  >directions_bus</span>
                   <span class="sr-only" data-i18n="body.options.transit">Public transit</span>
                 </label>
               </div>
@@ -69,78 +90,146 @@
               <input id="departure-datetime" name="departure-datetime" type="datetime-local" step="60" />
             </div>
             <hr class="control-divider" />
-            <div class="control-row control-row-speeds">
-              <label for="walk-speed-kph" data-i18n="body.options.walkSpeed">Walking speed</label>
-              <input id="walk-speed-kph" name="walk-speed-kph" type="number" min="1" step="0.1" value="4" />
-              <label for="bike-speed-kph" data-i18n="body.options.bikeSpeed">Cycling speed</label>
-              <input id="bike-speed-kph" name="bike-speed-kph" type="number" min="1" step="0.5" value="18" />
-              <span class="control-unit" id="speed-unit-label">km/h</span>
-            </div>
-            <div class="control-row" id="transit-walk-budget-row" hidden>
-              <label for="transit-walk-budget-minutes" data-i18n="body.options.transitWalkBudget">
-                Most walking per transit leg
-              </label>
-              <span class="control-row-value">
+            <!-- One <div class="control-section"> so the four numeric rows can
+                 share a single label/input/unit grid: columns only line up
+                 between rows that live in the same grid. The section, not the
+                 panel, owns those columns - the datetime picker is far wider
+                 than any number input and would stretch the input column for
+                 everyone. Colour repeating period stays outside the Speed
+                 settings fieldset because it is not a speed. -->
+            <div class="control-section">
+              <!-- role="group" + aria-labelledby rather than <fieldset>/<legend>,
+                   which is what every other group here uses. A fieldset renders
+                   through an anonymous content box, so grid-template-columns:
+                   subgrid resolves to zero columns inside one and the rows lose
+                   their alignment. The mapping is the same either way: fieldset
+                   exposes role=group, and the title supplies the same accessible
+                   name a legend would. Do not "tidy" this back to a fieldset
+                   without also giving up the shared column grid. -->
+              <div class="control-group" id="speed-group" role="group" aria-labelledby="speed-group-title">
+                <span class="control-title" id="speed-group-title" data-i18n="body.options.speedSettings">Speed settings</span>
+                <div class="control-row">
+                  <label for="walk-speed-kph" data-i18n="body.options.walkSpeed">Walking speed</label>
+                  <input
+                    id="walk-speed-kph"
+                    name="walk-speed-kph"
+                    type="number"
+                    inputmode="decimal"
+                    min="1"
+                    step="0.1"
+                    value="4"
+                    aria-describedby="walk-speed-unit-label"
+                  />
+                  <span class="control-unit speed-unit-label" id="walk-speed-unit-label">km/h</span>
+                </div>
+                <div class="control-row">
+                  <label for="bike-speed-kph" data-i18n="body.options.bikeSpeed">Cycling speed</label>
+                  <input
+                    id="bike-speed-kph"
+                    name="bike-speed-kph"
+                    type="number"
+                    inputmode="decimal"
+                    min="1"
+                    step="0.5"
+                    value="18"
+                    aria-describedby="bike-speed-unit-label"
+                  />
+                  <span class="control-unit speed-unit-label" id="bike-speed-unit-label">km/h</span>
+                </div>
+              </div>
+              <div class="control-row" id="transit-walk-budget-row" hidden>
+                <label for="transit-walk-budget-minutes" data-i18n="body.options.transitWalkBudget">
+                  Most walking per transit leg
+                </label>
                 <input
                   id="transit-walk-budget-minutes"
                   name="transit-walk-budget-minutes"
                   type="number"
+                  inputmode="numeric"
                   min="0"
                   max="60"
                   step="1"
-                  value="5"
+                  value="15"
+                  aria-describedby="transit-walk-budget-unit"
                 />
-                <span class="control-unit" data-i18n="body.options.minutesUnit">min</span>
-              </span>
-            </div>
-            <div class="control-row">
-              <label for="colour-cycle-minutes" data-i18n="body.options.colourCycle">
-                Colour repeating period (minutes)
-              </label>
-              <input
-                id="colour-cycle-minutes"
-                name="colour-cycle-minutes"
-                type="number"
-                min="5"
-                step="5"
-                value="75"
-              />
+                <span
+                  class="control-unit"
+                  id="transit-walk-budget-unit"
+                  data-i18n="body.options.minutesUnit"
+                >min</span>
+              </div>
+              <div class="control-row">
+                <label for="colour-cycle-minutes" data-i18n="body.options.colourCycle">
+                  Colour repeating period
+                </label>
+                <input
+                  id="colour-cycle-minutes"
+                  name="colour-cycle-minutes"
+                  type="number"
+                  inputmode="numeric"
+                  min="5"
+                  step="5"
+                  value="75"
+                  aria-describedby="colour-cycle-unit"
+                />
+                <span
+                  class="control-unit"
+                  id="colour-cycle-unit"
+                  data-i18n="body.options.minutesUnit"
+                >min</span>
+              </div>
             </div>
             <hr class="control-divider" />
-            <div class="control-row control-row-radio-group" id="theme-radio-group">
-              <label class="radio-option">
-                <input type="radio" name="theme" value="auto" checked />
-                <span data-i18n="body.options.theme.auto">Auto</span>
-              </label>
-              <label class="radio-option">
-                <input type="radio" name="theme" value="light" />
-                <span data-i18n="body.options.theme.light">Light mode</span>
-              </label>
-              <label class="radio-option">
-                <input type="radio" name="theme" value="dark" />
-                <span data-i18n="body.options.theme.dark">Dark mode</span>
-              </label>
-            </div>
-            <div class="control-row control-row-radio-group" id="unit-system-radio-group">
-              <label class="radio-option">
-                <input type="radio" name="unit-system" value="metric" checked />
-                <span data-i18n="body.options.units.metric">Metric</span>
-              </label>
-              <label class="radio-option">
-                <input type="radio" name="unit-system" value="imperial" />
-                <span data-i18n="body.options.units.imperial">Imperial</span>
-              </label>
-            </div>
-            <div class="control-row control-row-checkbox">
-              <label for="invert-pointer-buttons" data-i18n="body.options.invertPointerButtons">
-                Left mouse button to move start/right mouse button to move map
-              </label>
-              <input
-                id="invert-pointer-buttons"
-                name="invert-pointer-buttons"
-                type="checkbox"
-              />
-            </div>
+            <fieldset class="control-group" id="theme-radio-group">
+              <legend class="control-title" data-i18n="body.options.theme">Theme</legend>
+              <div class="control-row control-row-radio-group">
+                <label class="radio-option">
+                  <input type="radio" name="theme" value="auto" checked />
+                  <span data-i18n="body.options.theme.auto">Auto</span>
+                </label>
+                <label class="radio-option">
+                  <input type="radio" name="theme" value="light" />
+                  <span data-i18n="body.options.theme.light">Light</span>
+                </label>
+                <label class="radio-option">
+                  <input type="radio" name="theme" value="dark" />
+                  <span data-i18n="body.options.theme.dark">Dark</span>
+                </label>
+              </div>
+            </fieldset>
+            <fieldset class="control-group" id="unit-system-radio-group">
+              <legend class="control-title" data-i18n="body.options.units">Units</legend>
+              <div class="control-row control-row-radio-group">
+                <label class="radio-option">
+                  <input type="radio" name="unit-system" value="metric" checked />
+                  <span data-i18n="body.options.units.metric">Metric</span>
+                </label>
+                <label class="radio-option">
+                  <input type="radio" name="unit-system" value="imperial" />
+                  <span data-i18n="body.options.units.imperial">Imperial</span>
+                </label>
+              </div>
+            </fieldset>
+            <!-- Mouse-only: canvas-routing.js ignores this for touch and pen
+                 pointers, which get their own one-finger-pans/tap-to-move
+                 gestures. Naming the buttons is therefore accurate, not a
+                 desktop assumption. "Primary" rather than "left" because the
+                 OS may already have swapped them for a left-handed user. -->
+            <fieldset class="control-group" id="primary-mouse-button-group">
+              <legend class="control-title" data-i18n="body.options.primaryMouseButton">
+                Primary mouse button
+              </legend>
+              <div class="control-row control-row-radio-group">
+                <label class="radio-option">
+                  <input type="radio" name="primary-mouse-button" value="pan" checked />
+                  <span data-i18n="body.options.primaryMouseButton.pan">Pans the map</span>
+                </label>
+                <label class="radio-option">
+                  <input type="radio" name="primary-mouse-button" value="start" />
+                  <span data-i18n="body.options.primaryMouseButton.start">Moves the start</span>
+                </label>
+              </div>
+            </fieldset>
             <hr class="control-divider" />
             <div class="control-row control-row-actions">
               <button id="export-svg-button" type="button" disabled data-i18n="body.options.exportSvg">

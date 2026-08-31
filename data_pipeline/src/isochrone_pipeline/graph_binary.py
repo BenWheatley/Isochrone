@@ -1,4 +1,4 @@
-"""Binary graph export for graph schema v2."""
+"""Binary graph export for graph schema v3."""
 
 from __future__ import annotations
 
@@ -15,8 +15,9 @@ from .binary_reader import (
 from .binary_writer import BinaryWriter
 from .gtfs_transit import TransitConnection, TransitStop
 from .projection import ProjectionResult
+from .transit_transfers import TransitTransfer
 
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ def export_graph_binary_bytes(
     projection: ProjectionResult,
     stops: tuple[TransitStop, ...] = (),
     transit_edges: tuple[TransitConnection, ...] = (),
+    transfers: tuple[TransitTransfer, ...] = (),
 ) -> bytes:
     _validate_adjacency_layout(graph)
     _validate_transit_layout(graph, stops, transit_edges)
@@ -99,15 +101,20 @@ def export_graph_binary_bytes(
     # Transit edges are written in the order given (the caller sorts by
     # departure_seconds_from_midnight, which is what the browser's
     # single-pass Connection Scan Algorithm needs — one global scan, not a
-    # per-stop lookup). first_tedge_index/tedge_count below are therefore
-    # left at 0 for every stop: they'd only matter for a per-stop
-    # "departures after time T" query style, which nothing uses yet.
-    for stop in stops:
+    # per-stop lookup), so no per-stop index into them is needed.
+    #
+    # The two words that used to reserve such an index now carry the CSR range
+    # into the transfer table instead. `transfers` is required to be sorted by
+    # (from_stop_index, to_stop_index), which makes each stop's range
+    # contiguous.
+    transfer_ranges = _transfer_ranges_by_stop(transfers, len(stops))
+    for stop_index, stop in enumerate(stops):
+        first_transfer_index, transfer_count = transfer_ranges[stop_index]
         writer.write_i32(stop.x_m)
         writer.write_i32(stop.y_m)
         writer.write_u32(stop.nearest_node_index)
-        writer.write_u32(0)  # first_tedge_index (reserved, unused by CSA scan)
-        writer.write_u16(0)  # tedge_count (reserved, unused by CSA scan)
+        writer.write_u32(first_transfer_index)
+        writer.write_u16(transfer_count)
         writer.write_u8(stop.transport_type)
         writer.write_u8(0)  # reserved
         writer.write_u32(0)  # name_offset (string table not implemented in this MVP)
@@ -121,7 +128,53 @@ def export_graph_binary_bytes(
         writer.write_u16(transit_edge.route_id)
         writer.write_u32(transit_edge.service_day_mask)
 
+    # Appended after the transit edges, with no header field of its own: the
+    # 64-byte header is full, and the reader derives this table's offset the
+    # same way it already derives the transit-edge table's, then its length
+    # from the last stop's CSR range. A v2 payload simply ends here, which
+    # reads back as every stop having no transfers.
+    for transfer in transfers:
+        writer.write_u32(transfer.to_stop_index)
+        writer.write_u16(transfer.walk_distance_m)
+        writer.write_u16(transfer.min_transfer_seconds)
+
     return writer.to_bytes()
+
+
+def _transfer_ranges_by_stop(
+    transfers: tuple[TransitTransfer, ...],
+    n_stops: int,
+) -> list[tuple[int, int]]:
+    """CSR ranges, one per stop.
+
+    A stop with no transfers still gets the running offset rather than zero, so
+    that `first + count` of the *last* stop is the table's total length however
+    the transfers happen to be distributed. The reader derives the length that
+    way, having no header field to read it from.
+    """
+    counts = [0] * n_stops
+    previous_from_stop_index = -1
+    for index, transfer in enumerate(transfers):
+        from_stop_index = transfer.from_stop_index
+        if from_stop_index < 0 or from_stop_index >= n_stops:
+            raise ValueError(
+                f"transfer {index} from_stop_index out of range: "
+                f"{from_stop_index} (n_stops={n_stops})"
+            )
+        if from_stop_index < previous_from_stop_index:
+            raise ValueError(
+                "transfers must be sorted by from_stop_index; "
+                f"stop {from_stop_index} follows {previous_from_stop_index}"
+            )
+        previous_from_stop_index = from_stop_index
+        counts[from_stop_index] += 1
+
+    ranges: list[tuple[int, int]] = []
+    running_offset = 0
+    for stop_index in range(n_stops):
+        ranges.append((running_offset, counts[stop_index]))
+        running_offset += counts[stop_index]
+    return ranges
 
 
 def _validate_transit_layout(

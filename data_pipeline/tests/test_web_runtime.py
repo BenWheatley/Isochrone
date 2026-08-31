@@ -103,7 +103,8 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
         "controls-menu",
         "controls-menu-summary",
         "theme-radio-group",
-        "invert-pointer-buttons",
+        "primary-mouse-button-group",
+        "unit-system-radio-group",
         "mode-checkbox-group",
         "colour-cycle-minutes",
         "walk-speed-kph",
@@ -139,10 +140,27 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
 
     assert parsed.elements_by_id["location-select"].tag == "select"
     assert parsed.elements_by_id["location-select"].attrs["name"] == "location-select"
-    assert parsed.elements_by_id["theme-radio-group"].tag == "div"
-    assert parsed.elements_by_id["mode-checkbox-group"].tag == "fieldset"
-    assert parsed.elements_by_id["invert-pointer-buttons"].tag == "input"
-    assert parsed.elements_by_id["invert-pointer-buttons"].attrs["type"] == "checkbox"
+    # Every group of related controls carries an accessible name, so that a
+    # screen reader announces what "Auto" or "Metric" is a choice *about*
+    # rather than reading the options bare. A <fieldset> gets that from its
+    # <legend>; #speed-group cannot be a fieldset - subgrid resolves to zero
+    # columns through a fieldset's anonymous content box, which is what aligns
+    # its label/input/unit columns - so it uses the role=group/aria-labelledby
+    # spelling of the same thing.
+    for group_id in (
+        "mode-checkbox-group",
+        "theme-radio-group",
+        "unit-system-radio-group",
+        "primary-mouse-button-group",
+    ):
+        assert parsed.elements_by_id[group_id].tag == "fieldset", group_id
+
+    speed_group = parsed.elements_by_id["speed-group"]
+    assert speed_group.attrs.get("role") == "group"
+    labelled_by = speed_group.attrs.get("aria-labelledby", "")
+    assert labelled_by in parsed.elements_by_id, (
+        f"#speed-group is labelled by {labelled_by!r}, which no element carries"
+    )
 
     colour_cycle_input = parsed.elements_by_id["colour-cycle-minutes"]
     assert colour_cycle_input.tag == "input"
@@ -246,4 +264,68 @@ def test_readme_links_live_app_and_discussed_docs() -> None:
     markdown_links = parse_markdown_links(readme)
     assert markdown_links["Region Data Pipeline"] == "docs/region-data-pipeline.md"
     assert markdown_links["WASM Routing Kernel"] == "docs/wasm-routing-kernel.md"
-    assert markdown_links["Graph Binary Schema v2"] == "docs/graph-binary-schema-v2.md"
+    assert markdown_links["Graph Binary Schema v3"] == "docs/graph-binary-schema-v3.md"
+
+
+def collect_i18n_keys_from_index_html() -> set[str]:
+    """Every localisation key index.html asks for, text and attribute alike."""
+    markup = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
+    return set(re.findall(r'data-i18n(?:-attr-[a-z-]+)?="([^"]+)"', markup))
+
+
+def load_locale_bundles() -> dict[str, dict[str, str]]:
+    locales_root = WEB_ROOT / "locales"
+    return {
+        path.parent.name: json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(locales_root.glob("*/common.json"))
+    }
+
+
+def test_locale_bundles_cover_every_key_the_markup_asks_for() -> None:
+    bundles = load_locale_bundles()
+    assert set(bundles) >= {"en", "de", "fr"}
+
+    requested = collect_i18n_keys_from_index_html()
+    assert requested, "index.html declares no data-i18n keys, which cannot be right"
+
+    for locale, messages in bundles.items():
+        missing = sorted(requested.difference(messages))
+        assert not missing, f"{locale} is missing keys used by index.html: {missing}"
+
+
+def test_locale_bundles_agree_on_their_key_sets() -> None:
+    """A key added to one language and forgotten in the others silently falls
+    back to English at runtime, which reads as a half-translated panel rather
+    than as an error. Compare the sets instead of waiting to notice."""
+    bundles = load_locale_bundles()
+    reference_locale, reference = next(iter(sorted(bundles.items())))
+
+    for locale, messages in sorted(bundles.items()):
+        if locale == reference_locale:
+            continue
+        only_here = sorted(set(messages).difference(reference))
+        only_there = sorted(set(reference).difference(messages))
+        assert not only_here, f"{locale} has keys {reference_locale} lacks: {only_here}"
+        assert not only_there, f"{locale} lacks keys {reference_locale} has: {only_there}"
+
+
+def test_locale_bundles_carry_no_orphan_keys() -> None:
+    """Keys nothing references are translation debt: they get maintained and
+    re-translated forever without ever reaching a user."""
+    bundles = load_locale_bundles()
+    referenced = collect_i18n_keys_from_index_html()
+    # Some keys are only ever built at runtime - `export.mode.${modeValue}` -
+    # so a literal-only sweep would call every one of them an orphan. Treat the
+    # static part of such a template as covering the whole family.
+    dynamic_prefixes: set[str] = set()
+    for source in sorted(WEB_ROOT.glob("src/**/*.js")):
+        js = source.read_text(encoding="utf-8")
+        referenced.update(re.findall(r"['\"]([a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)+)['\"]", js))
+        dynamic_prefixes.update(re.findall(r"`([a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)*\.)\$\{", js))
+
+    orphans = sorted(
+        key
+        for key in bundles["en"]
+        if key not in referenced and not any(key.startswith(prefix) for prefix in dynamic_prefixes)
+    )
+    assert not orphans, f"locale keys nothing references: {orphans}"

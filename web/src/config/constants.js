@@ -13,8 +13,15 @@ export const NODE_RECORD_SIZE = 16;
 export const EDGE_RECORD_SIZE = 12;
 export const STOP_RECORD_SIZE = 24;
 export const TEDGE_RECORD_SIZE = 20;
+export const TRANSFER_RECORD_SIZE = 8;
 export const BYTES_PER_MEBIBYTE = 1024 * 1024;
-export const SUPPORTED_GRAPH_VERSIONS = new Set([2]);
+// v3 spends two words the v2 stop record reserved and never wrote on a CSR
+// range into a new transfer table, and appends that table after the transit
+// edges. A v2 payload is therefore still readable: those words are zero, which
+// reads as "this stop has no transfers", and the transfer table is empty
+// because the file ends where it would start. Regions built before v3 keep
+// working, with the pre-v3 behaviour of no changes of vehicle.
+export const SUPPORTED_GRAPH_VERSIONS = new Set([2, 3]);
 export const EDGE_MODE_WALK_BIT = 1;
 export const EDGE_MODE_BIKE_BIT = 1 << 1;
 export const EDGE_MODE_CAR_BIT = 1 << 2;
@@ -55,7 +62,21 @@ export const DEFAULT_WALK_SPEED_KPH = 4;
 // stop, between stops when changing, and away from the last one. Bounds the
 // walking that public-transit routing is allowed to add on top of the
 // vehicle legs themselves.
-export const DEFAULT_TRANSIT_WALK_BUDGET_MINUTES = 5;
+//
+// 15 minutes is roughly a kilometre, which is the outer edge of the catchment
+// journey planners generally assume for reaching a station. It was 5 minutes
+// (about 330 m) while the budget was inert for every mode combination except
+// "transit and nothing else"; once it actually bounds the access leg, 5
+// minutes is short enough to leave a rider with no service at all - measured
+// against Berlin, the nearest stop to a Märkisches Viertel origin is a 6
+// minute walk, so a 5 minute budget silently returned a walking isochrone.
+export const DEFAULT_TRANSIT_WALK_BUDGET_MINUTES = 15;
+// Charged for every change, over and above the walk itself: alighting,
+// finding the next platform and boarding is never instantaneous, and without
+// a floor the scan will happily change vehicles in zero seconds. Only a
+// fallback - where the feed's transfers.txt declares a real minimum for an
+// interchange, the graph carries that instead, per transfer.
+export const TRANSIT_MIN_TRANSFER_SECONDS = 60;
 export const CAR_FALLBACK_SPEED_KPH = 30;
 // Kept numerically identical to FERRY_FALLBACK_SPEED_KPH in
 // data_pipeline/src/isochrone_pipeline/adjacency.py.

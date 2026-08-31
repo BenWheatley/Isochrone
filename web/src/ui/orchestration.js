@@ -76,8 +76,15 @@ export function initializeAppShell(doc, options = {}) {
   const unitSystemRadios = Array.from(
     resolvedDocument.querySelectorAll('input[name="unit-system"]'),
   );
-  const speedUnitLabelElement = resolvedDocument.getElementById('speed-unit-label');
-  const invertPointerButtonsInput = resolvedDocument.getElementById('invert-pointer-buttons');
+  // One unit span per speed input, rather than a single trailing one: with
+  // two inputs on the row a lone "km/h" reads as though it qualifies only the
+  // input it sits next to.
+  const speedUnitLabelElements = Array.from(
+    resolvedDocument.querySelectorAll('.speed-unit-label'),
+  );
+  const primaryMouseButtonRadios = Array.from(
+    resolvedDocument.querySelectorAll('input[name="primary-mouse-button"]'),
+  );
   const modeCheckboxGroup = resolvedDocument.getElementById('mode-checkbox-group');
   const modeCheckboxes = Array.from(resolvedDocument.querySelectorAll('.mode-checkbox'));
   const colourCycleMinutesInput = resolvedDocument.getElementById('colour-cycle-minutes');
@@ -147,11 +154,19 @@ export function initializeAppShell(doc, options = {}) {
   if (unitSystemRadios.length !== 2 || unitSystemRadios.some((radio) => radio.tagName !== 'INPUT')) {
     throw new Error('index.html is missing two <input type="radio" name="unit-system"> elements');
   }
-  if (!speedUnitLabelElement || speedUnitLabelElement.tagName !== 'SPAN') {
-    throw new Error('index.html is missing <span id="speed-unit-label">');
+  if (
+    speedUnitLabelElements.length === 0
+    || speedUnitLabelElements.some((element) => element.tagName !== 'SPAN')
+  ) {
+    throw new Error('index.html is missing <span class="speed-unit-label"> elements');
   }
-  if (!invertPointerButtonsInput || invertPointerButtonsInput.tagName !== 'INPUT') {
-    throw new Error('index.html is missing <input id="invert-pointer-buttons">');
+  if (
+    primaryMouseButtonRadios.length !== 2
+    || primaryMouseButtonRadios.some((radio) => radio.tagName !== 'INPUT')
+  ) {
+    throw new Error(
+      'index.html is missing two <input type="radio" name="primary-mouse-button"> elements',
+    );
   }
   if (!modeCheckboxGroup || modeCheckboxGroup.tagName !== 'FIELDSET') {
     throw new Error('index.html is missing <fieldset id="mode-checkbox-group">');
@@ -283,8 +298,8 @@ export function initializeAppShell(doc, options = {}) {
     routingDisclaimerTransitLink,
     themeRadios,
     unitSystemRadios,
-    speedUnitLabelElement,
-    invertPointerButtonsInput,
+    speedUnitLabelElements,
+    primaryMouseButtonRadios,
     modeCheckboxGroup,
     modeCheckboxes,
     colourCycleMinutesInput,
@@ -359,8 +374,12 @@ export function bindLocationSelectControl(shell, options = {}) {
 }
 
 export function bindPointerButtonInversionControl(shell, options = {}) {
-  if (!shell || typeof shell !== 'object' || !shell.invertPointerButtonsInput) {
-    throw new Error('shell.invertPointerButtonsInput is required');
+  if (
+    !shell || typeof shell !== 'object'
+    || !Array.isArray(shell.primaryMouseButtonRadios)
+    || shell.primaryMouseButtonRadios.length === 0
+  ) {
+    throw new Error('shell.primaryMouseButtonRadios is required');
   }
 
   const storage = options.storage ?? globalThis.localStorage ?? null;
@@ -369,32 +388,49 @@ export function bindPointerButtonInversionControl(shell, options = {}) {
     throw new Error('storageKey must be a non-empty string');
   }
 
-  const setChecked = (checked, persist = true) => {
-    shell.invertPointerButtonsInput.checked = checked === true;
-    if (persist) {
-      safeStorageSet(storage, storageKey, checked === true ? '1' : '0');
+  // The stored value predates the radio group and is still a boolean "are the
+  // buttons swapped": keeping it means an existing user's preference survives
+  // the control changing shape. "start" is the swapped state - the primary
+  // button moves the start point rather than panning.
+  const setInverted = (inverted, persist = true) => {
+    const nextValue = inverted === true ? 'start' : 'pan';
+    for (const radio of shell.primaryMouseButtonRadios) {
+      radio.checked = radio.value === nextValue;
     }
-    return shell.invertPointerButtonsInput.checked;
+    if (persist) {
+      safeStorageSet(storage, storageKey, inverted === true ? '1' : '0');
+    }
+    return inverted === true;
   };
 
+  const readInverted = () => shell.primaryMouseButtonRadios
+    .some((radio) => radio.checked && radio.value === 'start');
+
   const persistedValue = safeStorageGet(storage, storageKey);
-  setChecked(
+  setInverted(
     persistedValue === '1' || persistedValue === 'true' || persistedValue === 'yes' || persistedValue === 'on',
     false,
   );
 
   const handleChange = () => {
-    setChecked(shell.invertPointerButtonsInput.checked, true);
+    setInverted(readInverted(), true);
   };
 
-  shell.invertPointerButtonsInput.addEventListener('change', handleChange);
+  for (const radio of shell.primaryMouseButtonRadios) {
+    radio.addEventListener('change', handleChange);
+  }
 
   return {
     dispose() {
-      shell.invertPointerButtonsInput.removeEventListener('change', handleChange);
+      for (const radio of shell.primaryMouseButtonRadios) {
+        radio.removeEventListener('change', handleChange);
+      }
+    },
+    isInverted() {
+      return readInverted();
     },
     setChecked(checked, applyOptions = {}) {
-      return setChecked(checked, applyOptions.persist !== false);
+      return setInverted(checked, applyOptions.persist !== false);
     },
   };
 }
@@ -600,8 +636,8 @@ export function bindUnitSystemControl(shell, options = {}) {
       radio.checked = radio.value === nextUnitSystem;
     }
     rootElement.dataset.units = nextUnitSystem;
-    if (shell.speedUnitLabelElement) {
-      shell.speedUnitLabelElement.textContent = speedUnitLabel(nextUnitSystem);
+    for (const element of shell.speedUnitLabelElements ?? []) {
+      element.textContent = speedUnitLabel(nextUnitSystem);
     }
 
     // Restate the speeds in the new unit. Converting through km/h keeps the

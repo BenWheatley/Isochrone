@@ -1,8 +1,8 @@
 {
-  "generated_at_utc": "2026-08-08T16:20:42.771377+00:00",
+  "generated_at_utc": "2026-08-31T19:14:46.092862+00:00",
   "input": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/input/berlin-routing.osm.json",
   "binary_output": "/Users/benwheatley/Documents/Code/Isochrone/data_pipeline/output/graph-walk.bin",
-  "binary_size_bytes": 64438336,
+  "binary_size_bytes": 64939392,
   "before_node_count": 1240596,
   "before_edge_count": 2765024,
   "after_node_count": 577715,
@@ -78,11 +78,17 @@
       "max": "2026-12-12"
     },
     "final_stop_count": 7670,
-    "final_connection_count": 1892441
+    "final_connection_count": 1892441,
+    "transfer_count": 62632,
+    "transfer_radius_m": 500.0,
+    "routed_transfer_pair_count": 62386,
+    "declared_transfer_pair_count": 10244,
+    "declared_only_transfer_pair_count": 246,
+    "forbidden_transfer_pair_count": 0
   },
   "header": {
     "magic": "0x49534F43",
-    "version": 2,
+    "version": 3,
     "flags": 1,
     "n_nodes": 577715,
     "n_edges": 1430161,

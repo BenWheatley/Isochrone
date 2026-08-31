@@ -18,7 +18,7 @@ from .binary_reader import (
     validate_offsets,
 )
 
-SUPPORTED_VERSIONS = frozenset({1, 2})
+SUPPORTED_VERSIONS = frozenset({1, 2, 3})
 
 
 @dataclass(frozen=True)

@@ -120,7 +120,10 @@ function createCanvasFixture() {
       isochroneCanvas,
       canvasStack,
       mapRegion,
-      invertPointerButtonsInput: { checked: false },
+      primaryMouseButtonRadios: [
+        { value: 'pan', checked: true },
+        { value: 'start', checked: false },
+      ],
     },
     baseRect,
   };
@@ -503,7 +506,8 @@ test('secondary drag moves the selection point without panning by default', asyn
 
 test('invert pointer buttons swaps navigation and selection drag roles', async () => {
   const { shell } = createCanvasFixture();
-  shell.invertPointerButtonsInput.checked = true;
+  shell.primaryMouseButtonRadios[0].checked = false;
+  shell.primaryMouseButtonRadios[1].checked = true;
   const mapData = {
     graph: {
       header: {

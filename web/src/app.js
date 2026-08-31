@@ -269,6 +269,7 @@ export {
 export { timeToColour } from './render/colour.js';
 
 const TRANSIT_WALK_BUDGET_SCRATCH_PROPERTY = '__transitWalkBudgetDistSeconds';
+const WALK_ONLY_SNAPSHOT_SCRATCH_PROPERTY = '__walkOnlyDistSecondsSnapshot';
 const WASM_EDGE_COST_TICK_SCALE = 1_000;
 const EDGE_TRAVERSAL_COST_TICK_CACHE_PROPERTY = '__edgeTraversalCostTicksByModeMask';
 const MODE_SPECIFIC_KERNEL_GRAPH_VIEWS_CACHE_PROPERTY = '__modeSpecificKernelGraphViewsByModeMask';
@@ -919,6 +920,7 @@ export async function runWalkingIsochroneFromSourceNode(
           departureWeekdayIndex: options.departureWeekdayIndex,
           timeLimitSeconds,
           walkingSpeedMps,
+          walkBudgetSeconds: transitWalkBudgetSeconds,
         },
       );
       if (csaResult.renderableTedgeIndices.length > 0) {
@@ -931,12 +933,30 @@ export async function runWalkingIsochroneFromSourceNode(
         transitAugmented = transitEdgeVertexData.length > 0;
       }
       if (csaResult.seedNodeIndices.length > 0) {
-        const seedNodeIndices = new Uint32Array(csaResult.seedNodeIndices.length + 1);
-        const seedStartDistSeconds = new Float32Array(csaResult.seedStartDistSeconds.length + 1);
-        seedNodeIndices[0] = sourceNodeIndex;
-        seedStartDistSeconds[0] = 0;
-        seedNodeIndices.set(csaResult.seedNodeIndices, 1);
-        seedStartDistSeconds.set(csaResult.seedStartDistSeconds, 1);
+        // Seeded from the stops alone, with the origin folded back in by the
+        // elementwise minimum below rather than as a seed here. Keeping the
+        // two fields separate is what lets the walk budget bound the walk
+        // *away from a stop* without also bounding the walk away from the
+        // origin, which is a plain walking journey and no business of the
+        // transit budget's.
+        const seedNodeIndices = Uint32Array.from(csaResult.seedNodeIndices);
+        const seedStartDistSeconds = Float32Array.from(csaResult.seedStartDistSeconds);
+
+        // Pass 1 may have handed back a view straight into the kernel's
+        // output region rather than a JS-owned buffer, and every later kernel
+        // call reuses that same region - so the walk-only field has to be
+        // copied out now, before the two calls below overwrite it. Reading it
+        // afterwards would silently be reading pass 2's own output.
+        const nodeCount = mapData.graph.header.nNodes;
+        let walkOnlyDistSeconds = mapData[WALK_ONLY_SNAPSHOT_SCRATCH_PROPERTY];
+        if (
+          !(walkOnlyDistSeconds instanceof Float32Array)
+          || walkOnlyDistSeconds.length !== nodeCount
+        ) {
+          walkOnlyDistSeconds = new Float32Array(nodeCount);
+          mapData[WALK_ONLY_SNAPSHOT_SCRATCH_PROPERTY] = walkOnlyDistSeconds;
+        }
+        walkOnlyDistSeconds.set(finalDistSeconds.subarray(0, nodeCount));
 
         const transitDistSeconds = getOrRotateRoutingDistScratchBuffer(
           mapData,
@@ -957,23 +977,36 @@ export async function runWalkingIsochroneFromSourceNode(
           timeLimitSeconds,
         });
         void multiSourceResult;
-        finalDistSeconds = transitDistSeconds;
 
-        if (isTransitOnlyRouting) {
-          // Pass 2 spreads outward from every stop the rider could reach, but
-          // a plain Dijkstra has no notion of "walking since I last got off",
-          // so left alone it would happily walk for hours from a stop reached
-          // early. Recompute how far a walker can get from *any* reached stop
-          // within one budget and drop everything beyond that, which is what
-          // bounds the final leg.
-          applyTransitWalkBudgetReachability(
-            mapData,
-            finalDistSeconds,
-            seedNodeIndices,
-            transitWalkBudgetSeconds,
-            { edgeCostPrecomputeKernel, kernelGraphViews },
-          );
+        // Pass 2 spreads outward from every stop the rider could reach, but a
+        // plain Dijkstra has no notion of "walking since I last got off", so
+        // left alone it would happily walk for hours from a stop reached
+        // early. Recompute how far a walker can get from *any* reached stop
+        // within one budget and drop everything beyond that, which is what
+        // bounds the final leg. Applied whatever the mode selection: the
+        // budget describes the transit journey, and used to be skipped
+        // entirely unless transit was the only mode selected - which left the
+        // control inert in the Walk + Public transit case that is the normal
+        // way to use it.
+        applyTransitWalkBudgetReachability(
+          mapData,
+          transitDistSeconds,
+          seedNodeIndices,
+          transitWalkBudgetSeconds,
+          { edgeCostPrecomputeKernel, kernelGraphViews },
+        );
+
+        // Whichever is quicker: walking the whole way, or riding and walking
+        // the bounded legs at each end. The walk-only field is unbounded when
+        // Walk is a selected mode, and bounded to the budget when transit is
+        // the only mode, in which case it is exactly the access leg.
+        for (let nodeIndex = 0; nodeIndex < transitDistSeconds.length; nodeIndex += 1) {
+          const walkOnlySeconds = walkOnlyDistSeconds[nodeIndex];
+          if (walkOnlySeconds < transitDistSeconds[nodeIndex]) {
+            transitDistSeconds[nodeIndex] = walkOnlySeconds;
+          }
         }
+        finalDistSeconds = transitDistSeconds;
         // Edge-interpolation vertex buffers were built from the walk-only
         // pass; invalidate so the next render lazily rebuilds them from
         // the transit-augmented distances (getOrBuildSnapshotEdgeVertexData
@@ -1512,6 +1545,23 @@ function getOrBuildStaticEdgeNodeIndexedVertexDataForModeFromMapData(
  * so it has to be told where the grid sits. Edge draws are unaffected: they
  * work in graph space throughout.
  */
+/**
+ * Which raster fallback grids a renderer will actually reach.
+ *
+ * Every render path is the same ladder: draw edges if it can, else fill the
+ * travel-time grid, else the pixel grid. A WebGL renderer can draw edges, so
+ * it takes the first rung and touches neither grid - even though it also
+ * exposes drawTravelTimeGrid, which is why capability alone is the wrong test.
+ */
+export function resolveRenderGridRequirements(renderer) {
+  const drawsEdges = typeof renderer?.drawTravelTimeEdges === 'function';
+  const drawsTravelTimeGrid = typeof renderer?.drawTravelTimeGrid === 'function';
+  return {
+    needsTravelTimeGrid: !drawsEdges && drawsTravelTimeGrid,
+    needsPixelGrid: !drawsEdges && !drawsTravelTimeGrid,
+  };
+}
+
 function translateViewportIntoGrid(viewport, fitBoundingBoxPx, grid) {
   const originXPx = grid?.originXPx ?? 0;
   const originYPx = grid?.originYPx ?? 0;
@@ -2167,24 +2217,28 @@ export async function initializeMapData(shell, options = {}) {
     const nodePixels = precomputeNodePixelCoordinates(graph);
     const nodeModeMask = precomputeNodeModeMask(graph);
     const nodeSpatialIndex = createNodeSpatialIndex(graph, nodePixels);
-    // Render grids cover the most-zoomed-out view, not the routing graph.
-    // Sizing them to the graph meant a region whose ferries reach another
-    // country allocated across that whole envelope: Portsmouth's grid is
-    // 20570 x 24802, so the pair cost ~4 GB - every cell written by the
-    // clears below - for a city about 15 km across.
+    // Render grids are raster fallbacks, allocated only for a renderer that
+    // will actually reach them. Every render path is
+    //   if (drawTravelTimeEdges) ... else if (drawTravelTimeGrid) ... else pixelGrid
+    // and a WebGL renderer has drawTravelTimeEdges, so it always takes the
+    // first branch and touches neither grid. Allocating them regardless cost
+    // Berlin 61 MiB each - far more than the canvas they would have been
+    // drawn into - for buffers nothing read.
     const renderGridExtent = computeRenderGridExtent(graph.header, boundaryFitBoundingBoxPx);
-    const pixelGrid = createPixelGrid(
-      renderGridExtent.widthPx,
-      renderGridExtent.heightPx,
-      renderGridExtent,
-    );
-    const travelTimeGrid = createTravelTimeGrid(
-      renderGridExtent.widthPx,
-      renderGridExtent.heightPx,
-      renderGridExtent,
-    );
-    clearGrid(pixelGrid);
-    clearTravelTimeGrid(travelTimeGrid);
+    const { needsTravelTimeGrid, needsPixelGrid } = resolveRenderGridRequirements(renderer);
+
+    const pixelGrid = needsPixelGrid
+      ? createPixelGrid(renderGridExtent.widthPx, renderGridExtent.heightPx, renderGridExtent)
+      : null;
+    const travelTimeGrid = needsTravelTimeGrid
+      ? createTravelTimeGrid(renderGridExtent.widthPx, renderGridExtent.heightPx, renderGridExtent)
+      : null;
+    if (pixelGrid) {
+      clearGrid(pixelGrid);
+    }
+    if (travelTimeGrid) {
+      clearTravelTimeGrid(travelTimeGrid);
+    }
 
     return {
       boundarySummary: boundaryLoad.boundarySummary,
@@ -2794,7 +2848,9 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;
   const supportsGpuEdgeInterpolation = typeof renderer.drawTravelTimeEdges === 'function';
   const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
-  if (supportsGpuTravelTimeRendering && !mapData.travelTimeGrid) {
+  // Only the branch that actually runs needs its grid: a renderer that can
+  // draw edges never reaches the travel-time grid, whatever else it exposes.
+  if (!supportsGpuEdgeInterpolation && supportsGpuTravelTimeRendering && !mapData.travelTimeGrid) {
     throw new Error('mapData.travelTimeGrid is required for GPU travel-time rendering');
   }
 
@@ -3132,8 +3188,8 @@ export function runGpuCpuParityDiagnostic(renderer, mapData, searchState, option
   if (!mapData || typeof mapData !== 'object') {
     throw new Error('mapData must be an object');
   }
-  if (!mapData.graph || !mapData.nodePixels || !mapData.pixelGrid) {
-    throw new Error('mapData.graph, mapData.nodePixels, and mapData.pixelGrid are required');
+  if (!mapData.graph || !mapData.nodePixels) {
+    throw new Error('mapData.graph and mapData.nodePixels are required');
   }
   if (!searchState || typeof searchState !== 'object') {
     throw new Error('searchState must be an object');
@@ -3161,7 +3217,16 @@ export function runGpuCpuParityDiagnostic(renderer, mapData, searchState, option
   const sampleSeed = options.sampleSeed ?? 0x5f3759df;
   const perChannelThreshold = clampInt(Math.round(options.perChannelThreshold ?? 64), 0, 255);
 
-  const referenceGrid = createPixelGrid(mapData.pixelGrid.widthPx, mapData.pixelGrid.heightPx);
+  // Sized from the render extent rather than from mapData.pixelGrid, which a
+  // GPU renderer no longer allocates - this only ever needed the dimensions.
+  const referenceExtent = mapData.pixelGrid
+    ?? mapData.renderGridExtent
+    ?? computeRenderGridExtent(mapData.graph.header, mapData.boundaryFitBoundingBoxPx ?? null);
+  const referenceGrid = createPixelGrid(
+    referenceExtent.widthPx,
+    referenceExtent.heightPx,
+    referenceExtent,
+  );
   clearGrid(referenceGrid);
   paintAllReachableEdgeInterpolationsToGrid(
     referenceGrid,

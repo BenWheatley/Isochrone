@@ -12,6 +12,7 @@ NODE_RECORD_SIZE = 16
 EDGE_RECORD_SIZE = 12
 STOP_RECORD_SIZE = 24
 TEDGE_RECORD_SIZE = 20
+TRANSFER_RECORD_SIZE = 8
 TRANSIT_FLAG_BIT = 1 << 0
 
 
@@ -60,10 +61,21 @@ class StopRecord:
     x_m: int
     y_m: int
     nearest_node_index: int
-    first_tedge_index: int
-    tedge_count: int
+    # v2 reserved these two words for a per-stop index into the transit-edge
+    # table and never wrote anything but zero. v3 spends them on the CSR range
+    # into the transfer table instead, which is why the record did not have to
+    # grow. A v2 payload therefore reads back as "no transfers".
+    first_transfer_index: int
+    transfer_count: int
     transport_type: int
     name_offset: int
+
+
+@dataclass(frozen=True)
+class TransferRecord:
+    to_stop_index: int
+    walk_distance_m: int
+    min_transfer_seconds: int
 
 
 @dataclass(frozen=True)
@@ -167,8 +179,8 @@ def parse_stop_record(buffer: bytes | bytearray | memoryview, offset: int) -> St
         x_m,
         y_m,
         nearest_node_index,
-        first_tedge_index,
-        tedge_count,
+        first_transfer_index,
+        transfer_count,
         transport_type,
         _reserved,
         name_offset,
@@ -177,8 +189,8 @@ def parse_stop_record(buffer: bytes | bytearray | memoryview, offset: int) -> St
         x_m=x_m,
         y_m=y_m,
         nearest_node_index=nearest_node_index,
-        first_tedge_index=first_tedge_index,
-        tedge_count=tedge_count,
+        first_transfer_index=first_transfer_index,
+        transfer_count=transfer_count,
         transport_type=transport_type,
         name_offset=name_offset,
     )
@@ -206,6 +218,37 @@ def parse_transit_edge_record(
         route_id=route_id,
         service_day_mask=service_day_mask,
     )
+
+
+def transfer_table_offset(header: GraphHeader) -> int:
+    """Transfers follow the transit-edge table, derived rather than carried in
+    the header for the same reason that table's own offset is."""
+    return transit_edge_table_offset(header) + (header.n_tedges * TEDGE_RECORD_SIZE)
+
+
+def parse_transfer_record(buffer: bytes | bytearray | memoryview, offset: int) -> TransferRecord:
+    if offset < 0 or offset + TRANSFER_RECORD_SIZE > len(buffer):
+        raise ValueError(f"Transfer record offset out of range: {offset}")
+
+    to_stop_index, walk_distance_m, min_transfer_seconds = struct.unpack_from(
+        "<IHH", buffer, offset
+    )
+    return TransferRecord(
+        to_stop_index=to_stop_index,
+        walk_distance_m=walk_distance_m,
+        min_transfer_seconds=min_transfer_seconds,
+    )
+
+
+def count_transfers(buffer: bytes | bytearray | memoryview, header: GraphHeader) -> int:
+    """Total transfer records, from the last stop's CSR range rather than a
+    header field - the header has no room for one."""
+    if header.n_stops == 0:
+        return 0
+    last_stop = parse_stop_record(
+        buffer, header.stop_table_offset + ((header.n_stops - 1) * STOP_RECORD_SIZE)
+    )
+    return last_stop.first_transfer_index + last_stop.transfer_count
 
 
 def validate_offsets(header: GraphHeader, file_size: int) -> None:
@@ -241,6 +284,9 @@ def validate_offsets(header: GraphHeader, file_size: int) -> None:
     tedge_table_end = tedge_table_offset + (header.n_tedges * TEDGE_RECORD_SIZE)
     if tedge_table_end > file_size:
         raise ValueError("transit edge table extends beyond file size")
+
+    if transfer_table_offset(header) > file_size:
+        raise ValueError("transfer table offset exceeds file size")
 
 
 def summarize_graph_file(path: Path) -> list[str]:

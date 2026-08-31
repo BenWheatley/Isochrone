@@ -33,6 +33,7 @@ from isochrone_pipeline.osm_graph_extract import (
 )
 from isochrone_pipeline.projection import project_nodes_to_utm
 from isochrone_pipeline.simplify import simplify_degree2_chains
+from isochrone_pipeline.transit_transfers import build_transit_transfers
 
 
 def write_simplified_boundary_canvas(
@@ -116,6 +117,7 @@ def write_graph_binary_artifacts(
 
     stops: tuple[Any, ...] = ()
     transit_edges: tuple[Any, ...] = ()
+    transfers: tuple[Any, ...] = ()
     if parsed_feed is not None:
         osm_id_to_final_index = {
             node.osm_id: index
@@ -136,11 +138,33 @@ def write_graph_binary_artifacts(
         transit_summary["final_stop_count"] = len(stops)
         transit_summary["final_connection_count"] = len(transit_edges)
 
+        # A feed splits an interchange across several stop ids, so without
+        # walkable connections between them the scan can only ever ride one
+        # through service. Routed over the simplified walk graph, so a river
+        # or a railway between two stops counts, and unioned with the feed's
+        # own transfers.txt, which repairs the cases where OSM has not joined
+        # the ways.
+        transfer_summary = build_transit_transfers(
+            simplified.graph,
+            stops,
+            feed_dir=transit_feed_dir,
+        )
+        transfers = transfer_summary.transfers
+        transit_summary["transfer_count"] = len(transfers)
+        transit_summary["transfer_radius_m"] = transfer_summary.radius_m
+        transit_summary["routed_transfer_pair_count"] = transfer_summary.routed_pair_count
+        transit_summary["declared_transfer_pair_count"] = transfer_summary.declared_pair_count
+        transit_summary["declared_only_transfer_pair_count"] = (
+            transfer_summary.declared_only_pair_count
+        )
+        transit_summary["forbidden_transfer_pair_count"] = transfer_summary.forbidden_pair_count
+
     payload = export_graph_binary_bytes(
         simplified.graph,
         projection=projected,
         stops=stops,
         transit_edges=transit_edges,
+        transfers=transfers,
     )
 
     binary_output.parent.mkdir(parents=True, exist_ok=True)
