@@ -56,7 +56,7 @@ jobs:
           cp data_pipeline/output/*.bin.gz site/data_pipeline/output/
           cp data_pipeline/output/*-district-boundaries-canvas.json site/data_pipeline/output/
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: site
 
