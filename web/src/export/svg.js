@@ -559,15 +559,26 @@ function buildSvgPathCommands(path) {
 
 function buildSvgFilledPolygonMarkup(features, fillColour, groupId) {
   const pathMarkup = [];
+  // One <path> per feature, not per ring. A feature's rings are an outer
+  // boundary and its holes: an OSM coastline is the sea *with the islands
+  // taken out of it*, and Portsea Island is a hole in Portsmouth's. Emitting
+  // each ring as its own filled path throws that relationship away and paints
+  // the island as sea - which is what the on-screen canvas never did, because
+  // it has always put a feature's rings into one path and filled once.
+  //
+  // even-odd rather than nonzero so the hole is subtracted whichever way it
+  // winds. The data does wind holes opposite today, but nothing enforces it,
+  // and a silently flooded island is a poor way to find out it stopped.
   for (const feature of features) {
-    for (const path of feature.paths) {
-      if (path.length < 3) {
-        continue;
-      }
-      pathMarkup.push(
-        `    <path d="${buildSvgPathCommands(path)} Z" fill="${escapeXml(fillColour)}" stroke="none" />`,
-      );
+    const rings = feature.paths.filter((path) => path.length >= 3);
+    if (rings.length === 0) {
+      continue;
     }
+    const commands = rings.map((path) => `${buildSvgPathCommands(path)} Z`).join(' ');
+    pathMarkup.push(
+      `    <path d="${commands}" fill="${escapeXml(fillColour)}"`
+      + ' fill-rule="evenodd" stroke="none" />',
+    );
   }
 
   if (pathMarkup.length === 0) {

@@ -63,8 +63,13 @@ function createBoundaryPayload() {
     ],
     water_features: [
       {
+        // An island in the sea, the way OSM gives a coastline: an outer ring
+        // with the land taken out of it as a hole, wound the other way.
         name: 'Sea',
-        paths: [[[0, 0], [40, 0], [40, 40], [0, 40], [0, 0]]],
+        paths: [
+          [[0, 0], [40, 0], [40, 40], [0, 40], [0, 0]],
+          [[10, 10], [10, 30], [30, 30], [30, 10], [10, 10]],
+        ],
       },
     ],
     forest_features: [
@@ -755,4 +760,28 @@ test('bindSvgExportControl handles async export callback resolution', async () =
   await flushTasks();
   assert.equal(successCount, 1);
   binding.dispose();
+});
+
+test('an island stays dry: a water feature exports as one path, holes and all', () => {
+  const svg = buildRenderedIsochroneSvgDocument({
+    widthPx: 100,
+    heightPx: 100,
+    backgroundColour: '#111820',
+    graphHeader: createGraphHeader(),
+    boundaryPayload: createBoundaryPayload(),
+    edgeVertexData: new Float32Array(0),
+  });
+
+  const seaGroup = svg.match(/<g id="isochrone-sea">[\s\S]*?<\/g>/)?.[0];
+  assert.ok(seaGroup, 'no sea group was exported');
+
+  // One <path> carrying both rings, not one path per ring. Emitting a ring at
+  // a time loses the outer/hole relationship, and the island - Portsea Island
+  // in the case that found this - gets painted as sea.
+  assert.equal(seaGroup.match(/<path/g)?.length, 1);
+  const seaPath = seaGroup.match(/<path d="([^"]+)"/)?.[1];
+  assert.equal((seaPath.match(/M /g) ?? []).length, 2, 'the sea path is not two subpaths');
+
+  // even-odd, so the hole is subtracted whichever way the data winds it.
+  assert.ok(seaGroup.includes('fill-rule="evenodd"'));
 });
