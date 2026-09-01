@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   DEFAULT_HATCH_PATTERN_COUNT,
+  WATER_HATCH_PATTERN,
   HATCH_PATTERN_LADDER,
   MAX_HATCH_PATTERN_COUNT,
   MIN_HATCH_PATTERN_COUNT,
@@ -14,6 +15,7 @@ import {
   buildHatchPatternDefs,
   buildMonochromeIsochroneSvg,
   placeContourLabel,
+  placeContourLabels,
 } from '../src/export/monochrome-svg.js';
 
 // How far apart two hatches must sit in ink coverage to stay apart once the
@@ -169,4 +171,95 @@ test('buildMonochromeIsochroneSvg refuses a scene it cannot draw', () => {
     () => buildMonochromeIsochroneSvg({ widthPx: 10, heightPx: 10, bands: [] }),
     /at least one band/,
   );
+});
+
+test('a contour label is masked out of whatever it lies on', () => {
+  const patterns = selectHatchPatterns(2);
+  const bands = [{
+    threshold: 1800,
+    label: '30 min',
+    pattern: patterns[1],
+    rings: [squareRing(300, 20)],
+  }];
+  const svg = buildMonochromeIsochroneSvg({
+    widthPx: 400, heightPx: 400, bands, legend: false, paper: '#ffffff', ink: '#000000',
+  });
+
+  // Drawn twice: a thick paper-coloured stroke, then the black fill over it.
+  // Black text on a black hatch cannot be read however well it is placed, and
+  // the halo is the whole difference between legible and not.
+  const texts = svg.match(/<text [^>]*>30 min<\/text>/g) ?? [];
+  assert.ok(texts.length >= 2 && texts.length % 2 === 0, `${texts.length} text elements`);
+  for (let index = 0; index < texts.length; index += 2) {
+    assert.ok(texts[index].includes('stroke="#ffffff"'), 'the halo is not drawn first');
+    assert.ok(texts[index].includes('fill="none"'));
+    assert.ok(texts[index + 1].includes('fill="#000000"'));
+  }
+
+  // Horizontal by default: a value set steeply is legible only to a reader
+  // willing to turn the sheet.
+  assert.ok(!texts[1].includes('rotate('));
+});
+
+test('labels can be set along the contour when that reads better', () => {
+  const patterns = selectHatchPatterns(2);
+  const bands = [{
+    threshold: 1800, label: '30 min', pattern: patterns[1], rings: [squareRing(300, 20)],
+  }];
+  const svg = buildMonochromeIsochroneSvg({
+    widthPx: 400, heightPx: 400, bands, legend: false, labelsFollowContour: true,
+  });
+  assert.ok(/<text [^>]*rotate\(/.test(svg));
+});
+
+test('placeContourLabels repeats along a contour too long to label once', () => {
+  const long = [];
+  for (let x = 0; x <= 4000; x += 20) long.push(x, 0);
+  for (let x = 4000; x >= 0; x -= 20) long.push(x, 30);
+  const points = Float64Array.from(long);
+
+  const once = placeContourLabels(points, { text: '30 min', fontSize: 12, spacingPx: 1e9 });
+  assert.equal(once.length, 1, 'a single label was not produced for a huge spacing');
+
+  const many = placeContourLabels(points, { text: '30 min', fontSize: 12, spacingPx: 1500 });
+  assert.ok(many.length >= 3, `expected several labels along 8000px of contour, got ${many.length}`);
+  // Spread out rather than bunched: a reader should not have to hunt.
+  const xs = many.map((label) => label.x).sort((a, b) => a - b);
+  assert.ok(xs[xs.length - 1] - xs[0] > 1500);
+});
+
+test('the basemap goes under the bands, and its islands stay dry', () => {
+  const patterns = selectHatchPatterns(2);
+  const bands = [{
+    threshold: 1800, label: '30 min', pattern: patterns[1], rings: [squareRing(200, 40)],
+  }];
+  const svg = buildMonochromeIsochroneSvg({
+    widthPx: 400,
+    heightPx: 400,
+    bands,
+    legend: false,
+    basemap: {
+      waterFeatures: [{
+        paths: [
+          [[0, 0], [400, 0], [400, 400], [0, 400]],
+          [[100, 100], [100, 300], [300, 300], [300, 100]],
+        ],
+      }],
+      roadSegments: Float64Array.from([10, 10, 380, 380, 10, 380, 380, 10]),
+    },
+  });
+
+  assert.ok(svg.includes(`id="${WATER_HATCH_PATTERN.id}"`), 'no water pattern was defined');
+  const waterIndex = svg.indexOf(`url(#${WATER_HATCH_PATTERN.id})`);
+  const roadIndex = svg.indexOf('stroke-linecap="round"');
+  const bandIndex = svg.indexOf(`url(#${patterns[1].id})`);
+  assert.ok(waterIndex > 0 && roadIndex > waterIndex, 'roads are not drawn over the water');
+  assert.ok(bandIndex > roadIndex, 'the band tint is not drawn over the roads');
+
+  // An island is a hole in the sea, so the water path carries both rings under
+  // even-odd - the same rule the colour export needed.
+  const waterPath = svg.slice(waterIndex - 400, waterIndex + 40).match(/<path d="([^"]+)"/);
+  assert.ok(waterPath, 'no water path was emitted');
+  assert.equal((waterPath[1].match(/M/g) ?? []).length, 2);
+  assert.ok(svg.slice(waterIndex, waterIndex + 80).includes('evenodd'));
 });

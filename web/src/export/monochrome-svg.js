@@ -6,7 +6,7 @@
 // density itself becomes the problem - so monochrome changes what is drawn.
 // See docs/monochrome-rendering-plan.md.
 
-import { patternCoverageRatio } from '../render/hatch.js';
+import { patternCoverageRatio, WATER_HATCH_PATTERN } from '../render/hatch.js';
 
 const LABEL_FONT_FAMILY = "'Helvetica Neue', Helvetica, Arial, sans-serif";
 // Rough advance width per character as a fraction of font size. Only needs to
@@ -85,6 +85,38 @@ function ringPerimeter(points, transform) {
  * line itself to be unbroken. Straightness is scored as the total turning
  * across a window the length of the label.
  */
+/**
+ * Several placements along one contour, so that a label is always in view
+ * rather than having to be hunted for. A long ring gets one roughly every
+ * `spacingPx`; a short one gets a single label, or none.
+ */
+export function placeContourLabels(points, options = {}) {
+  const transform = options.transform ?? ((x, y) => [x, y]);
+  const spacingPx = options.spacingPx ?? Number.POSITIVE_INFINITY;
+  const perimeter = ringPerimeter(points, transform);
+  const wanted = Math.max(1, Math.min(6, Math.floor(perimeter / spacingPx)));
+  if (wanted === 1) {
+    const single = placeContourLabel(points, options);
+    return single ? [single] : [];
+  }
+
+  const count = points.length / 2;
+  const placements = [];
+  for (let slice = 0; slice < wanted; slice += 1) {
+    const from = Math.floor((slice * count) / wanted);
+    const to = Math.floor(((slice + 1) * count) / wanted);
+    if (to - from < 8) {
+      continue;
+    }
+    const sliceSpan = points.subarray(from * 2, to * 2);
+    const placement = placeContourLabel(sliceSpan, { ...options, requireClosedRing: false });
+    if (placement) {
+      placements.push(placement);
+    }
+  }
+  return placements.length > 0 ? placements : [];
+}
+
 export function placeContourLabel(points, options = {}) {
   const transform = options.transform ?? ((x, y) => [x, y]);
   const text = options.text ?? '';
@@ -94,9 +126,10 @@ export function placeContourLabel(points, options = {}) {
   if (count < 8 || labelLength <= 0) {
     return null;
   }
-  // A label needs the ring to be several times its own length, or the gap
+  // A label needs the run to be several times its own length, or the gap
   // swallows the contour it is annotating.
-  if (ringPerimeter(points, transform) < labelLength * 4) {
+  const minimumLength = options.requireClosedRing === false ? labelLength * 2 : labelLength * 4;
+  if (ringPerimeter(points, transform) < minimumLength) {
     return null;
   }
 
@@ -146,7 +179,13 @@ export function placeContourLabel(points, options = {}) {
       projected[endIndex][0] - projected[startIndex][0],
       projected[endIndex][1] - projected[startIndex][1],
     );
-    const score = walked - chord;
+    // Straightness first, but among equally straight runs prefer the flatter
+    // one: text set near-vertical is legal, and tiring. The penalty is scaled
+    // by the label's own length so it stays comparable with the turning above.
+    const steepness = chord === 0
+      ? 1
+      : Math.abs(projected[endIndex][1] - projected[startIndex][1]) / chord;
+    const score = walked - chord + steepness * labelLength * 0.35;
     if (score < bestScore) {
       bestScore = score;
       bestStart = startIndex;
@@ -195,6 +234,37 @@ function ringPathWithGap(points, transform, gap) {
   return parts.join('');
 }
 
+/**
+ * The value, on clear ground.
+ *
+ * A contour label on a monochrome map sits on top of a hatch, and black on
+ * black cannot be read however carefully it is placed - masking is not a
+ * refinement here, it is the whole difference between legible and not. The
+ * text is drawn twice, a thick paper-coloured stroke beneath the black fill,
+ * rather than with paint-order: the double draw works in every renderer,
+ * including whatever eventually turns this into a PDF.
+ */
+function renderHaloedLabel(placement, text, { fontSize, ink, paper, followContour }) {
+  const x = formatSvgNumber(placement.x);
+  const y = formatSvgNumber(placement.y);
+  // Set horizontally by default rather than along the contour. Paullin's
+  // "Rates of Travel" plates do the same, and for good reason: a value set at
+  // seventy degrees is legible only to a reader willing to turn the sheet,
+  // and the halo and the gap in the line already say which contour a label
+  // belongs to. Following the contour stays available for gentle, sweeping
+  // isolines where it reads well.
+  const rotate = followContour
+    ? ` transform="rotate(${formatSvgNumber(placement.angleDegrees)} ${x} ${y})"`
+    : '';
+  const common = `x="${x}" y="${y}"${rotate}`
+    + ` font-family="${LABEL_FONT_FAMILY}" font-size="${fontSize}"`
+    + ' text-anchor="middle" dominant-baseline="central"';
+  const escaped = escapeXmlText(text);
+  return `<text ${common} fill="none" stroke="${paper}"`
+    + ` stroke-width="${formatSvgNumber(fontSize * 0.45)}" stroke-linejoin="round">${escaped}</text>`
+    + `<text ${common} fill="${ink}">${escaped}</text>`;
+}
+
 function escapeXmlText(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -226,13 +296,55 @@ export function buildMonochromeIsochroneSvg(scene) {
   const fontSize = scene.labelFontSize ?? 11;
   const contourWidth = scene.contourStrokeWidth ?? 0.8;
 
+  const basemap = scene.basemap ?? {};
   const patterns = [...new Map(bands.map((band) => [band.pattern.id, band.pattern])).values()];
+  if (basemap.waterFeatures?.length) {
+    patterns.push(WATER_HATCH_PATTERN);
+  }
   const parts = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${widthPx}" height="${heightPx}"`
     + ` viewBox="0 0 ${widthPx} ${heightPx}">`,
     `<defs>${buildHatchPatternDefs(patterns, { ink, patternScale: scene.patternScale ?? 1 })}</defs>`,
     `<rect width="${widthPx}" height="${heightPx}" fill="${paper}" />`,
   ];
+
+  // The map beneath the isochrone. Drawn first so that the bands read as a
+  // tint laid over it, the way a screen tint prints over linework - which is
+  // also why the hatches are transparent rather than opaque. Without this
+  // there is nothing to tell the reader where they are: an isochrone with no
+  // coastline and no roads is a shape, not a map.
+  if (basemap.waterFeatures?.length) {
+    const waterPaths = basemap.waterFeatures
+      .map((feature) => feature.paths
+        .filter((path) => path.length >= 3)
+        .map((path) => ringToPathData(Float64Array.from(path.flat()), transform))
+        .join(''))
+      .filter((data) => data.length > 0);
+    if (waterPaths.length > 0) {
+      const data = waterPaths.join('');
+      // even-odd, so an island stays dry: a coastline is the sea with the land
+      // taken out of it.
+      parts.push(
+        `<path d="${data}" fill="url(#${WATER_HATCH_PATTERN.id})" fill-rule="evenodd" stroke="none" />`,
+        `<path d="${data}" fill="none" stroke="${ink}" stroke-width="${contourWidth}" />`,
+      );
+    }
+  }
+  if (basemap.roadSegments?.length >= 4) {
+    const segments = basemap.roadSegments;
+    const commands = [];
+    for (let index = 0; index + 3 < segments.length; index += 4) {
+      const [x0, y0] = transform(segments[index], segments[index + 1]);
+      const [x1, y1] = transform(segments[index + 2], segments[index + 3]);
+      commands.push(
+        `M${formatSvgNumber(x0)} ${formatSvgNumber(y0)}L${formatSvgNumber(x1)} ${formatSvgNumber(y1)}`,
+      );
+    }
+    parts.push(
+      `<path d="${commands.join('')}" fill="none" stroke="${ink}"`
+      + ` stroke-width="${scene.roadStrokeWidth ?? 0.35}" stroke-linecap="round" />`,
+    );
+  }
 
   // Fills first, then every contour, then every label: a label must never be
   // crossed by a line belonging to a band drawn after it.
@@ -283,15 +395,25 @@ export function buildMonochromeIsochroneSvg(scene) {
     return true;
   };
 
+  const labelSpacingPx = scene.labelSpacingPx ?? Math.max(320, Math.min(widthPx, heightPx) / 3);
   for (const band of bands) {
     for (const ring of band.rings) {
-      const candidate = band.label
-        ? placeContourLabel(ring.points, { transform, text: band.label, fontSize })
-        : null;
+      const candidates = band.label
+        ? placeContourLabels(ring.points, {
+          transform,
+          text: band.label,
+          fontSize,
+          spacingPx: labelSpacingPx,
+        })
+        : [];
       // Rotation is ignored when testing for a clash: an axis-aligned box
       // around the unrotated run is a little generous, which is the side to
       // err on when the alternative is two values printed over each other.
-      const gap = candidate && claim(candidate, band.label) ? candidate : null;
+      const placed = candidates.filter((candidate) => claim(candidate, band.label));
+      // Only the first placement can break this ring's path; the rest rely on
+      // their halo. Breaking a ring in several places would need the path
+      // split into runs, and the halo already clears the line under the text.
+      const gap = placed[0] ?? null;
       const pathData = gap
         ? ringPathWithGap(ring.points, transform, gap)
         : ringToPathData(ring.points, transform);
@@ -299,15 +421,13 @@ export function buildMonochromeIsochroneSvg(scene) {
         `<path d="${pathData}" fill="none" stroke="${ink}"`
         + ` stroke-width="${contourWidth}" stroke-linejoin="round" />`,
       );
-      if (gap) {
-        labels.push(
-          `<text x="${formatSvgNumber(gap.x)}" y="${formatSvgNumber(gap.y)}"`
-          + ` transform="rotate(${formatSvgNumber(gap.angleDegrees)} ${formatSvgNumber(gap.x)}`
-          + ` ${formatSvgNumber(gap.y)})" font-family="${LABEL_FONT_FAMILY}"`
-          + ` font-size="${fontSize}" fill="${ink}" text-anchor="middle"`
-          + ' dominant-baseline="central">'
-          + `${escapeXmlText(band.label)}</text>`,
-        );
+      for (const placement of placed) {
+        labels.push(renderHaloedLabel(placement, band.label, {
+          fontSize,
+          ink,
+          paper,
+          followContour: scene.labelsFollowContour === true,
+        }));
       }
     }
   }

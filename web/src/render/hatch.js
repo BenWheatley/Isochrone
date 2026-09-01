@@ -56,6 +56,18 @@ export const HATCH_PATTERN_LADDER = [
   },
 ];
 
+/**
+ * Water. Ruled horizontally, which no time band ever is - every hatch on the
+ * ladder runs at 45 degrees - so the sea cannot be misread as a band, and in
+ * particular cannot be confused with the bare-paper rung.
+ */
+export const WATER_HATCH_PATTERN = {
+  id: 'mono-water',
+  tileSize: 7,
+  strokeWidth: 0.6,
+  lines: [{ x1: -7, y1: 3.5, x2: 14, y2: 3.5 }],
+};
+
 export const MIN_HATCH_PATTERN_COUNT = 2;
 export const MAX_HATCH_PATTERN_COUNT = HATCH_PATTERN_LADDER.length;
 /**
