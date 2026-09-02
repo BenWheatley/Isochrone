@@ -158,6 +158,18 @@ would reintroduce exactly what was removed.
 
 ## Verification
 
+**Rasterise the output and look at it at 1:1.** `web/tools/render-monochrome.mjs`
+writes an SVG; `rsvg-convert -w 1500 -b white out.svg -o out.png` turns it into
+something that can actually be inspected. This is not a nicety. Reviewing the
+SVG in a viewport that downscaled it hid, in turn: a water pattern that was
+never drawn at all (a sub-pixel stroke snapped away by `crispEdges`), ferry
+routes drawn as roads and striking off the sheet, and a coastline registered
+kilometres from the road network it describes. Each was obvious within seconds
+of looking at a raster, and invisible for two rounds without one.
+
+Note also that a "detail view" of an SVG is meaningless - it is vector, the
+reader can zoom. A detail *raster* is worth producing.
+
 "Looks fine to me" is how the current palette shipped, so:
 
 - **Pattern coverage test.** Per above - objective, and cheap to run in CI.
@@ -170,6 +182,13 @@ would reintroduce exactly what was removed.
   hole and a known disjoint component must produce the expected ring counts and
   containment.
 - Actual paper is a human check; it cannot be automated here.
+
+**Anything drawn alongside the isochrone must go through
+`projectBoundaryBasemapToGraphPaths`.** The boundary payload carries its own
+projected origin and extent, and they are not the graph's - for Portsmouth the
+origins differ by 2.4 km east and 14.2 km north, and the extents by a factor of
+1.23. Rescaling one onto the other, rather than projecting it, puts the
+coastline nowhere near the roads it belongs to.
 
 ## Suggested sequencing
 
