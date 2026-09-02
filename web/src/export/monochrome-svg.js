@@ -66,11 +66,12 @@ function ringToPathData(points, transform, { reversed = false } = {}) {
   return `${parts.join('')}Z`;
 }
 
-function ringPerimeter(points, transform) {
+function ringPerimeter(points, transform, closed = true) {
   const count = points.length / 2;
   let total = 0;
   let [previousX, previousY] = transform(points[0], points[1]);
-  for (let index = 1; index <= count; index += 1) {
+  const last = closed ? count : count - 1;
+  for (let index = 1; index <= last; index += 1) {
     const wrapped = index % count;
     const [x, y] = transform(points[wrapped * 2], points[wrapped * 2 + 1]);
     total += Math.hypot(x - previousX, y - previousY);
@@ -135,7 +136,7 @@ export function placeContourLabels(points, options = {}) {
       continue;
     }
     const sliceSpan = points.subarray(from * 2, to * 2);
-    const placement = placeContourLabel(sliceSpan, { ...options, requireClosedRing: false });
+    const placement = placeContourLabel(sliceSpan, { ...options, closed: false });
     if (placement) {
       // The gap indices come back relative to the slice. Left unshifted they
       // cut the contour somewhere unrelated to the label, which is how lines
@@ -162,8 +163,13 @@ export function placeContourLabel(points, options = {}) {
   }
   // A label needs the run to be several times its own length, or the gap
   // swallows the contour it is annotating.
-  const minimumLength = options.requireClosedRing === false ? labelLength * 2 : labelLength * 4;
-  if (ringPerimeter(points, transform) < minimumLength) {
+  // A slice of a ring is an open chain, not a ring of its own. Letting the
+  // window wrap from its end back to its start makes the label's gap span
+  // almost the whole contour once the indices are read back against the ring -
+  // which is how long stretches of isoline came to be missing entirely.
+  const closed = options.closed !== false;
+  const minimumLength = closed ? labelLength * 4 : labelLength * 2;
+  if (ringPerimeter(points, transform, closed) < minimumLength) {
     return null;
   }
 
@@ -176,7 +182,10 @@ export function placeContourLabel(points, options = {}) {
     let travelled = 0;
     let index = startIndex;
     while (travelled < labelLength) {
-      const nextIndex = (index + 1) % count;
+      const nextIndex = closed ? (index + 1) % count : index + 1;
+      if (nextIndex >= count) {
+        return -1;
+      }
       travelled += Math.hypot(
         projected[nextIndex][0] - projected[index][0],
         projected[nextIndex][1] - projected[index][1],
@@ -194,7 +203,7 @@ export function placeContourLabel(points, options = {}) {
   let bestEnd = -1;
   for (let startIndex = 0; startIndex < count; startIndex += 1) {
     const endIndex = windowEndFor(startIndex);
-    if (endIndex === startIndex) {
+    if (endIndex === startIndex || endIndex < 0) {
       continue;
     }
     // Turning across the window: the straighter the stretch, the smaller the

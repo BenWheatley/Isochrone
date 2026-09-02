@@ -373,3 +373,41 @@ test('a band is an annulus under either fill rule, not just even-odd', () => {
     `both subpaths wind the same way (${areas}), so non-zero fill would not subtract`,
   );
 });
+
+test('a label gap is a short forward run, never a wrap around the ring', () => {
+  // A jagged ring with one straight stretch, placed so the straightest window
+  // in its slice sits near that slice's end. A slice is an open chain, and if
+  // the window is allowed to wrap from its end back to its start, the indices
+  // read back against the ring describe a gap running the wrong way round -
+  // and the contour drawn from them loses everything but a stub.
+  const count = 400;
+  const points = [];
+  for (let step = 0; step < count; step += 1) {
+    const angle = (step / count) * Math.PI * 2;
+    // Straight from 20% to 24% of the way round; jagged everywhere else.
+    const fraction = step / count;
+    const wobble = fraction > 0.2 && fraction < 0.24 ? 0 : (step % 2 === 0 ? 18 : -18);
+    const radius = 900 + wobble;
+    points.push(1000 + radius * Math.cos(angle), 1000 + radius * Math.sin(angle));
+  }
+  const ring = Float64Array.from(points);
+
+  const placements = placeContourLabels(ring, {
+    text: '30 min',
+    fontSize: 14,
+    spacingPx: 1200,
+  });
+  assert.ok(placements.length >= 2, `expected several labels, got ${placements.length}`);
+
+  for (const placement of placements) {
+    assert.ok(
+      placement.gapEndIndex > placement.gapStartIndex,
+      `gap runs backwards: ${placement.gapStartIndex} -> ${placement.gapEndIndex}`,
+    );
+    const span = placement.gapEndIndex - placement.gapStartIndex;
+    assert.ok(
+      span < count / 8,
+      `gap spans ${span} of ${count} points, which is a stretch of contour, not a label`,
+    );
+  }
+});
