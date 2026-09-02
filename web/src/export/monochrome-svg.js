@@ -6,7 +6,7 @@
 // density itself becomes the problem - so monochrome changes what is drawn.
 // See docs/monochrome-rendering-plan.md.
 
-import { patternCoverageRatio, WATER_HATCH_PATTERN } from '../render/hatch.js';
+import { patternCoverageRatio, WATER_HATCH_PATTERN, WATER_INK } from '../render/hatch.js';
 
 const LABEL_FONT_FAMILY = "'Helvetica Neue', Helvetica, Arial, sans-serif";
 // Rough advance width per character as a fraction of font size. Only needs to
@@ -104,11 +104,33 @@ export function placeContourLabels(points, options = {}) {
     return single ? [single] : [];
   }
 
+  // Cut the ring into equal *lengths*, not equal numbers of points. A ring
+  // from a triangulation has points bunched wherever the network is dense, so
+  // slicing by index puts several labels in one crowded corner and none along
+  // a long smooth run - which is exactly what made their positions look
+  // arbitrary.
   const count = points.length / 2;
+  const cumulative = new Float64Array(count + 1);
+  for (let index = 0; index < count; index += 1) {
+    const next = (index + 1) % count;
+    const [x0, y0] = transform(points[index * 2], points[index * 2 + 1]);
+    const [x1, y1] = transform(points[next * 2], points[next * 2 + 1]);
+    cumulative[index + 1] = cumulative[index] + Math.hypot(x1 - x0, y1 - y0);
+  }
+  const indexAtLength = (target) => {
+    let low = 0;
+    let high = count;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (cumulative[mid] < target) low = mid + 1; else high = mid;
+    }
+    return Math.min(count - 1, low);
+  };
+
   const placements = [];
   for (let slice = 0; slice < wanted; slice += 1) {
-    const from = Math.floor((slice * count) / wanted);
-    const to = Math.floor(((slice + 1) * count) / wanted);
+    const from = indexAtLength((slice * perimeter) / wanted);
+    const to = indexAtLength(((slice + 1) * perimeter) / wanted);
     if (to - from < 8) {
       continue;
     }
@@ -118,7 +140,7 @@ export function placeContourLabels(points, options = {}) {
       placements.push(placement);
     }
   }
-  return placements.length > 0 ? placements : [];
+  return placements;
 }
 
 export function placeContourLabel(points, options = {}) {
@@ -251,15 +273,13 @@ function ringPathWithGap(points, transform, gap) {
 function renderHaloedLabel(placement, text, { fontSize, ink, paper, followContour }) {
   const x = formatSvgNumber(placement.x);
   const y = formatSvgNumber(placement.y);
-  // Set horizontally by default rather than along the contour. Paullin's
-  // "Rates of Travel" plates do the same, and for good reason: a value set at
-  // seventy degrees is legible only to a reader willing to turn the sheet,
-  // and the halo and the gap in the line already say which contour a label
-  // belongs to. Following the contour stays available for gentle, sweeping
-  // isolines where it reads well.
-  const rotate = followContour
-    ? ` transform="rotate(${formatSvgNumber(placement.angleDegrees)} ${x} ${y})"`
-    : '';
+  // Set along the contour, which is what an isoline label does and what makes
+  // it obvious which line a value belongs to. It is never set upside down, and
+  // placement prefers the straightest, flattest run available, so it does not
+  // come out at an angle a reader has to turn the sheet for.
+  const rotate = followContour === false
+    ? ''
+    : ` transform="rotate(${formatSvgNumber(placement.angleDegrees)} ${x} ${y})"`;
   const common = `x="${x}" y="${y}"${rotate}`
     + ` font-family="${LABEL_FONT_FAMILY}" font-size="${fontSize}"`
     + ' text-anchor="middle" dominant-baseline="central"';
@@ -301,6 +321,10 @@ export function buildMonochromeIsochroneSvg(scene) {
   const contourWidth = scene.contourStrokeWidth ?? 0.8;
 
   const basemap = scene.basemap ?? {};
+  // The sea covers more of the sheet than anything else and has the least to
+  // say, so where grey is available it is the first thing that should use it.
+  // One bit is what this mode is built to survive, not a rule it must obey.
+  const waterInk = scene.waterInk ?? WATER_INK;
   const bandPatterns = [...new Map(bands.map((band) => [band.pattern.id, band.pattern])).values()];
   // The sea's ruling keeps its own pitch: scaling it with the bands would put
   // it back in competition with them, which is exactly what it must not do.
@@ -309,7 +333,7 @@ export function buildMonochromeIsochroneSvg(scene) {
     `<svg xmlns="http://www.w3.org/2000/svg" width="${widthPx}" height="${heightPx}"`
     + ` viewBox="0 0 ${widthPx} ${heightPx}">`,
     `<defs>${buildHatchPatternDefs(bandPatterns, { ink, patternScale: scene.patternScale ?? 1 })}`
-    + `${buildHatchPatternDefs(waterPatterns, { ink, patternScale: 1 })}</defs>`,
+    + `${buildHatchPatternDefs(waterPatterns, { ink: waterInk, patternScale: 1 })}</defs>`,
     `<rect width="${widthPx}" height="${heightPx}" fill="${paper}" />`,
   ];
 
@@ -331,7 +355,7 @@ export function buildMonochromeIsochroneSvg(scene) {
       // taken out of it.
       parts.push(
         `<path d="${data}" fill="url(#${WATER_HATCH_PATTERN.id})" fill-rule="evenodd" stroke="none" />`,
-        `<path d="${data}" fill="none" stroke="${ink}" stroke-width="${contourWidth}" />`,
+        `<path d="${data}" fill="none" stroke="${waterInk}" stroke-width="${contourWidth}" />`,
       );
     }
   }
@@ -413,7 +437,7 @@ export function buildMonochromeIsochroneSvg(scene) {
   const labelSpacingPx = scene.labelSpacingPx ?? Math.max(320, Math.min(widthPx, heightPx) / 3);
   for (const band of bands) {
     for (const ring of band.rings) {
-      const candidates = band.label
+      const candidates = band.label && ring.isHole !== true
         ? placeContourLabels(ring.points, {
           transform,
           text: band.label,
@@ -446,7 +470,7 @@ export function buildMonochromeIsochroneSvg(scene) {
           fontSize,
           ink,
           paper,
-          followContour: scene.labelsFollowContour === true,
+          followContour: scene.labelsFollowContour !== false,
         }));
       }
     }

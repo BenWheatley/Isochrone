@@ -79,6 +79,7 @@ export function printCurrentRenderedIsochrone(shell, options = {}) {
 
   const theme = resolveSvgTheme(shell, options);
   const svgDocument = buildRenderedIsochroneSvgDocument({
+    monochromeMapMarkup: options.monochromeMapMarkup ?? null,
     widthPx,
     heightPx,
     backgroundColour: resolveSvgBackgroundColour(shell, options),

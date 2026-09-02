@@ -1,3 +1,6 @@
+import { MAP_STYLE_MONOCHROME } from '../config/constants.js';
+import { buildMonochromeScreenSvg } from '../render/monochrome-screen.js';
+import { getMapStyleFromShell } from '../ui/orchestration.js';
 import { DEFAULT_LOCATION_NAME, TRANSIT_ONLY_ALLOWED_MODE_MASK } from '../config/constants.js';
 import { computeExportDistanceScaleBar } from '../ui/legend-scale.js';
 import { getShellLocaleMessages } from '../ui/status.js';
@@ -50,9 +53,36 @@ export function collectRenderedIsochroneScene(shell, mapData, options = {}) {
     cycleMinutes = snapshot.colourCycleMinutes;
   }
 
+  // What is exported is what is on screen. Monochrome changes the drawing, not
+  // just its colours, so an export that quietly reverted to coloured lines
+  // would be showing something the reader never asked for - and for a mode
+  // whose whole purpose is a black-and-white printer, that is the one output
+  // that must not ignore it.
+  let monochromeMapMarkup = null;
+  if (
+    graphHeader
+    && snapshot
+    && getMapStyleFromShell(shell) === MAP_STYLE_MONOCHROME
+  ) {
+    monochromeMapMarkup = buildMonochromeScreenSvg(mapData, snapshot, {
+      widthPx: graphHeader.gridWidthPx,
+      heightPx: graphHeader.gridHeightPx,
+      viewport: null,
+      fitBoundingBoxPx: mapData?.boundaryFitBoundingBoxPx ?? null,
+      allowedModeMask: snapshot.allowedModeMask,
+      cycleMinutes,
+      projectedBoundary: mapData?.projectedBoundary ?? null,
+      // A sheet is read at arm's length, not a browser window's worth of
+      // pixels away, so the type and the hatch both scale with it.
+      labelFontSize: Math.max(12, Math.round(graphHeader.gridWidthPx / 110)),
+      patternScale: Math.max(1, graphHeader.gridWidthPx / 1200),
+    });
+  }
+
   return {
     graphHeader,
     boundaryPayload: mapData?.boundaryPayload ?? null,
+    monochromeMapMarkup,
     edgeVertexData,
     cycleMinutes,
     theme: options.theme ?? resolveIsochroneTheme(),

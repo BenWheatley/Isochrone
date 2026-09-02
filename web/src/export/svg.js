@@ -710,7 +710,13 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
   assertPositiveInteger(widthPx, 'widthPx');
   assertPositiveInteger(heightPx, 'heightPx');
 
-  const backgroundColour = options.backgroundColour ?? options.backgroundColor ?? '#ffffff';
+  const monochromeMapMarkup = typeof options.monochromeMapMarkup === 'string'
+    && options.monochromeMapMarkup.length > 0
+    ? options.monochromeMapMarkup
+    : null;
+  const backgroundColour = monochromeMapMarkup
+    ? '#ffffff'
+    : (options.backgroundColour ?? options.backgroundColor ?? '#ffffff');
   assertCssColourString(backgroundColour, 'backgroundColour');
   const edgeVertexData = options.edgeVertexData ?? new Float32Array(0);
   assertEdgeVertexData(edgeVertexData);
@@ -854,18 +860,25 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
     // The map keeps its own pixel coordinate system; the poster frame is built
     // around it by translation, so projected geometry never has to be rescaled.
     `  <g id="isochrone-map" clip-path="url(#isochrone-map-clip)" transform="translate(${formatSvgNumber(layout.mapX)}, ${formatSvgNumber(layout.mapY)})">`,
-    forestMarkup,
-    airportMarkup,
-    inlandWaterMarkup,
-    seaMarkup,
-    waterwayMarkup,
-    boundaryMarkup,
-    '  <g id="isochrone-edges">',
-    edgeLines,
-    '  </g>',
+    // Monochrome draws its own basemap, bands and key - it is a different map,
+    // not this one recoloured - so it replaces every layer here rather than
+    // being laid over them. Nested as an <svg> so its own coordinate system
+    // survives the poster's translation untouched.
+    monochromeMapMarkup ?? [
+      forestMarkup,
+      airportMarkup,
+      inlandWaterMarkup,
+      seaMarkup,
+      waterwayMarkup,
+      boundaryMarkup,
+      '  <g id="isochrone-edges">',
+      edgeLines,
+      '  </g>',
+    ].filter((line) => line.length > 0).join('\n'),
     '  </g>',
     titleOverlayMarkup,
-    legendOverlayMarkup,
+    // The colour key would be describing bands that are not on the sheet.
+    monochromeMapMarkup ? '' : legendOverlayMarkup,
     scaleOverlayMarkup,
     copyrightOverlayMarkup,
     '</svg>',
@@ -1001,6 +1014,7 @@ export function exportCurrentRenderedIsochroneSvg(shell, options = {}) {
     backgroundColour,
     graphHeader: options.graphHeader ?? null,
     boundaryPayload: options.boundaryPayload ?? null,
+    monochromeMapMarkup: options.monochromeMapMarkup ?? null,
     edgeVertexData: options.edgeVertexData ?? new Float32Array(0),
     cycleMinutes: options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
     theme,

@@ -40,19 +40,19 @@ function diagonalHatchLines(tileSize, { cross = false } = {}) {
 // than their coverage difference alone would.
 export const HATCH_PATTERN_LADDER = [
   { id: 'mono-blank', tileSize: 8, strokeWidth: 0, lines: [] },
-  { id: 'mono-hatch-wide', tileSize: 9, strokeWidth: 1, lines: diagonalHatchLines(9) },
-  { id: 'mono-hatch-narrow', tileSize: 4.5, strokeWidth: 1, lines: diagonalHatchLines(4.5) },
+  { id: 'mono-hatch-wide', tileSize: 12, strokeWidth: 1, lines: diagonalHatchLines(12) },
+  { id: 'mono-hatch-narrow', tileSize: 6, strokeWidth: 1, lines: diagonalHatchLines(6) },
   {
     id: 'mono-cross-wide',
-    tileSize: 5.5,
+    tileSize: 7.5,
     strokeWidth: 1,
-    lines: diagonalHatchLines(5.5, { cross: true }),
+    lines: diagonalHatchLines(7.5, { cross: true }),
   },
   {
     id: 'mono-cross-narrow',
-    tileSize: 4,
+    tileSize: 5.5,
     strokeWidth: 1,
-    lines: diagonalHatchLines(4, { cross: true }),
+    lines: diagonalHatchLines(5.5, { cross: true }),
   },
 ];
 
@@ -61,6 +61,14 @@ export const HATCH_PATTERN_LADDER = [
  * ladder runs at 45 degrees - so the sea cannot be misread as a band, and in
  * particular cannot be confused with the bare-paper rung.
  */
+/**
+ * Half-strength grey, not black. One bit is what this mode is designed to
+ * survive, not a constraint it has to obey everywhere - and where grey is
+ * available the sea is the first thing that should use it, because it covers
+ * more of the sheet than anything else and has the least to say.
+ */
+export const WATER_INK = '#808080';
+
 export const WATER_HATCH_PATTERN = {
   id: 'mono-water',
   // Finer than any time band. Ruling the sea at the same pitch as a hatch

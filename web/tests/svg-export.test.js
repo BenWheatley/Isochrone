@@ -785,3 +785,47 @@ test('an island stays dry: a water feature exports as one path, holes and all', 
   // even-odd, so the hole is subtracted whichever way the data winds it.
   assert.ok(seaGroup.includes('fill-rule="evenodd"'));
 });
+
+test('a monochrome export is the monochrome map, not the colour one', () => {
+  const monochromeMapMarkup =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">'
+    + '<defs><pattern id="mono-hatch-wide" /></defs>'
+    + '<path d="M0 0L10 10Z" fill="url(#mono-hatch-wide)" /></svg>';
+  const svg = buildRenderedIsochroneSvgDocument({
+    widthPx: 100,
+    heightPx: 100,
+    backgroundColour: '#111820',
+    graphHeader: createGraphHeader(),
+    boundaryPayload: createBoundaryPayload(),
+    edgeVertexData: Float32Array.from([0, 0, 60, 10, 10, 120]),
+    monochromeMapMarkup,
+  });
+
+  // What is exported is what is on screen. Monochrome is a different drawing,
+  // so it replaces every layer rather than being laid over them.
+  assert.ok(svg.includes(monochromeMapMarkup));
+  assert.ok(!svg.includes('id="isochrone-sea"'));
+  assert.ok(!svg.includes('id="isochrone-forest"'));
+  assert.ok(!svg.includes('id="isochrone-edges"'));
+
+  // The colour key would describe bands that are not on the sheet.
+  assert.ok(!svg.includes('id="isochrone-legend"'));
+
+  // The frame around it survives, and with it the attribution, which is a
+  // licence obligation and not optional in any rendering.
+  assert.ok(svg.includes('id="isochrone-background"'));
+  assert.ok(/OpenStreetMap/.test(svg));
+});
+
+test('without monochrome markup the export is unchanged', () => {
+  const svg = buildRenderedIsochroneSvgDocument({
+    widthPx: 100,
+    heightPx: 100,
+    backgroundColour: '#111820',
+    graphHeader: createGraphHeader(),
+    boundaryPayload: createBoundaryPayload(),
+    edgeVertexData: Float32Array.from([0, 0, 60, 10, 10, 120]),
+  });
+  assert.ok(svg.includes('id="isochrone-sea"'));
+  assert.ok(svg.includes('id="isochrone-edges"'));
+});

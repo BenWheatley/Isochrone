@@ -16,17 +16,52 @@ import { resolveViewportFrame } from '../core/viewport.js';
 import { buildMonochromeIsochroneSvg } from '../export/monochrome-svg.js';
 import { buildBandRegions, DEFAULT_MAX_TRIANGLE_SPAN_M } from './band-regions.js';
 import { triangulate } from './delaunay.js';
-import { selectHatchPatterns } from './hatch.js';
+import { HATCH_PATTERN_LADDER, selectHatchPatterns } from './hatch.js';
+
+/**
+ * The pair a map uses for hatched-and-clear.
+ *
+ * Not selectHatchPatterns(2), which returns the ladder's two ends because
+ * separation is what it optimises. With two states separation is not the
+ * binding constraint - bare paper against anything is already maximal - and
+ * the darkest rung buries the street network underneath it. Judged against
+ * Portsmouth at 1:1: the second rung keeps the roads legible through the
+ * hatch while still reading unmistakably as hatched.
+ */
+const MAP_HATCH_PAIR = [HATCH_PATTERN_LADDER[0], HATCH_PATTERN_LADDER[1]];
 
 const TRIANGULATION_PROPERTY = '__nodeTriangulation';
-// Roads are for orientation, so they have to stay legible as roads. Past
-// roughly one segment per 250 square pixels they stop being a street network
-// and become a grey wash - Portsmouth's whole network inside a 250px island is
-// solid black - so the layer is thinned to fit the space it has. Zooming in
-// reduces how many are visible, so more of them survive, which is the right
-// way round.
-const CANVAS_PIXELS_PER_ROAD_SEGMENT = 250;
-const MIN_DRAWN_ROAD_SEGMENTS = 1500;
+// Roads are for orientation, so they have to stay legible as roads. Portsmouth's
+// whole network inside a 250px island is a grey wash, not a street map, so at
+// low zoom only the more important roads are drawn.
+//
+// Which roads, chosen by class rather than by thinning the visible set. An
+// earlier version kept every Nth segment with N derived from how many happened
+// to be on screen: panning changed the count, which changed N, which changed
+// *which* roads were drawn, and the whole network shimmered. Class is a
+// property of the road itself, so the same roads are drawn from one frame to
+// the next and zooming only ever adds more.
+//
+// Ids come from adjacency.py: motorway 15, trunk 14, primary 13, secondary 12,
+// tertiary 11, unclassified 10, track 9, cycleway 8, service 7, residential 6,
+// and footways below that.
+const ROAD_CLASS_BY_SCALE = [
+  { minimumScale: 0, minimumRoadClass: 12 },
+  { minimumScale: 0.35, minimumRoadClass: 11 },
+  { minimumScale: 0.7, minimumRoadClass: 10 },
+  { minimumScale: 1.2, minimumRoadClass: 6 },
+  { minimumScale: 2.5, minimumRoadClass: 0 },
+];
+
+function minimumRoadClassForScale(effectiveScale) {
+  let minimumRoadClass = ROAD_CLASS_BY_SCALE[0].minimumRoadClass;
+  for (const step of ROAD_CLASS_BY_SCALE) {
+    if (effectiveScale >= step.minimumScale) {
+      minimumRoadClass = step.minimumRoadClass;
+    }
+  }
+  return minimumRoadClass;
+}
 
 /**
  * The region's triangulation, built once and kept on the map data.
@@ -77,6 +112,7 @@ function formatBandLabel(minutes, formatMinutes) {
  * judged in canvas pixels, since that is what "on screen" means.
  */
 function collectVisibleRoadSegments(graph, nodePixels, frame, widthPx, heightPx) {
+  const minimumRoadClass = minimumRoadClassForScale(frame.effectiveScale);
   const segments = [];
   const nodeCount = graph.header.nNodes;
   const toCanvasX = (graphPx) => (graphPx - frame.offsetXPx) * frame.effectiveScale;
@@ -92,6 +128,9 @@ function collectVisibleRoadSegments(graph, nodePixels, frame, widthPx, heightPx)
       // striking out to sea and off the map, which is worse than useless as
       // a way of telling a reader where they are.
       if ((graph.edgeModeMask[edgeIndex] & EDGE_MODE_WATER_BIT) !== 0) {
+        continue;
+      }
+      if (graph.edgeRoadClassId[edgeIndex] < minimumRoadClass) {
         continue;
       }
       const targetIndex = graph.edgeU32[edgeIndex * 3];
@@ -123,19 +162,7 @@ function collectVisibleRoadSegments(graph, nodePixels, frame, widthPx, heightPx)
       );
     }
   }
-  const budget = Math.max(
-    MIN_DRAWN_ROAD_SEGMENTS,
-    Math.floor((widthPx * heightPx) / CANVAS_PIXELS_PER_ROAD_SEGMENT),
-  );
-  if (segments.length / 4 <= budget) {
-    return Float64Array.from(segments);
-  }
-  const stride = Math.ceil(segments.length / 4 / budget);
-  const thinned = [];
-  for (let index = 0; index < segments.length; index += 4 * stride) {
-    thinned.push(segments[index], segments[index + 1], segments[index + 2], segments[index + 3]);
-  }
-  return Float64Array.from(thinned);
+  return Float64Array.from(segments);
 }
 
 /**
@@ -170,7 +197,9 @@ export function buildMonochromeScreenSvg(mapData, snapshot, options = {}) {
   }
 
   const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
-  const patterns = options.patterns ?? selectHatchPatterns(options.patternCount ?? 2);
+  const patternCount = options.patternCount ?? 2;
+  const patterns = options.patterns
+    ?? (patternCount === 2 ? MAP_HATCH_PAIR : selectHatchPatterns(patternCount));
   const bandSeconds = (cycleMinutes * 60) / patterns.length;
   const maxBands = options.maxBands ?? 40;
 

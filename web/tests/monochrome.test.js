@@ -23,7 +23,13 @@ import {
 // greys are gone. The colour palette this replaces shipped with two bands
 // three levels out of 255 apart, which is the failure this number exists to
 // prevent recurring.
-const MINIMUM_COVERAGE_SEPARATION = 0.1;
+//
+// Expressed as a fraction of the ladder's own range as well as an absolute
+// floor: lightening every rung - as was done to stop the hatch swamping the
+// roads - shrinks the gaps in proportion without making any pair harder to
+// tell apart, and a fixed number alone would call that a regression.
+const MINIMUM_COVERAGE_SEPARATION = 0.08;
+const MINIMUM_SEPARATION_AS_RANGE_FRACTION = 0.15;
 
 test('the hatch ladder climbs, and never reaches solid', () => {
   const coverage = HATCH_PATTERN_LADDER.map((pattern) => patternCoverageRatio(pattern, 120));
@@ -42,11 +48,17 @@ test('the hatch ladder climbs, and never reaches solid', () => {
 test('every supported pattern count keeps its bands distinguishable', () => {
   for (let count = MIN_HATCH_PATTERN_COUNT; count <= MAX_HATCH_PATTERN_COUNT; count += 1) {
     const coverage = selectHatchPatterns(count).map((pattern) => patternCoverageRatio(pattern, 120));
+    const range = coverage[coverage.length - 1] - coverage[0];
     for (let index = 1; index < coverage.length; index += 1) {
       const separation = coverage[index] - coverage[index - 1];
       assert.ok(
         separation >= MINIMUM_COVERAGE_SEPARATION,
         `at n=${count}, bands ${index - 1} and ${index} differ by only ${separation.toFixed(3)}`,
+      );
+      assert.ok(
+        separation / range >= MINIMUM_SEPARATION_AS_RANGE_FRACTION,
+        `at n=${count}, bands ${index - 1} and ${index} take only `
+        + `${(100 * separation / range).toFixed(0)}% of the ladder's range`,
       );
     }
   }
@@ -197,20 +209,43 @@ test('a contour label is masked out of whatever it lies on', () => {
     assert.ok(texts[index + 1].includes('fill="#000000"'));
   }
 
-  // Horizontal by default: a value set steeply is legible only to a reader
-  // willing to turn the sheet.
-  assert.ok(!texts[1].includes('rotate('));
+  // Set along the contour by default, which is what an isoline label does.
+  assert.ok(texts[1].includes('rotate('));
 });
 
-test('labels can be set along the contour when that reads better', () => {
+test('labels can be set horizontally where that reads better', () => {
   const patterns = selectHatchPatterns(2);
   const bands = [{
     threshold: 1800, label: '30 min', pattern: patterns[1], rings: [squareRing(300, 20)],
   }];
   const svg = buildMonochromeIsochroneSvg({
-    widthPx: 400, heightPx: 400, bands, legend: false, labelsFollowContour: true,
+    widthPx: 400, heightPx: 400, bands, legend: false, labelsFollowContour: false,
   });
-  assert.ok(/<text [^>]*rotate\(/.test(svg));
+  assert.ok(!/<text [^>]*rotate\(/.test(svg));
+});
+
+test('a hole carries the value of the band inside it, so it is not labelled here', () => {
+  const patterns = selectHatchPatterns(2);
+  const bands = [{
+    threshold: 1800,
+    label: '30 min',
+    pattern: patterns[1],
+    rings: [
+      { ...squareRing(300, 20), isHole: false },
+      { ...squareRing(160, 90), isHole: true },
+    ],
+  }];
+  const svg = buildMonochromeIsochroneSvg({ widthPx: 400, heightPx: 400, bands, legend: false });
+  // Labelling both would print two different times against one line, since a
+  // band's hole is its neighbour's outer boundary.
+  const labelled = (svg.match(/<text [^>]*>30 min<\/text>/g) ?? []).length / 2;
+  const outerOnly = buildMonochromeIsochroneSvg({
+    widthPx: 400,
+    heightPx: 400,
+    legend: false,
+    bands: [{ ...bands[0], rings: [bands[0].rings[0]] }],
+  });
+  assert.equal(labelled, (outerOnly.match(/<text [^>]*>30 min<\/text>/g) ?? []).length / 2);
 });
 
 test('placeContourLabels repeats along a contour too long to label once', () => {
