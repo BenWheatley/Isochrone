@@ -964,3 +964,18 @@ body {
     display: block !important;
   }
 }
+
+/* Monochrome draws vector bands and labelled contours rather than pixels, so
+   it sits in an SVG layer over the isochrone canvas instead of inside it. It
+   is inert - and empty - in colour mode. */
+.monochrome-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.monochrome-overlay svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}

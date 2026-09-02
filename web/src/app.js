@@ -11,6 +11,7 @@ import {
   EDGE_MODE_WATER_BIT,
   FINAL_EDGE_INTERPOLATION_STEP_STRIDE,
   INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE,
+  MAP_STYLE_MONOCHROME,
   TRANSIT_ONLY_ALLOWED_MODE_MASK,
 } from './config/constants.js';
 import {
@@ -64,6 +65,9 @@ import {
   bindModeSelectControl as bindModeSelectControlInternal,
   populateLocationSelect,
   updateTransitControlAvailability,
+  bindMapStyleControl,
+  getMapStyleFromShell,
+  normalizeMapStyle,
 } from './ui/orchestration.js';
 import {
   loadCommonLocaleBundle,
@@ -100,6 +104,7 @@ import {
   blitPixelGridToCanvas,
   getOrCreateIsochroneRenderer,
 } from './render/isochrone-renderer.js';
+import { buildMonochromeScreenSvg } from './render/monochrome-screen.js';
 import {
   clearGrid,
   clearTravelTimeGrid,
@@ -737,7 +742,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     updateDistanceScaleBar,
     redrawViewport(currentShell, currentMapData) {
       if (currentMapData?.boundaryPayload && currentMapData?.graph?.header) {
-        drawBoundaryBasemapAlignedToGraphGrid(
+        currentMapData.projectedBoundary = drawBoundaryBasemapAlignedToGraphGrid(
           currentShell.boundaryCanvas,
           currentMapData.boundaryPayload,
           currentMapData.graph.header,
@@ -746,12 +751,13 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
             viewport: currentMapData.viewport,
             fitBoundingBoxPx: currentMapData.boundaryFitBoundingBoxPx,
           },
-        );
+        ).projectedBoundary;
       }
       rerenderIsochroneFromSnapshot(currentShell, currentMapData, {
         colourTheme: resolveIsochroneTheme(),
         colourCycleMinutes: getColourCycleMinutesFromShell(currentShell),
         viewport: currentMapData?.viewport,
+        mapStyle: getMapStyleFromShell(currentShell),
       });
     },
   });
@@ -1030,6 +1036,20 @@ export async function runWalkingIsochroneFromSourceNode(
       transitEdgeVertexData,
     };
 
+    // Monochrome is not a re-tint of what the time-sliced render just painted;
+    // it is a different drawing, made from the finished field. It therefore
+    // cannot be produced incrementally as the search runs, and is done once
+    // here instead, when the distances are final.
+    if (normalizeMapStyle(getMapStyleFromShell(shell)) === MAP_STYLE_MONOCHROME) {
+      rerenderIsochroneFromSnapshot(shell, mapData, {
+        allowedModeMask,
+        colourCycleMinutes: options.colourCycleMinutes,
+        colourTheme: options.colourTheme,
+        viewport: mapData.viewport,
+        mapStyle: MAP_STYLE_MONOCHROME,
+      });
+    }
+
     // runSearchTimeSlicedWithRendering already painted the canvas from the
     // walk-only pass-1 distances (searchState.distSeconds) before this
     // function ever runs CSA/pass-2 above — that paint call has no way to
@@ -1042,6 +1062,7 @@ export async function runWalkingIsochroneFromSourceNode(
         allowedModeMask,
         colourCycleMinutes: options.colourCycleMinutes,
         colourTheme: options.colourTheme,
+        mapStyle: getMapStyleFromShell(shell),
       });
       // The status text above was already set by
       // runSearchTimeSlicedWithRendering from the walk-only pass-1 result
@@ -1587,6 +1608,71 @@ function translateViewportIntoGrid(viewport, fitBoundingBoxPx, grid) {
   };
 }
 
+const MONOCHROME_PATTERN_COUNT = 2;
+
+function hideMonochromeOverlay(shell) {
+  const overlay = shell.monochromeOverlay;
+  if (overlay && overlay.hidden !== true) {
+    overlay.hidden = true;
+    overlay.innerHTML = '';
+  }
+  if (shell.isochroneCanvas && shell.isochroneCanvas.style) {
+    shell.isochroneCanvas.style.visibility = '';
+  }
+  if (shell.boundaryCanvas && shell.boundaryCanvas.style) {
+    shell.boundaryCanvas.style.visibility = '';
+  }
+  if (shell.isochroneLegend && shell.isochroneLegend.style) {
+    shell.isochroneLegend.style.visibility = '';
+  }
+}
+
+function renderMonochromeSnapshotToOverlay(shell, mapData, snapshot, options) {
+  const overlay = shell.monochromeOverlay;
+  if (!overlay) {
+    return false;
+  }
+  const canvas = shell.isochroneCanvas;
+  syncCanvasToDisplaySize(canvas);
+  // Hidden rather than cleared: a monochrome view is not a colour view with
+  // the colour turned down, and anything left underneath would show through
+  // the transparent hatches.
+  if (canvas.style) {
+    canvas.style.visibility = 'hidden';
+  }
+  // The colour basemap goes too. A blue sea under a black-and-white isochrone
+  // is not monochrome, and the scene draws its own coastline and roads - from
+  // the same projection, so they register.
+  if (shell.boundaryCanvas && shell.boundaryCanvas.style) {
+    shell.boundaryCanvas.style.visibility = 'hidden';
+  }
+  // The colour key would be describing bands that are not on screen. A key
+  // showing the actual hatches belongs here instead, and is the next thing
+  // this mode needs.
+  if (shell.isochroneLegend && shell.isochroneLegend.style) {
+    shell.isochroneLegend.style.visibility = 'hidden';
+  }
+
+  const markup = buildMonochromeScreenSvg(mapData, snapshot, {
+    widthPx: canvas.width,
+    heightPx: canvas.height,
+    viewport: options.viewport,
+    fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+    allowedModeMask: options.allowedModeMask,
+    edgeTraversalCostSeconds: validateEdgeTraversalCostSecondsLookup(
+      snapshot.edgeTraversalCostSeconds,
+      mapData.graph.header.nEdges,
+    ) ?? undefined,
+    cycleMinutes: options.colourCycleMinutes,
+    patternCount: MONOCHROME_PATTERN_COUNT,
+    projectedBoundary: mapData.projectedBoundary ?? null,
+  });
+
+  overlay.hidden = false;
+  overlay.innerHTML = markup ?? '';
+  return true;
+}
+
 function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   if (!shell || typeof shell !== 'object' || !shell.isochroneCanvas) {
     return false;
@@ -1619,6 +1705,19 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   );
   const allowedModeMask = options.allowedModeMask ?? snapshot.allowedModeMask ?? EDGE_MODE_CAR_BIT;
   const viewport = options.viewport ?? mapData.viewport;
+
+  // Monochrome is a different drawing entirely - filled hatched bands with
+  // labelled contours, not coloured lines - so it takes its own path rather
+  // than re-tinting this one, and lands in an SVG layer above the canvas.
+  if (normalizeMapStyle(options.mapStyle) === MAP_STYLE_MONOCHROME) {
+    return renderMonochromeSnapshotToOverlay(shell, mapData, snapshot, {
+      ...options,
+      allowedModeMask,
+      colourCycleMinutes,
+      viewport,
+    });
+  }
+  hideMonochromeOverlay(shell);
 
   const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
   updateRenderBackendBadge(shell, renderer);
@@ -2104,6 +2203,10 @@ export function drawBoundaryBasemapAlignedToGraphGrid(
   return {
     featureCount: projectedBoundary.features.length,
     pathCount: renderedPathCount,
+    // Handed back so the monochrome scene can draw the coastline through the
+    // same projection, in the same space, rather than deriving its own - which
+    // is how a basemap ends up kilometres from the roads it describes.
+    projectedBoundary,
   };
 }
 
@@ -2243,6 +2346,9 @@ export async function initializeMapData(shell, options = {}) {
     return {
       boundarySummary: boundaryLoad.boundarySummary,
       alignedBoundarySummary,
+      // The basemap already projected into graph space, for the monochrome
+      // scene to draw the coastline from.
+      projectedBoundary: alignedBoundarySummary.projectedBoundary,
       boundaryPayload: boundaryLoad.boundaryPayload,
       boundaryFitBoundingBoxPx,
       graph,
@@ -3427,7 +3533,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         return;
       }
       if (mapData.boundaryPayload) {
-        drawBoundaryBasemapAlignedToGraphGrid(
+        mapData.projectedBoundary = drawBoundaryBasemapAlignedToGraphGrid(
           shell.boundaryCanvas,
           mapData.boundaryPayload,
           mapData.graph.header,
@@ -3436,12 +3542,13 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
             viewport: mapData.viewport,
             fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
           },
-        );
+        ).projectedBoundary;
       }
       rerenderIsochroneFromSnapshot(shell, mapData, {
         colourTheme: resolveIsochroneTheme(),
         colourCycleMinutes: getColourCycleMinutesFromShell(shell),
         viewport: mapData.viewport,
+        mapStyle: getMapStyleFromShell(shell),
       });
       updateDistanceScaleBar(shell, mapData.graph.header, {
         viewport: mapData.viewport,
@@ -3691,12 +3798,25 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         );
       },
     });
+    bindMapStyleControl(shell, {
+      onMapStyleChange() {
+        // Monochrome changes what is drawn, not just how it is coloured, so
+        // the map has to be redrawn rather than re-tinted.
+        rerenderIsochroneFromSnapshotWithStatus(shell, initializedMapData, {
+          colourTheme: resolveIsochroneTheme(),
+          colourCycleMinutes: getColourCycleMinutesFromShell(shell),
+          viewport: initializedMapData?.viewport,
+          mapStyle: getMapStyleFromShell(shell),
+        });
+      },
+    });
     bindModeSelectControl(shell, {
       requestIsochroneRepaint() {
         const cycleMinutes = getColourCycleMinutesFromShell(shell);
         const rerendered = rerenderIsochroneFromSnapshotWithStatus(shell, initializedMapData, {
           colourTheme: resolveIsochroneTheme(),
           colourCycleMinutes: cycleMinutes,
+          mapStyle: getMapStyleFromShell(shell),
         });
         if (rerendered && initializedMapData?.lastRoutingSnapshot) {
           initializedMapData.lastRoutingSnapshot.colourCycleMinutes = cycleMinutes;

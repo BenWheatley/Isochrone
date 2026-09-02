@@ -5,6 +5,9 @@ import {
   DEPARTURE_DATETIME_QUERY_PARAM,
   LANGUAGE_QUERY_PARAM,
   LAST_CLICKED_NODE_QUERY_PARAM,
+  MAP_STYLE_COLOUR,
+  MAP_STYLE_MONOCHROME,
+  MAP_STYLE_QUERY_PARAM,
   MODE_SELECTION_QUERY_PARAM,
   SELECTED_REGION_QUERY_PARAM,
   WALK_SPEED_QUERY_PARAM,
@@ -386,4 +389,38 @@ function clampInt(value, minValue, maxValue) {
     return maxValue;
   }
   return value;
+}
+
+
+/**
+ * Map style from the URL, so a monochrome view can be linked to and shared -
+ * which for a mode whose whole point is accessibility is not a nicety.
+ */
+export function parseMapStyleFromLocationSearch(locationSearch) {
+  const params = new URLSearchParams(typeof locationSearch === 'string' ? locationSearch : '');
+  const raw = params.get(MAP_STYLE_QUERY_PARAM);
+  if (raw === MAP_STYLE_MONOCHROME || raw === MAP_STYLE_COLOUR) {
+    return raw;
+  }
+  return null;
+}
+
+export function persistMapStyleToLocation(mapStyle, options = {}) {
+  const normalized = mapStyle === MAP_STYLE_MONOCHROME ? MAP_STYLE_MONOCHROME : MAP_STYLE_COLOUR;
+  const locationObject = options.locationObject ?? globalThis.location ?? null;
+  const historyObject = options.historyObject ?? globalThis.history ?? null;
+  if (!locationObject || typeof locationObject.href !== 'string') {
+    return false;
+  }
+  if (!historyObject || typeof historyObject.replaceState !== 'function') {
+    return false;
+  }
+
+  const nextUrl = new URL(locationObject.href);
+  if (nextUrl.searchParams.get(MAP_STYLE_QUERY_PARAM) === normalized) {
+    return false;
+  }
+  nextUrl.searchParams.set(MAP_STYLE_QUERY_PARAM, normalized);
+  historyObject.replaceState(null, '', nextUrl.toString());
+  return true;
 }

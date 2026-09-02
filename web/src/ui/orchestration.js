@@ -2,6 +2,8 @@ import {
   BIKE_CRUISE_SPEED_KPH,
   DEFAULT_COLOUR_CYCLE_MINUTES,
   DEFAULT_TRANSIT_WALK_BUDGET_MINUTES,
+  MAP_STYLE_COLOUR,
+  MAP_STYLE_MONOCHROME,
   DEFAULT_WALK_SPEED_KPH,
   EDGE_MODE_BIKE_BIT,
   EDGE_MODE_CAR_BIT,
@@ -11,6 +13,8 @@ import {
 } from '../config/constants.js';
 import {
   parseBikeSpeedKphFromLocationSearch,
+  parseMapStyleFromLocationSearch,
+  persistMapStyleToLocation,
   parseColourCycleMinutesFromLocationSearch,
   parseDepartureDatetimeFromLocationSearch,
   parseModeValuesFromLocationSearch,
@@ -41,6 +45,7 @@ const CANONICAL_THEME_VALUES = ['light', 'dark', 'auto'];
 const THEME_STORAGE_KEY = 'isochrone-theme';
 const POINTER_BUTTON_INVERSION_STORAGE_KEY = 'isochrone-invert-pointer-buttons';
 const UNIT_SYSTEM_STORAGE_KEY = 'isochrone-unit-system';
+const MAP_STYLE_STORAGE_KEY = 'isochrone-map-style';
 
 export function initializeAppShell(doc, options = {}) {
   const resolvedDocument = doc ?? globalThis.document;
@@ -85,6 +90,8 @@ export function initializeAppShell(doc, options = {}) {
   const primaryMouseButtonRadios = Array.from(
     resolvedDocument.querySelectorAll('input[name="primary-mouse-button"]'),
   );
+  const mapStyleRadios = Array.from(resolvedDocument.querySelectorAll('input[name="map-style"]'));
+  const monochromeOverlay = resolvedDocument.getElementById('monochrome-overlay');
   const modeCheckboxGroup = resolvedDocument.getElementById('mode-checkbox-group');
   const modeCheckboxes = Array.from(resolvedDocument.querySelectorAll('.mode-checkbox'));
   const colourCycleMinutesInput = resolvedDocument.getElementById('colour-cycle-minutes');
@@ -159,6 +166,12 @@ export function initializeAppShell(doc, options = {}) {
     || speedUnitLabelElements.some((element) => element.tagName !== 'SPAN')
   ) {
     throw new Error('index.html is missing <span class="speed-unit-label"> elements');
+  }
+  if (mapStyleRadios.length !== 2 || mapStyleRadios.some((radio) => radio.tagName !== 'INPUT')) {
+    throw new Error('index.html is missing two <input type="radio" name="map-style"> elements');
+  }
+  if (!monochromeOverlay) {
+    throw new Error('index.html is missing <div id="monochrome-overlay">');
   }
   if (
     primaryMouseButtonRadios.length !== 2
@@ -299,6 +312,8 @@ export function initializeAppShell(doc, options = {}) {
     themeRadios,
     unitSystemRadios,
     speedUnitLabelElements,
+    mapStyleRadios,
+    monochromeOverlay,
     primaryMouseButtonRadios,
     modeCheckboxGroup,
     modeCheckboxes,
@@ -504,6 +519,76 @@ export function bindHeaderMenuControl(shell, options = {}) {
 function getCheckedThemeRadioValue(themeRadios) {
   const checkedRadio = themeRadios.find((radio) => radio.checked);
   return checkedRadio?.value ?? themeRadios[0]?.value;
+}
+
+export function normalizeMapStyle(value, fallback = MAP_STYLE_COLOUR) {
+  return value === MAP_STYLE_MONOCHROME ? MAP_STYLE_MONOCHROME : fallback;
+}
+
+export function getMapStyleFromShell(shell) {
+  if (!shell || typeof shell !== 'object' || !Array.isArray(shell.mapStyleRadios)) {
+    return MAP_STYLE_COLOUR;
+  }
+  return normalizeMapStyle(getCheckedRadioValue(shell.mapStyleRadios));
+}
+
+/**
+ * Colour or monochrome, remembered and shareable like every other display
+ * choice. Monochrome exists for e-ink, mono printers and total colourblindness,
+ * two of which are live-viewing cases - so it switches what is drawn on screen,
+ * not only what an export contains.
+ */
+export function bindMapStyleControl(shell, options = {}) {
+  if (!shell || typeof shell !== 'object' || !Array.isArray(shell.mapStyleRadios)
+    || shell.mapStyleRadios.length === 0) {
+    throw new Error('shell.mapStyleRadios is required');
+  }
+
+  const storage = options.storage ?? globalThis.localStorage ?? null;
+  const storageKey = options.storageKey ?? MAP_STYLE_STORAGE_KEY;
+  const onMapStyleChange = options.onMapStyleChange ?? null;
+
+  const applyMapStyle = (value, { persist = true, notify = false } = {}) => {
+    const nextStyle = normalizeMapStyle(value);
+    for (const radio of shell.mapStyleRadios) {
+      radio.checked = radio.value === nextStyle;
+    }
+    if (persist) {
+      safeStorageSet(storage, storageKey, nextStyle);
+      persistMapStyleToLocation(nextStyle);
+    }
+    if (notify && typeof onMapStyleChange === 'function') {
+      onMapStyleChange(nextStyle);
+    }
+    return nextStyle;
+  };
+
+  const fromLocation = parseMapStyleFromLocationSearch(
+    options.locationSearch ?? globalThis.location?.search ?? '',
+  );
+  const initialStyle = fromLocation ?? safeStorageGet(storage, storageKey) ?? MAP_STYLE_COLOUR;
+  applyMapStyle(initialStyle, { persist: false });
+
+  const handleChange = () => {
+    applyMapStyle(getCheckedRadioValue(shell.mapStyleRadios), { notify: true });
+  };
+  for (const radio of shell.mapStyleRadios) {
+    radio.addEventListener('change', handleChange);
+  }
+
+  return {
+    dispose() {
+      for (const radio of shell.mapStyleRadios) {
+        radio.removeEventListener('change', handleChange);
+      }
+    },
+    getMapStyle() {
+      return normalizeMapStyle(getCheckedRadioValue(shell.mapStyleRadios));
+    },
+    setMapStyle(value, applyOptions = {}) {
+      return applyMapStyle(value, applyOptions);
+    },
+  };
 }
 
 export function bindThemeControl(shell, options = {}) {
