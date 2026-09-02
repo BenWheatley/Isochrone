@@ -70,7 +70,42 @@ vertex counts that explode along every cul-de-sac. It also does not avoid an
 arbitrary parameter, since the buffer radius plays exactly the role a raster
 cell size would.
 
-**Chosen: rasterise the per-band vector geometry, then contour it.** The vector
+**Superseded 2026-09-02: triangulate the nodes, then classify triangles.**
+
+The choice below was made between buffer-and-union and a raster, and never
+considered the construction that actually suits this. Buffer-and-union really
+is a bad idea, for the reasons given. A raster is a worse one than the section
+admitted: its cell size is not merely "an arbitrary parameter", it makes the
+drawing resolution-dependent, so the same map has to be re-derived for every
+output size and mottles as you zoom. A poster and a screen ended up with
+different geometry for the same isochrone.
+
+Delaunay-triangulate the node positions instead. A triangle is reachable by the
+time its slowest corner is, so each falls in exactly one band, and merging the
+triangles of a band is combinatorial rather than geometric: an edge shared by
+two same-band triangles cancels against its own reverse, and what is left is
+the boundary, already correctly wound. No boolean geometry, no tolerance, no
+cell size. Holes and disjoint components need no special handling at all - a
+park with no paths simply has no triangles, and a transit isochrone landing in
+several places simply produces several rings.
+
+The triangulation depends only on where the nodes are, so it is built once per
+region and kept: Berlin's 578,000 nodes take about 390 ms and yield 1.15
+million triangles, after which a routing run only reclassifies them. Panning
+and zooming touch no geometry at all.
+
+One length survives - the span above which a triangle is judged to bridge a gap
+rather than cover ground - but unlike a cell size it is in metres, it is
+resolution-independent, and Delaunay's habit of maximising the minimum angle is
+what makes it meaningful: a river or the edge of the network shows up as a long
+thin triangle, and a city block does not.
+
+See `web/src/render/delaunay.js` and `web/src/render/band-regions.js`.
+
+---
+
+**Rejected in the original plan, and wrong: rasterise the per-band vector
+geometry, then contour it.** The vector
 edge geometry remains the source of truth; a raster is used only as a transient
 rendering intermediate, sized to the output (a poster is ~4576px wide), then
 discarded. Marching squares over that gives closed rings directly.

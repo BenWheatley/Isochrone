@@ -3,26 +3,22 @@
 // e-ink and total colourblindness are live-viewing cases, so a monochrome mode
 // that only reached the PDF would miss two of the three readers it exists for.
 // The isochrone is drawn as filled hatched bands with labelled contours, into
-// an SVG overlay above the map canvas, from a raster built for this frame and
-// thrown away again.
+// an SVG layer above the map canvas.
+//
+// Vector throughout. The bands are polygons built from a triangulation of the
+// nodes, not traced out of a raster, so they are the same shapes at any zoom
+// and at any output size. The triangulation is a static property of the region
+// and is kept, so a routing run only reclassifies triangles and panning is a
+// pure transform.
 
-import {
-  DEFAULT_COLOUR_CYCLE_MINUTES,
-  EDGE_MODE_WATER_BIT,
-  FINAL_EDGE_INTERPOLATION_STEP_STRIDE,
-} from '../config/constants.js';
+import { DEFAULT_COLOUR_CYCLE_MINUTES, EDGE_MODE_WATER_BIT } from '../config/constants.js';
 import { resolveViewportFrame } from '../core/viewport.js';
 import { buildMonochromeIsochroneSvg } from '../export/monochrome-svg.js';
-import { extractContourRings } from './contour.js';
-import { selectHatchPatterns, timeToFillPattern } from './hatch.js';
-import { paintAllReachableEdgeInterpolationsToTravelTimeGrid } from './edge-painting.js';
-import { clearTravelTimeGrid, createTravelTimeGrid } from './pixel-grid.js';
+import { buildBandRegions, DEFAULT_MAX_TRIANGLE_SPAN_M } from './band-regions.js';
+import { triangulate } from './delaunay.js';
+import { selectHatchPatterns } from './hatch.js';
 
-// The painted edges are one cell wide, so contouring the raster untouched
-// traces every individual street rather than the region they enclose. Widening
-// the reachable set by a few cells first is what turns a road network into an
-// area - and it is the one number here still chosen by eye.
-const DEFAULT_DILATE_PASSES = 5;
+const TRIANGULATION_PROPERTY = '__nodeTriangulation';
 // Roads are for orientation, so they have to stay legible as roads. Past
 // roughly one segment per 250 square pixels they stop being a street network
 // and become a grey wash - Portsmouth's whole network inside a 250px island is
@@ -32,41 +28,32 @@ const DEFAULT_DILATE_PASSES = 5;
 const CANVAS_PIXELS_PER_ROAD_SEGMENT = 250;
 const MIN_DRAWN_ROAD_SEGMENTS = 1500;
 
-function buildTransientField(grid) {
-  // The grid marks "not reached" as -1, which would contour as a very low
-  // travel time rather than as unreachable ground.
-  const field = new Float32Array(grid.seconds.length);
-  for (let index = 0; index < field.length; index += 1) {
-    const seconds = grid.seconds[index];
-    field[index] = seconds < 0 ? Number.POSITIVE_INFINITY : seconds;
+/**
+ * The region's triangulation, built once and kept on the map data.
+ *
+ * It depends only on where the nodes are, which does not change, so rebuilding
+ * it per frame - or worse, per pan - would be pure waste. Berlin's 578,000
+ * nodes take about 390 ms and yield 1.15 million triangles; every routing run
+ * after that only has to decide which band each of them falls in.
+ *
+ * Built in graph pixels rather than metres, so it shares the space the
+ * viewport and the basemap already use and cannot drift out of register.
+ */
+function getOrBuildNodeTriangulation(mapData) {
+  const cached = mapData[TRIANGULATION_PROPERTY];
+  if (cached) {
+    return cached;
   }
-  return field;
-}
-
-function dilateReachability(field, width, height, passes) {
-  if (passes <= 0) {
-    return field;
+  const nodePixels = mapData.nodePixels;
+  const nodeCount = nodePixels.nodePixelX.length;
+  const coords = new Float64Array(nodeCount * 2);
+  for (let index = 0; index < nodeCount; index += 1) {
+    coords[index * 2] = nodePixels.nodePixelX[index];
+    coords[index * 2 + 1] = nodePixels.nodePixelY[index];
   }
-  let current = field;
-  for (let pass = 0; pass < passes; pass += 1) {
-    const source = Float32Array.from(current);
-    for (let y = 1; y < height - 1; y += 1) {
-      for (let x = 1; x < width - 1; x += 1) {
-        const index = y * width + x;
-        let best = source[index];
-        const left = source[index - 1];
-        const right = source[index + 1];
-        const up = source[index - width];
-        const down = source[index + width];
-        if (left < best) best = left;
-        if (right < best) best = right;
-        if (up < best) best = up;
-        if (down < best) best = down;
-        current[index] = best;
-      }
-    }
-  }
-  return current;
+  const triangulation = triangulate(coords);
+  mapData[TRIANGULATION_PROPERTY] = triangulation;
+  return triangulation;
 }
 
 function formatBandLabel(minutes, formatMinutes) {
@@ -82,14 +69,14 @@ function formatBandLabel(minutes, formatMinutes) {
 }
 
 /**
- * Visible roads, in grid coordinates.
+ * Visible roads, in graph pixels.
  *
- * Grid rather than canvas coordinates because everything handed to the scene
+ * Graph pixels rather than canvas pixels because everything handed to the scene
  * goes through one and the same transform - that is what keeps the coastline,
  * the roads and the bands registered with each other. Visibility is still
  * judged in canvas pixels, since that is what "on screen" means.
  */
-function collectVisibleRoadSegments(graph, nodePixels, frame, widthPx, heightPx, origin) {
+function collectVisibleRoadSegments(graph, nodePixels, frame, widthPx, heightPx) {
   const segments = [];
   const nodeCount = graph.header.nNodes;
   const toCanvasX = (graphPx) => (graphPx - frame.offsetXPx) * frame.effectiveScale;
@@ -129,10 +116,10 @@ function collectVisibleRoadSegments(graph, nodePixels, frame, widthPx, heightPx,
       }
       seen.add(key);
       segments.push(
-        (nodePixels.nodePixelX[sourceIndex] - origin.x) / origin.step,
-        (nodePixels.nodePixelY[sourceIndex] - origin.y) / origin.step,
-        (nodePixels.nodePixelX[targetIndex] - origin.x) / origin.step,
-        (nodePixels.nodePixelY[targetIndex] - origin.y) / origin.step,
+        nodePixels.nodePixelX[sourceIndex],
+        nodePixels.nodePixelY[sourceIndex],
+        nodePixels.nodePixelX[targetIndex],
+        nodePixels.nodePixelY[targetIndex],
       );
     }
   }
@@ -171,128 +158,54 @@ export function buildMonochromeScreenSvg(mapData, snapshot, options = {}) {
     fitBoundingBoxPx: options.fitBoundingBoxPx ?? null,
   });
 
-  // A raster for this frame only, sized to what is on screen and discarded
-  // when the function returns - never a persistent, graph-sized buffer.
-  const originXPx = Math.max(0, Math.floor(frame.offsetXPx));
-  const originYPx = Math.max(0, Math.floor(frame.offsetYPx));
-  const gridWidthPx = Math.min(
-    graph.header.gridWidthPx - originXPx,
-    Math.ceil(widthPx / frame.effectiveScale) + 2,
-  );
-  const gridHeightPx = Math.min(
-    graph.header.gridHeightPx - originYPx,
-    Math.ceil(heightPx / frame.effectiveScale) + 2,
-  );
-  if (!(gridWidthPx > 2) || !(gridHeightPx > 2)) {
-    return null;
-  }
-
-  const grid = createTravelTimeGrid(gridWidthPx, gridHeightPx, { originXPx, originYPx });
-  clearTravelTimeGrid(grid);
-  paintAllReachableEdgeInterpolationsToTravelTimeGrid(
-    grid,
-    graph,
-    mapData.nodePixels,
-    snapshot.distSeconds,
-    options.allowedModeMask,
-    {
-      stepStride: FINAL_EDGE_INTERPOLATION_STEP_STRIDE,
-      edgeTraversalCostSeconds: options.edgeTraversalCostSeconds ?? undefined,
-    },
-  );
-
-  // Down to the resolution actually being displayed. Zoomed out, the graph
-  // grid is several times finer than the canvas - Portsmouth is 1388 cells
-  // across shown in about 340 pixels - and contouring at that fineness traces
-  // noise the reader can never see, while a few passes of dilation cover a
-  // fraction of a displayed pixel. Reducing by minimum keeps reachability
-  // exact: a block is reachable as early as its earliest cell.
-  const sampleStep = Math.max(1, Math.round(1 / frame.effectiveScale));
-  const fieldWidth = Math.max(2, Math.ceil(gridWidthPx / sampleStep));
-  const fieldHeight = Math.max(2, Math.ceil(gridHeightPx / sampleStep));
-  const rawField = buildTransientField(grid);
-  let sampledField = rawField;
-  if (sampleStep > 1) {
-    sampledField = new Float32Array(fieldWidth * fieldHeight).fill(Number.POSITIVE_INFINITY);
-    for (let y = 0; y < gridHeightPx; y += 1) {
-      const targetRow = Math.floor(y / sampleStep) * fieldWidth;
-      const sourceRow = y * gridWidthPx;
-      for (let x = 0; x < gridWidthPx; x += 1) {
-        const seconds = rawField[sourceRow + x];
-        const targetIndex = targetRow + Math.floor(x / sampleStep);
-        if (seconds < sampledField[targetIndex]) {
-          sampledField[targetIndex] = seconds;
-        }
-      }
-    }
-  }
-
-  const field = dilateReachability(
-    sampledField,
-    fieldWidth,
-    fieldHeight,
-    options.dilatePasses ?? DEFAULT_DILATE_PASSES,
-  );
-
-  let longestReachableSeconds = 0;
-  for (let index = 0; index < field.length; index += 1) {
-    const seconds = field[index];
-    if (Number.isFinite(seconds) && seconds > longestReachableSeconds) {
-      longestReachableSeconds = seconds;
-    }
-  }
-  if (longestReachableSeconds <= 0) {
+  // Vector, not raster. The triangulation of the node positions is a static
+  // property of the region, so it is built once and kept: a routing run only
+  // reclassifies triangles, and panning or zooming is then a pure transform
+  // with nothing to recompute. A raster had to be rebuilt and re-contoured
+  // every frame at whatever resolution happened to be on screen, which is what
+  // made the bands mottle when zoomed and cost megabytes of markup per pan.
+  const triangulation = getOrBuildNodeTriangulation(mapData);
+  if (triangulation.triangles.length === 0) {
     return null;
   }
 
   const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   const patterns = options.patterns ?? selectHatchPatterns(options.patternCount ?? 2);
-  const bandMinutes = cycleMinutes / patterns.length;
-  const thresholds = [];
-  for (
-    let minutes = bandMinutes;
-    minutes <= longestReachableSeconds / 60 + bandMinutes;
-    minutes += bandMinutes
-  ) {
-    thresholds.push(minutes * 60);
-    if (thresholds.length >= 40) {
-      break;
-    }
-  }
-  if (thresholds.length === 0) {
+  const bandSeconds = (cycleMinutes * 60) / patterns.length;
+  const maxBands = options.maxBands ?? 40;
+
+  const regions = buildBandRegions(triangulation, snapshot.distSeconds, {
+    bandIndexForSeconds: (seconds) => {
+      const bandIndex = Math.floor(seconds / bandSeconds);
+      return bandIndex >= maxBands ? null : bandIndex;
+    },
+    // The limit is a real distance, but the triangulation lives in graph
+    // pixels - the space the viewport already works in - so it converts here.
+    maxTriangleSpanM: (options.maxTriangleSpanM ?? DEFAULT_MAX_TRIANGLE_SPAN_M)
+      / graph.header.pixelSizeM,
+  });
+  if (regions.bands.length === 0) {
     return null;
   }
 
-  const contours = extractContourRings(field, {
-    width: fieldWidth,
-    height: fieldHeight,
-    thresholds,
-  });
-
-  // One transform for everything in the scene: grid cell -> graph pixel ->
-  // canvas pixel. The basemap goes through the same one, which is what keeps
-  // the coastline registered with the roads it describes.
-  const transform = (fieldX, fieldY) => [
-    (originXPx + fieldX * sampleStep - frame.offsetXPx) * frame.effectiveScale,
-    (originYPx + fieldY * sampleStep - frame.offsetYPx) * frame.effectiveScale,
+  // Graph pixels straight to canvas pixels: the same frame the basemap and the
+  // edge renderer use, so everything registers without a second thought.
+  const transform = (graphX, graphY) => [
+    (graphX - frame.offsetXPx) * frame.effectiveScale,
+    (graphY - frame.offsetYPx) * frame.effectiveScale,
   ];
 
-  const bands = contours.map((contour, index) => ({
-    threshold: contour.threshold,
-    rings: contour.rings,
-    label: formatBandLabel(contour.threshold / 60, options.formatMinutes),
-    pattern: timeToFillPattern(Math.max(0, contour.threshold - 1), { cycleMinutes, patterns }),
-    isLimit: index === contours.length - 1,
+  const bands = regions.bands.map((region, index) => ({
+    rings: region.rings,
+    label: formatBandLabel(((region.bandIndex + 1) * bandSeconds) / 60, options.formatMinutes),
+    pattern: patterns[region.bandIndex % patterns.length],
+    isLimit: index === regions.bands.length - 1,
   }));
 
   const waterFeatures = (options.projectedBoundary?.waterFeatures ?? [])
     .concat(options.projectedBoundary?.inlandWaterFeatures ?? [])
     .map((feature) => ({
-      paths: feature.paths.map((path) =>
-        path.map(([graphX, graphY]) => [
-          (graphX - originXPx) / sampleStep,
-          (graphY - originYPx) / sampleStep,
-        ])),
+      paths: feature.paths.map((path) => path.map(([graphX, graphY]) => [graphX, graphY])),
     }));
 
   return buildMonochromeIsochroneSvg({
@@ -300,6 +213,7 @@ export function buildMonochromeScreenSvg(mapData, snapshot, options = {}) {
     heightPx,
     bands,
     transform,
+    bandsIncludeHoles: true,
     ink: options.ink ?? '#000000',
     paper: options.paper ?? '#ffffff',
     labelFontSize: options.labelFontSize ?? 12,
@@ -315,7 +229,6 @@ export function buildMonochromeScreenSvg(mapData, snapshot, options = {}) {
         frame,
         widthPx,
         heightPx,
-        { x: originXPx, y: originYPx, step: sampleStep },
       ),
     },
   });

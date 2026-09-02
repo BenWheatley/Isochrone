@@ -358,13 +358,16 @@ export function buildMonochromeIsochroneSvg(scene) {
     if (band.pattern.lines.length === 0) {
       continue;
     }
-    // The band inwards, wound the other way. Under even-odd the direction is
-    // irrelevant, but under non-zero a same-wound inner ring *adds* instead of
-    // subtracting, and every band paints as a full disc over its neighbour -
-    // which is what a browser that does not honour the fill-rule attribute
-    // produces. Reversing makes the annulus correct under either rule, so the
-    // drawing no longer depends on that attribute surviving.
-    const inner = index > 0 ? bands[index - 1].rings : [];
+    // Rings built from a triangulation already carry their own holes, wound
+    // oppositely, so a band is a finished annulus and needs nothing added.
+    // Rings from contouring do not: each outlines everything within a
+    // threshold, so the band inwards has to be subtracted, wound the other way
+    // - under even-odd the direction would not matter, but under non-zero a
+    // same-wound inner ring adds instead, and every band paints as a full disc
+    // over its neighbour. Reversing makes it correct under either rule.
+    const inner = scene.bandsIncludeHoles === true || index === 0
+      ? []
+      : bands[index - 1].rings;
     const pathData = band.rings
       .map((ring) => ringToPathData(ring.points, transform))
       .concat(inner.map((ring) => ringToPathData(ring.points, transform, { reversed: true })))
