@@ -303,3 +303,38 @@ test('the sea is ruled more finely than any band, and never at their angle', () 
     }
   }
 });
+
+test('a band is an annulus under either fill rule, not just even-odd', () => {
+  const patterns = selectHatchPatterns(2);
+  const bands = [
+    { threshold: 600, label: '10 min', pattern: patterns[1], rings: [squareRing(40, 30)] },
+    { threshold: 1200, label: '20 min', pattern: patterns[1], rings: [squareRing(100)] },
+  ];
+  const svg = buildMonochromeIsochroneSvg({ widthPx: 200, heightPx: 200, bands, legend: false });
+
+  // The outer band's path carries the inner band's ring wound the other way.
+  // Under non-zero a same-wound inner ring adds rather than subtracts, and the
+  // band paints as a full disc over its neighbour - which is what a renderer
+  // that ignores fill-rule produces, and what made the same map look different
+  // in two browsers.
+  const fillPaths = [...svg.matchAll(/<path d="([^"]+)" fill="url\(#/g)].map((m) => m[1]);
+  const outer = fillPaths[fillPaths.length - 1];
+  const subpaths = outer.split('M').filter((part) => part.length > 0);
+  assert.equal(subpaths.length, 2, 'the band path is not two subpaths');
+
+  const signedArea = (subpath) => {
+    const numbers = subpath.replace(/[LZ]/g, ' ').trim().split(/[\s]+/).map(Number);
+    let total = 0;
+    const count = numbers.length / 2;
+    for (let index = 0; index < count; index += 1) {
+      const next = (index + 1) % count;
+      total += numbers[index * 2] * numbers[next * 2 + 1] - numbers[next * 2] * numbers[index * 2 + 1];
+    }
+    return total / 2;
+  };
+  const areas = subpaths.map(signedArea);
+  assert.ok(
+    Math.sign(areas[0]) !== Math.sign(areas[1]),
+    `both subpaths wind the same way (${areas}), so non-zero fill would not subtract`,
+  );
+});

@@ -55,12 +55,13 @@ export function buildHatchPatternDefs(patterns, options = {}) {
   return definitions.join('');
 }
 
-function ringToPathData(points, transform) {
+function ringToPathData(points, transform, { reversed = false } = {}) {
   const count = points.length / 2;
   const parts = new Array(count);
-  for (let index = 0; index < count; index += 1) {
+  for (let step = 0; step < count; step += 1) {
+    const index = reversed ? count - 1 - step : step;
     const [x, y] = transform(points[index * 2], points[index * 2 + 1]);
-    parts[index] = `${index === 0 ? 'M' : 'L'}${formatSvgNumber(x)} ${formatSvgNumber(y)}`;
+    parts[step] = `${step === 0 ? 'M' : 'L'}${formatSvgNumber(x)} ${formatSvgNumber(y)}`;
   }
   return `${parts.join('')}Z`;
 }
@@ -357,9 +358,16 @@ export function buildMonochromeIsochroneSvg(scene) {
     if (band.pattern.lines.length === 0) {
       continue;
     }
+    // The band inwards, wound the other way. Under even-odd the direction is
+    // irrelevant, but under non-zero a same-wound inner ring *adds* instead of
+    // subtracting, and every band paints as a full disc over its neighbour -
+    // which is what a browser that does not honour the fill-rule attribute
+    // produces. Reversing makes the annulus correct under either rule, so the
+    // drawing no longer depends on that attribute surviving.
     const inner = index > 0 ? bands[index - 1].rings : [];
-    const pathData = [...band.rings, ...inner]
+    const pathData = band.rings
       .map((ring) => ringToPathData(ring.points, transform))
+      .concat(inner.map((ring) => ringToPathData(ring.points, transform, { reversed: true })))
       .join('');
     if (pathData.length === 0) {
       continue;

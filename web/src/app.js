@@ -1616,9 +1616,6 @@ function hideMonochromeOverlay(shell) {
     overlay.hidden = true;
     overlay.innerHTML = '';
   }
-  if (shell.isochroneCanvas && shell.isochroneCanvas.style) {
-    shell.isochroneCanvas.style.visibility = '';
-  }
   if (shell.boundaryCanvas && shell.boundaryCanvas.style) {
     shell.boundaryCanvas.style.visibility = '';
   }
@@ -1634,11 +1631,12 @@ function renderMonochromeSnapshotToOverlay(shell, mapData, snapshot, options) {
   }
   const canvas = shell.isochroneCanvas;
   syncCanvasToDisplaySize(canvas);
-  // Hidden rather than cleared: a monochrome view is not a colour view with
-  // the colour turned down, and anything left underneath would show through
-  // the transparent hatches.
-  if (canvas.style) {
-    canvas.style.visibility = 'hidden';
+  // Cleared, never hidden. Every pointer handler in canvas-routing is bound to
+  // this element, and visibility:hidden takes it out of hit testing - which is
+  // exactly how monochrome came to have no pan and no zoom.
+  const renderer = getOrCreateIsochroneRenderer(canvas);
+  if (typeof renderer.clear === 'function') {
+    renderer.clear();
   }
   // The colour basemap goes too. A blue sea under a black-and-white isochrone
   // is not monochrome, and the scene draws its own coastline and roads - from
