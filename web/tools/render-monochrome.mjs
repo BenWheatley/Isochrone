@@ -160,9 +160,11 @@ try {
 }
 
 const heightPx = Math.round(widthPx * (header.gridHeightPx / header.gridWidthPx));
+// Left undefined unless asked for, so the tool renders with whatever the app
+// itself would choose rather than a second opinion about it.
 const patterns = process.env.RUNGS
   ? process.env.RUNGS.split(',').map((index) => HATCH_PATTERN_LADDER[Number(index)])
-  : selectHatchPatterns(patternCount);
+  : (patternCount === 2 ? undefined : selectHatchPatterns(patternCount));
 
 const startedMs = performance.now();
 const svg = buildMonochromeScreenSvg(

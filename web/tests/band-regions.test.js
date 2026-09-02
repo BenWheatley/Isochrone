@@ -28,7 +28,11 @@ function radialLattice(timeFor = (radius) => radius * SPACING_M) {
   return { points, seconds };
 }
 
-const bandEvery = (width, limit) => (secs) => (secs > limit ? null : Math.floor(secs / width));
+const thresholdsEvery = (width, limit) => {
+  const thresholds = [];
+  for (let value = width; value <= limit; value += width) thresholds.push(value);
+  return thresholds;
+};
 
 test('triangulate finds a Delaunay triangulation', () => {
   const square = Float64Array.from([0, 0, 1, 0, 1, 1, 0, 1]);
@@ -68,7 +72,7 @@ test('triangulate finds a Delaunay triangulation', () => {
 test('a band comes out as a complete annulus, not a disc needing its neighbour', () => {
   const { points, seconds } = radialLattice();
   const result = buildBandRegions(triangulate(points), seconds, {
-    bandIndexForSeconds: bandEvery(100, 250),
+    thresholds: thresholdsEvery(100, 300),
     maxTriangleSpanM: 30,
   });
 
@@ -95,7 +99,7 @@ test('a band comes out as a complete annulus, not a disc needing its neighbour',
 test('band areas match the circles they stand for', () => {
   const { points, seconds } = radialLattice();
   const result = buildBandRegions(triangulate(points), seconds, {
-    bandIndexForSeconds: bandEvery(100, 250),
+    thresholds: thresholdsEvery(100, 300),
     maxTriangleSpanM: 30,
   });
   const outerArea = (band) => Math.abs(
@@ -132,7 +136,7 @@ test('an unreachable pocket becomes a hole, and a gap is not bridged', () => {
   }
   const lattice = Float64Array.from(kept);
   const result = buildBandRegions(triangulate(lattice), Float64Array.from(keptSeconds), {
-    bandIndexForSeconds: () => 0,
+    thresholds: [1e9],
     maxTriangleSpanM: 30,
   });
 
@@ -159,7 +163,7 @@ test('disjoint reachable areas come back as separate rings', () => {
   const result = buildBandRegions(
     triangulate(Float64Array.from(points)),
     Float64Array.from(seconds),
-    { bandIndexForSeconds: () => 0, maxTriangleSpanM: 50 },
+    { thresholds: [1e9], maxTriangleSpanM: 50 },
   );
   const outers = result.bands[0].rings.filter((ring) => !ring.isHole);
   assert.equal(outers.length, 2, 'the two islands did not come back separately');
@@ -173,18 +177,71 @@ test('the span limit is the one length this costs, and it is in metres', () => {
   const triangulation = triangulate(points);
   // Below the lattice spacing nothing survives; above it everything does.
   const tight = buildBandRegions(triangulation, seconds, {
-    bandIndexForSeconds: () => 0,
+    thresholds: [1e9],
     maxTriangleSpanM: 1,
   });
-  assert.equal(tight.coveredTriangles, 0);
+  assert.equal(tight.clippedPieces, 0);
   const loose = buildBandRegions(triangulation, seconds, {
-    bandIndexForSeconds: () => 0,
+    thresholds: [1e9],
     maxTriangleSpanM: 1000,
   });
-  assert.ok(loose.coveredTriangles > 6000);
+  assert.ok(loose.clippedPieces > 6000);
 });
 
 test('ringSignedArea measures a unit square and reverses with its winding', () => {
   assert.equal(ringSignedArea(Float64Array.from([0, 0, 1, 0, 1, 1, 0, 1])), 1);
   assert.equal(ringSignedArea(Float64Array.from([0, 1, 1, 1, 1, 0, 0, 0])), -1);
+});
+
+test('clipping to the band, not assigning whole triangles, removes the speckle', () => {
+  // A smoothly varying field, so a band boundary is a smooth line and there is
+  // nothing for a correct construction to break into specks. Deciding a whole
+  // triangle by the time of its slowest corner flips neighbours back and forth
+  // across a threshold and peppers the fill with single-triangle islands; this
+  // counts what comes out instead.
+  const { points, seconds } = radialLattice();
+  const triangulation = triangulate(points);
+  const result = buildBandRegions(triangulation, seconds, {
+    thresholds: thresholdsEvery(37, 300),
+    maxTriangleSpanM: 30,
+  });
+
+  for (const band of result.bands) {
+    const outers = band.rings.filter((ring) => !ring.isHole);
+    // A concentric field gives exactly one outer boundary per band. Any more
+    // are detached fragments, which is what speckling is.
+    assert.equal(
+      outers.length,
+      1,
+      `band ${band.bandIndex} came out in ${outers.length} pieces`,
+    );
+    assert.ok(band.rings.filter((ring) => ring.isHole).length <= 1);
+  }
+
+  // And the boundary is put where the time reaches the threshold, so a band's
+  // area is the annulus between two circles rather than a staircase near it.
+  const outerArea = (band) => Math.abs(
+    band.rings.filter((r) => !r.isHole).reduce((total, r) => total + r.signedArea, 0),
+  );
+  const first = result.bands[0];
+  assert.ok(Math.abs(outerArea(first) - Math.PI * 37 * 37) / (Math.PI * 37 * 37) < 0.2);
+});
+
+test('a triangle straddling a threshold contributes to both bands', () => {
+  // Two triangles from four points, with the field crossing 50 inside them.
+  const points = Float64Array.from([0, 0, 100, 0, 100, 100, 0, 100]);
+  const seconds = Float64Array.from([0, 100, 100, 0]);
+  const result = buildBandRegions(triangulate(points), seconds, {
+    thresholds: [50, 200],
+    maxTriangleSpanM: 1000,
+  });
+
+  assert.deepEqual(result.bands.map((band) => band.bandIndex), [0, 1]);
+  // Neither band is a whole triangle: both are pieces cut at the 50 line, so
+  // together they cover the square exactly.
+  const area = (band) => Math.abs(
+    band.rings.reduce((total, ring) => total + ring.signedArea, 0),
+  );
+  assert.ok(Math.abs(area(result.bands[0]) + area(result.bands[1]) - 10000) < 1);
+  assert.ok(Math.abs(area(result.bands[0]) - 5000) < 1, `band 0 covers ${area(result.bands[0])}`);
 });

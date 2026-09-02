@@ -815,6 +815,12 @@ test('a monochrome export is the monochrome map, not the colour one', () => {
   // licence obligation and not optional in any rendering.
   assert.ok(svg.includes('id="isochrone-background"'));
   assert.ok(/OpenStreetMap/.test(svg));
+
+  // And the frame is black on white. Its colours normally come from the
+  // interface theme, so a dark-themed browser printed the title, scale bar and
+  // credits in pale blue on white paper.
+  assert.ok(svg.includes('fill="#ffffff"'), 'the sheet is not white');
+  assert.ok(!/#dceaf8|#c0d4e8|#31577a|#c1d6e9/.test(svg), 'dark-theme frame colours leaked in');
 });
 
 test('without monochrome markup the export is unchanged', () => {

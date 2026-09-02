@@ -137,7 +137,15 @@ export function placeContourLabels(points, options = {}) {
     const sliceSpan = points.subarray(from * 2, to * 2);
     const placement = placeContourLabel(sliceSpan, { ...options, requireClosedRing: false });
     if (placement) {
-      placements.push(placement);
+      // The gap indices come back relative to the slice. Left unshifted they
+      // cut the contour somewhere unrelated to the label, which is how lines
+      // came to break where no value was written and values came to sit on
+      // unbroken lines.
+      placements.push({
+        ...placement,
+        gapStartIndex: placement.gapStartIndex + from,
+        gapEndIndex: placement.gapEndIndex + from,
+      });
     }
   }
   return placements;

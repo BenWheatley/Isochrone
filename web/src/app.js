@@ -1707,7 +1707,11 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   // Monochrome is a different drawing entirely - filled hatched bands with
   // labelled contours, not coloured lines - so it takes its own path rather
   // than re-tinting this one, and lands in an SVG layer above the canvas.
-  if (normalizeMapStyle(options.mapStyle) === MAP_STYLE_MONOCHROME) {
+  // Read from the shell unless a caller overrides it. Threading it through
+  // every call site meant any path that forgot silently reverted the map to
+  // colour, which is what happened on the redraw after a print dialog closed.
+  const mapStyle = options.mapStyle ?? getMapStyleFromShell(shell);
+  if (normalizeMapStyle(mapStyle) === MAP_STYLE_MONOCHROME) {
     return renderMonochromeSnapshotToOverlay(shell, mapData, snapshot, {
       ...options,
       allowedModeMask,

@@ -203,11 +203,32 @@ export function buildMonochromeScreenSvg(mapData, snapshot, options = {}) {
   const bandSeconds = (cycleMinutes * 60) / patterns.length;
   const maxBands = options.maxBands ?? 40;
 
+  let longestReachableSeconds = 0;
+  for (let index = 0; index < snapshot.distSeconds.length; index += 1) {
+    const seconds = snapshot.distSeconds[index];
+    if (Number.isFinite(seconds) && seconds > longestReachableSeconds) {
+      longestReachableSeconds = seconds;
+    }
+  }
+  const thresholds = [];
+  for (
+    let seconds = bandSeconds;
+    seconds < longestReachableSeconds + bandSeconds && thresholds.length < maxBands;
+    seconds += bandSeconds
+  ) {
+    thresholds.push(seconds);
+  }
+  if (thresholds.length === 0) {
+    return null;
+  }
+
+  // Below about this many square pixels on the finished map, a pocket is a
+  // speck rather than a feature. Expressed in output pixels and converted, so
+  // it means the same thing on screen and on a poster.
+  const minimumOutputArea = options.minimumRingOutputArea ?? 90;
   const regions = buildBandRegions(triangulation, snapshot.distSeconds, {
-    bandIndexForSeconds: (seconds) => {
-      const bandIndex = Math.floor(seconds / bandSeconds);
-      return bandIndex >= maxBands ? null : bandIndex;
-    },
+    thresholds,
+    minimumRingArea: minimumOutputArea / (frame.effectiveScale * frame.effectiveScale),
     // The limit is a real distance, but the triangulation lives in graph
     // pixels - the space the viewport already works in - so it converts here.
     maxTriangleSpanM: (options.maxTriangleSpanM ?? DEFAULT_MAX_TRIANGLE_SPAN_M)
@@ -226,7 +247,7 @@ export function buildMonochromeScreenSvg(mapData, snapshot, options = {}) {
 
   const bands = regions.bands.map((region, index) => ({
     rings: region.rings,
-    label: formatBandLabel(((region.bandIndex + 1) * bandSeconds) / 60, options.formatMinutes),
+    label: formatBandLabel(thresholds[region.bandIndex] / 60, options.formatMinutes),
     pattern: patterns[region.bandIndex % patterns.length],
     isLimit: index === regions.bands.length - 1,
   }));

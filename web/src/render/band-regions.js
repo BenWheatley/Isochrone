@@ -1,14 +1,23 @@
-// Filled isochrone bands as polygons, straight from the triangulation.
+// Filled isochrone bands as polygons, from the triangulation.
 //
-// A triangle is reachable by the time its slowest corner is, so each triangle
-// falls in exactly one band. Merging the triangles of a band is then purely
-// combinatorial: an edge shared by two triangles of the same band is interior
-// and cancels against its own reverse, and whatever is left is the boundary,
-// already correctly wound. No boolean geometry, no tolerance, no raster.
+// A band is the set of ground whose travel time falls between two thresholds,
+// so each triangle is *clipped* to the bands it overlaps rather than assigned
+// whole to one of them. Assigning whole triangles - by the time of the slowest
+// corner, say - decides a smoothly varying field one triangle at a time, and
+// neighbours flip bands wherever the field crosses a threshold: the fills come
+// out peppered with single-triangle specks. Clipping puts the boundary exactly
+// where the travel time reaches the threshold, so a band edge is a smooth line
+// through the triangles rather than a staircase around them.
 //
-// Holes and disjoint components need no special handling - a park with no
-// paths through it simply has no triangles, and a transit isochrone landing in
-// several places simply produces several rings.
+// Merging the pieces is then combinatorial rather than geometric. Along a
+// shared triangle edge, both triangles cut at the same interpolated point -
+// the same two corner values give the same answer - so their boundary pieces
+// are identical and cancel against each other. Whatever is left is the band's
+// boundary, already correctly wound. No boolean geometry, no tolerance.
+//
+// Holes and disjoint components need no handling at all: a park with no paths
+// simply has no triangles, and an isochrone landing in several places simply
+// produces several rings.
 
 /**
  * How far apart two nodes may be and still have the ground between them
@@ -30,49 +39,184 @@ function longestEdgeSquared(coords, a, b, c) {
   const by = coords[2 * b + 1];
   const cx = coords[2 * c];
   const cy = coords[2 * c + 1];
-  const ab = (ax - bx) ** 2 + (ay - by) ** 2;
-  const bc = (bx - cx) ** 2 + (by - cy) ** 2;
-  const ca = (cx - ax) ** 2 + (cy - ay) ** 2;
-  return Math.max(ab, bc, ca);
+  return Math.max(
+    (ax - bx) ** 2 + (ay - by) ** 2,
+    (bx - cx) ** 2 + (by - cy) ** 2,
+    (cx - ax) ** 2 + (cy - ay) ** 2,
+  );
 }
 
 /**
- * Boundary rings for each band, given a triangulation and a travel time per
- * point.
+ * Vertex identity for the pieces a clip produces.
  *
- * `bandIndexForSeconds` maps a travel time to a band; returning null drops the
- * triangle. Rings come back in the triangulation's own coordinates, so a
- * caller scales them into whatever it is drawing into - which is the whole
- * point of doing this in vector.
+ * A corner of a triangle is itself. A point where a threshold crosses a
+ * triangle edge is fixed by that edge and that threshold, and both triangles
+ * sharing the edge compute it from the same two values - so identifying it by
+ * (edge, threshold) makes their pieces cancel on integer equality, with no
+ * floating-point comparison anywhere in the merge.
+ */
+function createVertexTable(coords, pointCount) {
+  const crossingIds = new Map();
+  const crossingX = [];
+  const crossingY = [];
+
+  return {
+    cornerKey(pointIndex) {
+      return pointIndex;
+    },
+    crossingKey(a, b, thresholdIndex, thresholdSeconds, secondsAt) {
+      const low = a < b ? a : b;
+      const high = a < b ? b : a;
+      const edgeKey = low * pointCount + high;
+      const key = `${edgeKey}:${thresholdIndex}`;
+      const existing = crossingIds.get(key);
+      if (existing !== undefined) {
+        return existing;
+      }
+      const lowSeconds = secondsAt(low);
+      const highSeconds = secondsAt(high);
+      const span = highSeconds - lowSeconds;
+      const fraction = span === 0 ? 0.5 : (thresholdSeconds - lowSeconds) / span;
+      const clamped = Math.min(1, Math.max(0, fraction));
+      const id = pointCount + crossingX.length;
+      crossingX.push(coords[2 * low] + (coords[2 * high] - coords[2 * low]) * clamped);
+      crossingY.push(coords[2 * low + 1] + (coords[2 * high + 1] - coords[2 * low + 1]) * clamped);
+      crossingIds.set(key, id);
+      return id;
+    },
+    positionOf(key) {
+      if (key < pointCount) {
+        return [coords[2 * key], coords[2 * key + 1]];
+      }
+      const index = key - pointCount;
+      return [crossingX[index], crossingY[index]];
+    },
+  };
+}
+
+/**
+ * Clips a polygon, whose vertices carry a travel time, against one half-plane
+ * in value space: keep where `inside` says so, and cut on the threshold.
+ */
+function clipToValue(polygon, thresholdSeconds, thresholdIndex, keepBelow, vertices) {
+  const output = [];
+  const count = polygon.length;
+  for (let index = 0; index < count; index += 1) {
+    const current = polygon[index];
+    const next = polygon[(index + 1) % count];
+    const currentInside = keepBelow
+      ? current.seconds <= thresholdSeconds
+      : current.seconds >= thresholdSeconds;
+    const nextInside = keepBelow
+      ? next.seconds <= thresholdSeconds
+      : next.seconds >= thresholdSeconds;
+    if (currentInside) {
+      output.push(current);
+    }
+    if (currentInside !== nextInside) {
+      // The cut lands on a triangle edge only when both ends are corners; a
+      // cut against a previous threshold has already produced a point, and
+      // cutting it again would be cutting a straight line at its own value.
+      if (current.pointIndex !== null && next.pointIndex !== null) {
+        const key = vertices.crossingKey(
+          current.pointIndex,
+          next.pointIndex,
+          thresholdIndex,
+          thresholdSeconds,
+          (pointIndex) => (pointIndex === current.pointIndex ? current.seconds : next.seconds),
+        );
+        output.push({ key, pointIndex: null, seconds: thresholdSeconds });
+      } else {
+        const span = next.seconds - current.seconds;
+        const fraction = span === 0 ? 0.5 : (thresholdSeconds - current.seconds) / span;
+        output.push({
+          key: null,
+          pointIndex: null,
+          seconds: thresholdSeconds,
+          interpolated: { from: current, to: next, fraction },
+        });
+      }
+    }
+  }
+  return output;
+}
+
+/**
+ * Boundary rings per band, given a triangulation and a travel time per point.
+ *
+ * `thresholds` are the bands' upper bounds in seconds, ascending. Rings come
+ * back in the triangulation's own coordinates, so a caller scales them into
+ * whatever it is drawing into - which is the point of doing this in vector.
  */
 export function buildBandRegions(triangulation, distSeconds, options = {}) {
   const { triangles, coords } = triangulation;
-  const bandIndexForSeconds = options.bandIndexForSeconds;
-  if (typeof bandIndexForSeconds !== 'function') {
-    throw new Error('options.bandIndexForSeconds must be a function');
+  const thresholds = options.thresholds;
+  if (!Array.isArray(thresholds) || thresholds.length === 0) {
+    throw new Error('options.thresholds must be a non-empty ascending array of seconds');
   }
   const maxSpanM = options.maxTriangleSpanM ?? DEFAULT_MAX_TRIANGLE_SPAN_M;
+  // Generalisation, not smoothing. The small pockets that survive clipping are
+  // real - a cul-de-sac's far end is minutes away along the road and metres
+  // away across the grass, so its interior genuinely falls in the next band -
+  // but a map does not draw a feature too small to read, and hundreds of them
+  // register as noise rather than as information. Dropping a tiny outer ring
+  // loses the pocket; dropping a tiny hole fills it. Both say the same thing:
+  // below this size the distinction is not being drawn.
+  const minimumRingArea = options.minimumRingArea ?? 0;
   const maxSpanSquared = maxSpanM * maxSpanM;
   const pointCount = coords.length >> 1;
+  const vertices = createVertexTable(coords, pointCount);
 
-  // Directed edges per band. An interior edge meets its own reverse from the
-  // neighbouring triangle and both disappear; a boundary edge is left alone.
   const edgesByBand = new Map();
+  const interpolatedPoints = [];
+  const resolveKey = (vertex) => {
+    if (vertex.key !== null) {
+      return vertex.key;
+    }
+    // A cut across an already-cut edge. It belongs to one triangle alone, so
+    // it needs no shared identity - only a unique one.
+    const [fromX, fromY] = vertices.positionOf(vertex.interpolated.from.key);
+    const [toX, toY] = vertices.positionOf(vertex.interpolated.to.key);
+    const id = -1 - interpolatedPoints.length / 2;
+    interpolatedPoints.push(
+      fromX + (toX - fromX) * vertex.interpolated.fraction,
+      fromY + (toY - fromY) * vertex.interpolated.fraction,
+    );
+    vertex.key = id;
+    return id;
+  };
+  const positionOf = (key) => (key < 0
+    ? [interpolatedPoints[(-1 - key) * 2], interpolatedPoints[(-1 - key) * 2 + 1]]
+    : vertices.positionOf(key));
+
   const addEdge = (bandIndex, from, to) => {
+    if (from === to) {
+      return;
+    }
     let edges = edgesByBand.get(bandIndex);
     if (edges === undefined) {
       edges = new Map();
       edgesByBand.set(bandIndex, edges);
     }
-    const reverseKey = to * pointCount + from;
+    const reverseKey = `${to}|${from}`;
     if (edges.has(reverseKey)) {
       edges.delete(reverseKey);
       return;
     }
-    edges.set(from * pointCount + to, to);
+    edges.set(`${from}|${to}`, [from, to]);
   };
 
-  let coveredTriangles = 0;
+  const bandIndexOf = (seconds) => {
+    let low = 0;
+    let high = thresholds.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (thresholds[mid] <= seconds) low = mid + 1; else high = mid;
+    }
+    return low;
+  };
+
+  let clippedPieces = 0;
   let spannedTriangles = 0;
   for (let t = 0; t < triangles.length; t += 3) {
     const a = triangles[t];
@@ -88,69 +232,83 @@ export function buildBandRegions(triangulation, distSeconds, options = {}) {
       spannedTriangles += 1;
       continue;
     }
-    // The slowest corner: the ground inside a triangle is not all reachable
-    // before every corner of it is.
-    const bandIndex = bandIndexForSeconds(Math.max(ta, tb, tc));
-    if (bandIndex === null || bandIndex === undefined) {
+
+    const lowestBand = bandIndexOf(Math.min(ta, tb, tc));
+    const highestBand = bandIndexOf(Math.max(ta, tb, tc));
+    if (lowestBand >= thresholds.length) {
       continue;
     }
-    coveredTriangles += 1;
-    addEdge(bandIndex, a, b);
-    addEdge(bandIndex, b, c);
-    addEdge(bandIndex, c, a);
+
+    const corners = [
+      { key: vertices.cornerKey(a), pointIndex: a, seconds: ta },
+      { key: vertices.cornerKey(b), pointIndex: b, seconds: tb },
+      { key: vertices.cornerKey(c), pointIndex: c, seconds: tc },
+    ];
+
+    for (
+      let bandIndex = lowestBand;
+      bandIndex <= Math.min(highestBand, thresholds.length - 1);
+      bandIndex += 1
+    ) {
+      let polygon = corners;
+      if (bandIndex > 0) {
+        polygon = clipToValue(polygon, thresholds[bandIndex - 1], bandIndex - 1, false, vertices);
+        if (polygon.length < 3) continue;
+      }
+      polygon = clipToValue(polygon, thresholds[bandIndex], bandIndex, true, vertices);
+      if (polygon.length < 3) continue;
+
+      clippedPieces += 1;
+      const keys = polygon.map(resolveKey);
+      for (let index = 0; index < keys.length; index += 1) {
+        addEdge(bandIndex, keys[index], keys[(index + 1) % keys.length]);
+      }
+    }
   }
 
   const bands = [];
   for (const [bandIndex, edges] of [...edgesByBand.entries()].sort((x, y) => x[0] - y[0])) {
-    bands.push({ bandIndex, rings: stitchRings(edges, coords, pointCount) });
+    const rings = stitchRings(edges, positionOf, minimumRingArea);
+    if (rings.length > 0) {
+      bands.push({ bandIndex, rings });
+    }
   }
-  return { bands, coveredTriangles, spannedTriangles, maxTriangleSpanM: maxSpanM };
+  return { bands, clippedPieces, spannedTriangles, maxTriangleSpanM: maxSpanM };
 }
 
-function stitchRings(edges, coords, pointCount) {
-  // Several boundary edges can leave one vertex where a region pinches, so the
-  // walk consumes edges rather than assuming one successor per point.
+function stitchRings(edges, positionOf, minimumRingArea) {
   const outgoing = new Map();
-  for (const key of edges.keys()) {
-    const from = Math.floor(key / pointCount);
-    const to = key % pointCount;
+  for (const [from, to] of edges.values()) {
     const list = outgoing.get(from);
-    if (list === undefined) {
-      outgoing.set(from, [to]);
-    } else {
-      list.push(to);
-    }
+    if (list === undefined) outgoing.set(from, [to]); else list.push(to);
   }
 
   const rings = [];
-  for (const startPoint of outgoing.keys()) {
+  for (const startKey of outgoing.keys()) {
     for (;;) {
-      const firstList = outgoing.get(startPoint);
-      if (firstList === undefined || firstList.length === 0) {
-        break;
-      }
+      const first = outgoing.get(startKey);
+      if (first === undefined || first.length === 0) break;
       const points = [];
-      let current = startPoint;
+      let current = startKey;
       for (;;) {
         const list = outgoing.get(current);
-        if (list === undefined || list.length === 0) {
-          break;
-        }
+        if (list === undefined || list.length === 0) break;
         const next = list.pop();
-        points.push(coords[2 * current], coords[2 * current + 1]);
+        const [x, y] = positionOf(current);
+        points.push(x, y);
         current = next;
-        if (current === startPoint) {
-          break;
-        }
+        if (current === startKey) break;
       }
       if (points.length >= 6) {
         const ringPoints = Float64Array.from(points);
         const signedArea = ringSignedArea(ringPoints);
+        if (Math.abs(signedArea) < minimumRingArea) {
+          continue;
+        }
         // The triangulation winds clockwise in these coordinates, so a band's
-        // outer boundary comes out negative and the hole it leaves for the
-        // band inside it comes out positive. Each band is therefore already a
-        // complete annulus - outer plus holes, oppositely wound - and fills
-        // correctly under either fill rule with nothing added.
+        // outer boundary comes out negative and a hole positive. Each band is
+        // therefore a finished annulus and fills correctly under either fill
+        // rule with nothing added to it.
         rings.push({ points: ringPoints, signedArea, isHole: signedArea > 0 });
       }
     }
