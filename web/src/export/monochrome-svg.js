@@ -43,8 +43,11 @@ export function buildHatchPatternDefs(patterns, options = {}) {
     definitions.push(
       `<pattern id="${pattern.id}" patternUnits="userSpaceOnUse"`
       + ` width="${formatSvgNumber(tile)}" height="${formatSvgNumber(tile)}">`
-      + `<g stroke="${ink}" stroke-width="${formatSvgNumber(strokeWidth)}"`
-      + ' shape-rendering="crispEdges">'
+      // No shape-rendering="crispEdges": it snaps a stroke to the pixel grid,
+      // and anything under a pixel snaps to nothing. Patterns keep their
+      // strokes at a full unit and vary the spacing instead, so a line is
+      // always drawn and still survives being thresholded to one bit.
+      + `<g stroke="${ink}" stroke-width="${formatSvgNumber(strokeWidth)}">`
       + strokes
       + '</g></pattern>',
     );
@@ -297,14 +300,15 @@ export function buildMonochromeIsochroneSvg(scene) {
   const contourWidth = scene.contourStrokeWidth ?? 0.8;
 
   const basemap = scene.basemap ?? {};
-  const patterns = [...new Map(bands.map((band) => [band.pattern.id, band.pattern])).values()];
-  if (basemap.waterFeatures?.length) {
-    patterns.push(WATER_HATCH_PATTERN);
-  }
+  const bandPatterns = [...new Map(bands.map((band) => [band.pattern.id, band.pattern])).values()];
+  // The sea's ruling keeps its own pitch: scaling it with the bands would put
+  // it back in competition with them, which is exactly what it must not do.
+  const waterPatterns = basemap.waterFeatures?.length ? [WATER_HATCH_PATTERN] : [];
   const parts = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${widthPx}" height="${heightPx}"`
     + ` viewBox="0 0 ${widthPx} ${heightPx}">`,
-    `<defs>${buildHatchPatternDefs(patterns, { ink, patternScale: scene.patternScale ?? 1 })}</defs>`,
+    `<defs>${buildHatchPatternDefs(bandPatterns, { ink, patternScale: scene.patternScale ?? 1 })}`
+    + `${buildHatchPatternDefs(waterPatterns, { ink, patternScale: 1 })}</defs>`,
     `<rect width="${widthPx}" height="${heightPx}" fill="${paper}" />`,
   ];
 
@@ -417,9 +421,14 @@ export function buildMonochromeIsochroneSvg(scene) {
       const pathData = gap
         ? ringPathWithGap(ring.points, transform, gap)
         : ringToPathData(ring.points, transform);
+      // The outermost contour is not just another band edge, it is the limit
+      // of travel - and it needs to look like one. A bare-paper band inside it
+      // is otherwise the same white as the ground nobody can reach at all, and
+      // only this line says which side of it the reader is on.
+      const strokeWidth = band.isLimit ? contourWidth * 2.2 : contourWidth;
       parts.push(
         `<path d="${pathData}" fill="none" stroke="${ink}"`
-        + ` stroke-width="${contourWidth}" stroke-linejoin="round" />`,
+        + ` stroke-width="${formatSvgNumber(strokeWidth)}" stroke-linejoin="round" />`,
       );
       for (const placement of placed) {
         labels.push(renderHaloedLabel(placement, band.label, {
@@ -476,13 +485,34 @@ function buildLegendMarkup(bands, { widthPx, heightPx, ink, paper, fontSize, sce
       + ' dominant-baseline="central">'
       + `${escapeXmlText(band.label)}</text>`;
   }).join('');
+  // Inside the box, on its own paper. Floating above it, the caption sat
+  // straight on the map and was unreadable over the sea's ruling.
+  const captionHeight = scene.legendCaption ? fontSize * 1.8 : 0;
+  const totalHeight = boxHeight + captionHeight;
+  const boxTop = heightPx - totalHeight - 12;
   const caption = scene.legendCaption
-    ? `<text x="${left + 5}" y="${formatSvgNumber(top - 6)}" font-family="${LABEL_FONT_FAMILY}"`
-      + ` font-size="${fontSize}" fill="${ink}">${escapeXmlText(scene.legendCaption)}</text>`
+    ? `<text x="${left + 5}" y="${formatSvgNumber(boxTop + fontSize * 1.1)}"`
+      + ` font-family="${LABEL_FONT_FAMILY}" font-size="${fontSize}" fill="${ink}">`
+      + `${escapeXmlText(scene.legendCaption)}</text>`
     : '';
-  return `<g><rect x="${left}" y="${formatSvgNumber(top)}" width="${formatSvgNumber(boxWidth)}"`
-    + ` height="${formatSvgNumber(boxHeight)}" fill="${paper}" stroke="${ink}"`
-    + ' stroke-width="0.7" />' + rows + '</g>' + caption;
+  const rowsShifted = cycle.map((band, index) => {
+    const y = boxTop + captionHeight + 5 + index * rowHeight;
+    const fill = band.pattern.lines.length === 0 ? paper : `url(#${band.pattern.id})`;
+    return `<rect x="${left + 5}" y="${formatSvgNumber(y)}" width="${swatch}"`
+      + ` height="${swatch}" fill="${fill}" stroke="${ink}" stroke-width="0.7" />`
+      + `<text x="${left + 5 + swatch + 8}" y="${formatSvgNumber(y + swatch / 2)}"`
+      + ` font-family="${LABEL_FONT_FAMILY}" font-size="${fontSize}" fill="${ink}"`
+      + ' dominant-baseline="central">'
+      + `${escapeXmlText(band.label)}</text>`;
+  }).join('');
+  void rows;
+  const captionWidth = scene.legendCaption
+    ? scene.legendCaption.length * fontSize * LABEL_WIDTH_PER_CHARACTER + 16
+    : 0;
+  return `<g><rect x="${left}" y="${formatSvgNumber(boxTop)}"`
+    + ` width="${formatSvgNumber(Math.max(boxWidth, captionWidth))}"`
+    + ` height="${formatSvgNumber(totalHeight)}" fill="${paper}" stroke="${ink}"`
+    + ' stroke-width="0.7" />' + caption + rowsShifted + '</g>';
 }
 
 /** Legend rows showing the actual hatch, not a grey approximation of it. */

@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   DEFAULT_HATCH_PATTERN_COUNT,
+  MINIMUM_PATTERN_STROKE_WIDTH,
   WATER_HATCH_PATTERN,
   HATCH_PATTERN_LADDER,
   MAX_HATCH_PATTERN_COUNT,
@@ -262,4 +263,43 @@ test('the basemap goes under the bands, and its islands stay dry', () => {
   assert.ok(waterPath, 'no water path was emitted');
   assert.equal((waterPath[1].match(/M/g) ?? []).length, 2);
   assert.ok(svg.slice(waterIndex, waterIndex + 80).includes('evenodd'));
+});
+
+test('no pattern is drawn with a stroke thin enough to disappear', () => {
+  // A sub-pixel stroke is not a lighter line, it is a line that may not be
+  // drawn: the sea's ruling vanished outright at 0.45 units, snapped away by
+  // the renderer. Tone comes from the spacing between strokes instead, which
+  // is also what survives being thresholded to one bit.
+  for (const pattern of [...HATCH_PATTERN_LADDER, WATER_HATCH_PATTERN]) {
+    if (pattern.lines.length === 0) {
+      assert.equal(pattern.strokeWidth, 0, `${pattern.id} has strokes but claims none`);
+      continue;
+    }
+    assert.ok(
+      pattern.strokeWidth >= MINIMUM_PATTERN_STROKE_WIDTH,
+      `${pattern.id} strokes at ${pattern.strokeWidth}, under the minimum`,
+    );
+  }
+  // And nothing pins them to the pixel grid, which is how the thin one came to
+  // be snapped away in the first place.
+  assert.ok(!buildHatchPatternDefs([WATER_HATCH_PATTERN]).includes('crispEdges'));
+});
+
+test('the sea is ruled more finely than any band, and never at their angle', () => {
+  const bandCoverage = HATCH_PATTERN_LADDER
+    .filter((pattern) => pattern.lines.length > 0)
+    .map((pattern) => patternCoverageRatio(pattern, 120));
+  const water = patternCoverageRatio(WATER_HATCH_PATTERN, 200);
+  assert.ok(water < Math.min(...bandCoverage), 'the sea competes with the lightest band');
+
+  // Horizontal, where every band runs at 45 degrees, so the sea cannot be read
+  // as a time band - and in particular not as the bare-paper one.
+  for (const line of WATER_HATCH_PATTERN.lines) {
+    assert.equal(line.y1, line.y2, 'the water ruling is not horizontal');
+  }
+  for (const pattern of HATCH_PATTERN_LADDER) {
+    for (const line of pattern.lines) {
+      assert.notEqual(line.y1, line.y2, `${pattern.id} has a horizontal stroke`);
+    }
+  }
 });

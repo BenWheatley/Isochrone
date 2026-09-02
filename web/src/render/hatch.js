@@ -63,10 +63,26 @@ export const HATCH_PATTERN_LADDER = [
  */
 export const WATER_HATCH_PATTERN = {
   id: 'mono-water',
-  tileSize: 7,
-  strokeWidth: 0.6,
-  lines: [{ x1: -7, y1: 3.5, x2: 14, y2: 3.5 }],
+  // Finer than any time band. Ruling the sea at the same pitch as a hatch
+  // makes it compete with the isochrone for attention, and against a coastline
+  // this coarse - Portsmouth's whole harbour is 548 points - a wide pitch also
+  // leaves the shore looking like a staircase, because each ruled line stops
+  // at a different place along it.
+  tileSize: 9,
+  strokeWidth: 1,
+  lines: [{ x1: -9, y1: 4.5, x2: 18, y2: 4.5 }],
 };
+
+/**
+ * Every stroke in every pattern is at least this wide, and tone is set by the
+ * spacing between strokes rather than by thinning them.
+ *
+ * A sub-pixel stroke is not a lighter line, it is a line that may not be there
+ * at all: at 0.45 units the sea's ruling vanished outright, snapped away by
+ * the renderer. The same width is also what survives being thresholded to one
+ * bit, which is the output this whole mode exists for.
+ */
+export const MINIMUM_PATTERN_STROKE_WIDTH = 1;
 
 export const MIN_HATCH_PATTERN_COUNT = 2;
 export const MAX_HATCH_PATTERN_COUNT = HATCH_PATTERN_LADDER.length;
