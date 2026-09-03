@@ -496,33 +496,9 @@ export function buildMonochromeIsochroneSvg(scene) {
   // A solid hairline between bands. At one bit, adjacent hatches moire into
   // one another without a separating line, and the line is also what a label
   // sits on.
+  // Collected rather than pushed inline, so every label lands on top of every
+  // contour instead of only the ones already written.
   const labels = [];
-  // Where a label has already been written, so a later one does not land on
-  // top of it. Contours crowd together wherever the gradient is steep, which
-  // is exactly where several rings would otherwise all want to be labelled in
-  // the same few square centimetres.
-  const claimedBoxes = [];
-  const claim = (label, text) => {
-    const halfWidth = (text.length * fontSize * LABEL_WIDTH_PER_CHARACTER) / 2 + fontSize * 0.4;
-    const halfHeight = fontSize * 0.9;
-    const box = {
-      left: label.x - halfWidth,
-      right: label.x + halfWidth,
-      top: label.y - halfHeight,
-      bottom: label.y + halfHeight,
-    };
-    const collides = claimedBoxes.some((other) =>
-      box.left < other.right
-      && box.right > other.left
-      && box.top < other.bottom
-      && box.bottom > other.top);
-    if (collides) {
-      return false;
-    }
-    claimedBoxes.push(box);
-    return true;
-  };
-
   const plan = scene.labels
     ? { labels: scene.labels, gaps: scene.labelGaps ?? new Map() }
     : planContourLabels(bands, {

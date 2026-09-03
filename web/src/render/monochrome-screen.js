@@ -40,12 +40,11 @@ const TRIANGULATION_PROPERTY = '__nodeTriangulation';
 // whole network inside a 250px island is a grey wash, not a street map, so at
 // low zoom only the more important roads are drawn.
 //
-// Which roads, chosen by class rather than by thinning the visible set. An
-// earlier version kept every Nth segment with N derived from how many happened
-// to be on screen: panning changed the count, which changed N, which changed
-// *which* roads were drawn, and the whole network shimmered. Class is a
-// property of the road itself, so the same roads are drawn from one frame to
-// the next and zooming only ever adds more.
+// Which roads, chosen by class rather than by thinning the visible set. Class
+// is a property of the road itself, so the same roads are drawn from one frame
+// to the next and zooming only ever adds more; anything derived from how many
+// segments happen to be on screen changes under panning, and the network
+// shimmers.
 //
 // Ids come from adjacency.py: motorway 15, trunk 14, primary 13, secondary 12,
 // tertiary 11, unclassified 10, track 9, cycleway 8, service 7, residential 6,
@@ -242,6 +241,7 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
   const minimumOutputArea = options.minimumRingOutputArea ?? 90;
   const regions = buildBandRegions(triangulation, snapshot.distSeconds, {
     thresholds,
+    collectTriangles: options.collectTriangles === true,
     minimumRingArea: minimumOutputArea / (frame.effectiveScale * frame.effectiveScale),
     // The limit is a real distance, but the triangulation lives in graph
     // pixels - the space the viewport already works in - so it converts here.
@@ -261,6 +261,7 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
 
   const bands = regions.bands.map((region, index) => ({
     rings: region.rings,
+    triangles: region.triangles,
     label: formatBandLabel(thresholds[region.bandIndex] / 60, options.formatMinutes),
     pattern: patterns[region.bandIndex % patterns.length],
     isLimit: index === regions.bands.length - 1,

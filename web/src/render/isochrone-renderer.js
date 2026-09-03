@@ -6,16 +6,14 @@ import {
 import { normalizeIsochroneTheme } from './colour.js';
 import { resolveViewportFrame } from '../core/viewport.js';
 import { clampInt } from '../core/math.js';
-import {
-  syncCanvasToDisplaySize,
-  validatePixelGrid,
-  validateTravelTimeGrid,
-} from './pixel-grid.js';
+import { syncCanvasToDisplaySize, validatePixelGrid } from './pixel-grid.js';
+import { drawMonochromeScene as drawMonochromeSceneCanvas2d } from './monochrome-canvas.js';
+import { createMonochromeWebGlPainter, drawMonochromeSceneWebGl } from './monochrome-webgl.js';
 
 // The isochrone canvas renderers. createIsochroneRenderer picks the WebGL
 // implementation when a context is available and silently falls back to the
 // 2D canvas one, so callers only deal with the shared method set (draw /
-// drawTravelTimeGrid / drawTravelTimeEdges / drawTravelTimeEdgesFromNodeTimes),
+// drawTravelTimeEdges / drawTravelTimeEdgesFromNodeTimes / drawMonochromeScene),
 // each guarded by a `typeof` check at the call site.
 
 // How a Float32Array of edge vertices is packed. The two WebGL edge programs
@@ -41,6 +39,10 @@ export function createCanvas2dIsochroneRenderer(canvas) {
 
   return {
     mode: '2d',
+    drawMonochromeScene(scene) {
+      syncCanvasToDisplaySize(canvas);
+      return drawMonochromeSceneCanvas2d(context, scene);
+    },
     clear(options = {}) {
       syncCanvasToDisplaySize(canvas);
       const targetWidthPx = options.widthPx ?? canvas.width;
@@ -204,7 +206,10 @@ export function createWebGlIsochroneRenderer(canvas, options = {}) {
     alpha: true,
     antialias: true,
     depth: false,
-    stencil: false,
+    // The monochrome water fill masks a polygon with holes through the
+    // stencil buffer, which is exact for any ring set and needs no
+    // tessellation.
+    stencil: true,
     premultipliedAlpha: false,
     preserveDrawingBuffer: false,
     ...options.contextAttributes,
@@ -225,6 +230,9 @@ export function createWebGlIsochroneRenderer(canvas, options = {}) {
 
   const isWebGl2 =
     typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext;
+  // Built on first use: a session that never selects monochrome never compiles
+  // its programs or bakes its glyph atlas.
+  let monochromePainter = null;
   const vertexShaderSource = isWebGl2
     ? `#version 300 es
 in vec2 a_position;
@@ -316,80 +324,6 @@ void main(void) {
     gl.enableVertexAttribArray(positionLocationToBind);
     gl.vertexAttribPointer(positionLocationToBind, 2, gl.FLOAT, false, 0, 0);
   };
-
-  let travelTimeProgram = null;
-  let travelTimePositionLocation = -1;
-  let travelTimeTexture = null;
-  let travelTimeTextureLocation = null;
-  let travelTimeCycleMinutesLocation = null;
-  let travelTimeThemeVariantLocation = null;
-  let travelTimeTextureSizeLocation = null;
-  let travelTimeViewportSizeLocation = null;
-  let travelTimeViewOffsetLocation = null;
-  let travelTimeViewScaleLocation = null;
-
-  if (isWebGl2) {
-    const travelTimeFragmentSource = `#version 300 es
-precision highp float;
-uniform sampler2D u_time_texture;
-uniform float u_cycle_minutes;
-uniform float u_theme_variant;
-uniform vec2 u_texture_size_px;
-uniform vec2 u_viewport_px;
-uniform vec2 u_view_offset_px;
-uniform float u_view_scale;
-in vec2 v_uv;
-out vec4 outColor;
-
-${CYCLE_COLOUR_MAP_GLSL}
-
-void main(void) {
-  vec2 screenPx = vec2(v_uv.x * u_viewport_px.x, (1.0 - v_uv.y) * u_viewport_px.y);
-  vec2 samplePx = u_view_offset_px + screenPx / max(u_view_scale, 1.0);
-  vec2 sampleUv = samplePx / u_texture_size_px;
-  if (sampleUv.x < 0.0 || sampleUv.y < 0.0 || sampleUv.x > 1.0 || sampleUv.y > 1.0) {
-    outColor = vec4(0.0, 0.0, 0.0, 0.0);
-    return;
-  }
-  float seconds = texture(u_time_texture, sampleUv).r;
-  if (seconds < 0.0) {
-    outColor = vec4(0.0, 0.0, 0.0, 0.0);
-    return;
-  }
-  float cycleMinutes = max(u_cycle_minutes, 1.0);
-  float cyclePositionMinutes = mod(seconds / 60.0, cycleMinutes);
-  float cycleRatio = cyclePositionMinutes / cycleMinutes;
-  vec3 rgb = mapCycleColour(cycleRatio, u_theme_variant) / 255.0;
-  outColor = vec4(rgb, 1.0);
-}`;
-
-    travelTimeProgram = createWebGlProgram(gl, vertexShaderSource, travelTimeFragmentSource);
-    travelTimePositionLocation = gl.getAttribLocation(travelTimeProgram, 'a_position');
-    if (travelTimePositionLocation < 0) {
-      gl.deleteProgram(travelTimeProgram);
-      travelTimeProgram = null;
-    } else {
-      travelTimeTexture = gl.createTexture();
-      if (!travelTimeTexture) {
-        gl.deleteProgram(travelTimeProgram);
-        travelTimeProgram = null;
-      } else {
-        gl.bindTexture(gl.TEXTURE_2D, travelTimeTexture);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-        travelTimeTextureLocation = gl.getUniformLocation(travelTimeProgram, 'u_time_texture');
-        travelTimeCycleMinutesLocation = gl.getUniformLocation(travelTimeProgram, 'u_cycle_minutes');
-        travelTimeThemeVariantLocation = gl.getUniformLocation(travelTimeProgram, 'u_theme_variant');
-        travelTimeTextureSizeLocation = gl.getUniformLocation(travelTimeProgram, 'u_texture_size_px');
-        travelTimeViewportSizeLocation = gl.getUniformLocation(travelTimeProgram, 'u_viewport_px');
-        travelTimeViewOffsetLocation = gl.getUniformLocation(travelTimeProgram, 'u_view_offset_px');
-        travelTimeViewScaleLocation = gl.getUniformLocation(travelTimeProgram, 'u_view_scale');
-      }
-    }
-  }
 
   const edgeVertexShaderSource = isWebGl2
     ? `#version 300 es
@@ -1078,68 +1012,16 @@ void main(void) {
     },
   };
 
+  renderer.drawMonochromeScene = function drawMonochromeScene(scene) {
+    syncCanvasToDisplaySize(canvas);
+    if (!monochromePainter) {
+      monochromePainter = createMonochromeWebGlPainter(gl);
+    }
+    return drawMonochromeSceneWebGl(monochromePainter, scene);
+  };
+
   if (!indexedEdgeProgram || !indexedEdgeNodeTimeTexture) {
     delete renderer.drawTravelTimeEdgesFromNodeTimes;
-  }
-
-  if (travelTimeProgram && travelTimeTexture && isWebGl2) {
-    renderer.drawTravelTimeGrid = function drawTravelTimeGrid(travelTimeGrid, options = {}) {
-      validateTravelTimeGrid(travelTimeGrid);
-
-      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
-        canvas.width = travelTimeGrid.widthPx;
-        canvas.height = travelTimeGrid.heightPx;
-      }
-
-      const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
-      const themeVariant = getIsochroneThemeVariant(options.colourTheme ?? 'dark');
-      const viewport = resolveRendererViewport(
-        travelTimeGrid.widthPx,
-        travelTimeGrid.heightPx,
-        options.viewport,
-        options.fitBoundingBoxPx,
-      );
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      bindQuadToProgram(travelTimeProgram, travelTimePositionLocation);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, travelTimeTexture);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.R32F,
-        travelTimeGrid.widthPx,
-        travelTimeGrid.heightPx,
-        0,
-        gl.RED,
-        gl.FLOAT,
-        travelTimeGrid.seconds,
-      );
-      if (travelTimeTextureLocation !== null) {
-        gl.uniform1i(travelTimeTextureLocation, 0);
-      }
-      if (travelTimeTextureSizeLocation !== null) {
-        gl.uniform2f(travelTimeTextureSizeLocation, travelTimeGrid.widthPx, travelTimeGrid.heightPx);
-      }
-      if (travelTimeViewportSizeLocation !== null) {
-        gl.uniform2f(travelTimeViewportSizeLocation, canvas.width, canvas.height);
-      }
-      if (travelTimeViewOffsetLocation !== null) {
-        gl.uniform2f(travelTimeViewOffsetLocation, viewport.offsetXPx, viewport.offsetYPx);
-      }
-      if (travelTimeViewScaleLocation !== null) {
-        gl.uniform1f(travelTimeViewScaleLocation, viewport.effectiveScale);
-      }
-      if (travelTimeCycleMinutesLocation !== null) {
-        gl.uniform1f(travelTimeCycleMinutesLocation, cycleMinutes);
-      }
-      if (travelTimeThemeVariantLocation !== null) {
-        gl.uniform1f(travelTimeThemeVariantLocation, themeVariant);
-      }
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      return null;
-    };
   }
 
   return renderer;
@@ -1241,8 +1123,8 @@ export function createIsochroneRenderer(canvas, options = {}) {
   } catch (error) {
     // The probe succeeded, so this is not a missing-capability problem, and
     // the real canvas is now WebGL-bound with no way back to 2D. Report what
-    // actually broke rather than the 2D context error that used to surface
-    // here and hid it.
+    // actually broke: falling through to the 2D fallback here would only
+    // surface a context error that hides the real failure.
     throw new Error(
       `WebGL renderer initialization failed on the target canvas after probing successfully: ${
         error instanceof Error ? error.message : String(error)

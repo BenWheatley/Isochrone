@@ -182,8 +182,8 @@ export function zoomMapViewportAtCanvasPixel(
  * bounding box, padded), scale=1 instead means "that boundary fits the
  * frame" - minScale/maxScale are untouched, so the zoom-out limit becomes
  * the boundary view itself. Panning is held to the same padded box (see
- * resolvePanBounds); it used to range over the full grid, which let a
- * ferry-widened region scroll far past anything worth looking at.
+ * resolvePanBounds), so a ferry-widened region cannot scroll far past
+ * anything worth looking at.
  */
 function resolveFitScale(graphHeader, frameWidthPx, frameHeightPx, options) {
   const fitBoundingBoxPx = options.fitBoundingBoxPx ?? null;

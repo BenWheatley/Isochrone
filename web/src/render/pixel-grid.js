@@ -46,26 +46,6 @@ export function validatePixelGrid(pixelGrid) {
   }
 }
 
-export function validateTravelTimeGrid(travelTimeGrid) {
-  if (!travelTimeGrid || typeof travelTimeGrid !== 'object') {
-    throw new Error('travelTimeGrid must be an object');
-  }
-  if (!Number.isInteger(travelTimeGrid.widthPx) || travelTimeGrid.widthPx <= 0) {
-    throw new Error('travelTimeGrid.widthPx must be a positive integer');
-  }
-  if (!Number.isInteger(travelTimeGrid.heightPx) || travelTimeGrid.heightPx <= 0) {
-    throw new Error('travelTimeGrid.heightPx must be a positive integer');
-  }
-  if (!(travelTimeGrid.seconds instanceof Float32Array)) {
-    throw new Error('travelTimeGrid.seconds must be a Float32Array');
-  }
-  const expectedLength = travelTimeGrid.widthPx * travelTimeGrid.heightPx;
-  if (travelTimeGrid.seconds.length !== expectedLength) {
-    throw new Error(
-      `travelTimeGrid.seconds length mismatch: got ${travelTimeGrid.seconds.length}, expected ${expectedLength}`,
-    );
-  }
-}
 
 // Render grids are sized to what can actually be shown, not to the routing
 // graph. Those differ wildly: a region whose ferries reach another country has
@@ -200,50 +180,4 @@ export function setPixel(pixelGrid, xPx, yPx, r, g, b, a) {
   pixelGrid.rgba[offset + 2] = b;
   pixelGrid.rgba[offset + 3] = a;
   return true;
-}
-
-export function createTravelTimeGrid(widthPx, heightPx, options = {}) {
-  if (!Number.isInteger(widthPx) || widthPx <= 0) {
-    throw new Error('travel time grid width must be a positive integer');
-  }
-  if (!Number.isInteger(heightPx) || heightPx <= 0) {
-    throw new Error('travel time grid height must be a positive integer');
-  }
-
-  return {
-    widthPx,
-    heightPx,
-    ...normalizeGridOrigin(options),
-    seconds: new Float32Array(widthPx * heightPx),
-  };
-}
-
-export function clearTravelTimeGrid(travelTimeGrid) {
-  validateTravelTimeGrid(travelTimeGrid);
-  travelTimeGrid.seconds.fill(-1);
-}
-
-export function setTravelTimePixelMin(travelTimeGrid, xPx, yPx, seconds) {
-  validateTravelTimeGrid(travelTimeGrid);
-  if (!Number.isFinite(seconds) || seconds < 0) {
-    return false;
-  }
-  const localX = xPx - (travelTimeGrid.originXPx ?? 0);
-  const localY = yPx - (travelTimeGrid.originYPx ?? 0);
-  if (
-    localX < 0
-    || localY < 0
-    || localX >= travelTimeGrid.widthPx
-    || localY >= travelTimeGrid.heightPx
-  ) {
-    return false;
-  }
-
-  const offset = localY * travelTimeGrid.widthPx + localX;
-  const currentSeconds = travelTimeGrid.seconds[offset];
-  if (currentSeconds < 0 || seconds < currentSeconds) {
-    travelTimeGrid.seconds[offset] = seconds;
-    return true;
-  }
-  return false;
 }

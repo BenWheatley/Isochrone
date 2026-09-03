@@ -22,7 +22,7 @@ import { createWebGlProgram } from './isochrone-renderer.js';
 
 const FILL_VERTEX_SOURCE = `
 attribute vec2 a_position;
-uniform vec2 u_viewportPx;
+uniform highp vec2 u_viewportPx;
 void main(void) {
   vec2 clip = (a_position / u_viewportPx) * 2.0 - 1.0;
   gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
@@ -34,8 +34,8 @@ void main(void) {
 const FILL_FRAGMENT_SOURCE = `
 precision mediump float;
 uniform sampler2D u_tile;
-uniform vec2 u_tileSizePx;
-uniform vec2 u_viewportPx;
+uniform highp vec2 u_tileSizePx;
+uniform highp vec2 u_viewportPx;
 uniform vec4 u_ink;
 void main(void) {
   vec2 screen = vec2(gl_FragCoord.x, u_viewportPx.y - gl_FragCoord.y);
@@ -57,7 +57,7 @@ void main(void) {
 const GLYPH_VERTEX_SOURCE = `
 attribute vec2 a_position;
 attribute vec2 a_uv;
-uniform vec2 u_viewportPx;
+uniform highp vec2 u_viewportPx;
 varying vec2 v_uv;
 void main(void) {
   v_uv = a_uv;
@@ -365,6 +365,7 @@ export function drawMonochromeSceneWebGl(state, scene) {
   // way a screen tint prints over it.
   const basemap = scene.basemap ?? {};
   if (scene.waterPattern && basemap.waterFeatures?.length) {
+    fillWaterThroughStencil(state, scene, viewport);
     const outline = [];
     for (const feature of basemap.waterFeatures) {
       for (const path of feature.paths) {
@@ -439,6 +440,69 @@ export function drawMonochromeSceneWebGl(state, scene) {
 
   drawSceneLabels(state, scene, viewport, ink, paper);
   return drawnBands;
+}
+
+/**
+ * Fills the sea with its ruling, holes and all.
+ *
+ * A coastline is one polygon per feature: an outer ring with each island taken
+ * out of it. Nothing on the GPU fills that directly, so the rings are drawn as
+ * fans into the stencil buffer with INVERT - which leaves exactly an even-odd
+ * mask, islands excluded - and the hatch is painted through it by a single
+ * quad covering the view.
+ */
+function fillWaterThroughStencil(state, scene, viewport) {
+  const { gl, fill } = state;
+  const tile = getOrCreateTileTexture(state, scene.waterPattern, scene.patternScale, scene.waterInk ?? scene.ink);
+  if (!tile) {
+    return;
+  }
+  const fans = [];
+  for (const feature of scene.basemap.waterFeatures) {
+    for (const path of feature.paths) {
+      if (path.length < 3) {
+        continue;
+      }
+      const [originX, originY] = scene.transform(path[0][0], path[0][1]);
+      for (let index = 1; index + 1 < path.length; index += 1) {
+        const [x1, y1] = scene.transform(path[index][0], path[index][1]);
+        const [x2, y2] = scene.transform(path[index + 1][0], path[index + 1][1]);
+        fans.push(originX, originY, x1, y1, x2, y2);
+      }
+    }
+  }
+  if (fans.length < 6) {
+    return;
+  }
+
+  gl.enable(gl.STENCIL_TEST);
+  gl.clearStencil(0);
+  gl.clear(gl.STENCIL_BUFFER_BIT);
+  gl.colorMask(false, false, false, false);
+  gl.stencilFunc(gl.ALWAYS, 0, 1);
+  gl.stencilOp(gl.KEEP, gl.KEEP, gl.INVERT);
+  drawTriangles(state, Float32Array.from(fans), [0, 0, 0, 1], viewport);
+
+  gl.colorMask(true, true, true, true);
+  gl.stencilFunc(gl.EQUAL, 1, 1);
+  gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+  const quad = Float32Array.of(
+    0, 0, viewport[0], 0, viewport[0], viewport[1],
+    0, 0, viewport[0], viewport[1], 0, viewport[1],
+  );
+  gl.useProgram(fill.program);
+  gl.bindBuffer(gl.ARRAY_BUFFER, state.buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, quad, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(fill.position);
+  gl.vertexAttribPointer(fill.position, 2, gl.FLOAT, false, 0, 0);
+  gl.uniform2f(fill.viewport, viewport[0], viewport[1]);
+  gl.uniform2f(fill.tileSize, tile.sizePx, tile.sizePx);
+  gl.uniform4fv(fill.ink, parseCssColour(scene.waterInk ?? scene.ink));
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, tile.texture);
+  gl.uniform1i(fill.tile, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  gl.disable(gl.STENCIL_TEST);
 }
 
 function drawSceneLabels(state, scene, viewport, ink, paper) {

@@ -13,12 +13,7 @@ import {
   validateNodePixels,
   validateSettledBatch,
 } from '../core/routing-validation.js';
-import {
-  setPixel,
-  setTravelTimePixelMin,
-  validatePixelGrid,
-  validateTravelTimeGrid,
-} from './pixel-grid.js';
+import { setPixel, validatePixelGrid } from './pixel-grid.js';
 
 // Rasterising the travel-time field along graph edges.
 //
@@ -177,49 +172,6 @@ export function paintInterpolatedEdgeToGrid(
   return paintedCount;
 }
 
-export function paintInterpolatedEdgeTravelTimesToGrid(
-  travelTimeGrid,
-  x0,
-  y0,
-  startSeconds,
-  x1,
-  y1,
-  endSeconds,
-  options = {},
-) {
-  validateTravelTimeGrid(travelTimeGrid);
-
-  const stepStride = options.stepStride ?? 1;
-  if (!Number.isInteger(stepStride) || stepStride <= 0) {
-    throw new Error('stepStride must be a positive integer');
-  }
-  const startX = Math.round(x0);
-  const startY = Math.round(y0);
-  const endX = Math.round(x1);
-  const endY = Math.round(y1);
-  const totalSteps = Math.max(Math.abs(endX - startX), Math.abs(endY - startY));
-  let paintedCount = 0;
-  let stepIndex = 0;
-
-  rasterizeLinePixels(x0, y0, x1, y1, (xPx, yPx) => {
-    if (stepIndex % stepStride !== 0 && stepIndex !== totalSteps) {
-      stepIndex += 1;
-      return;
-    }
-    const seconds = interpolateEdgeTravelSeconds(
-      startSeconds,
-      endSeconds,
-      stepIndex,
-      totalSteps,
-    );
-    if (setTravelTimePixelMin(travelTimeGrid, xPx, yPx, seconds)) {
-      paintedCount += 1;
-    }
-    stepIndex += 1;
-  });
-
-  return paintedCount;
-}
 
 export function paintReachableNodesToGrid(pixelGrid, nodePixels, distSeconds, options = {}) {
   validatePixelGrid(pixelGrid);
@@ -248,24 +200,6 @@ export function paintReachableNodesToGrid(pixelGrid, nodePixels, distSeconds, op
   return paintedCount;
 }
 
-export function paintReachableNodesTravelTimesToGrid(travelTimeGrid, nodePixels, distSeconds) {
-  validateTravelTimeGrid(travelTimeGrid);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-
-  let paintedCount = 0;
-  for (let nodeIndex = 0; nodeIndex < nodePixels.nodePixelX.length; nodeIndex += 1) {
-    if (distSeconds[nodeIndex] < Infinity) {
-      const xPx = nodePixels.nodePixelX[nodeIndex];
-      const yPx = nodePixels.nodePixelY[nodeIndex];
-      if (setTravelTimePixelMin(travelTimeGrid, xPx, yPx, distSeconds[nodeIndex])) {
-        paintedCount += 1;
-      }
-    }
-  }
-
-  return paintedCount;
-}
 
 export function forEachEligibleOutgoingEdgeFromSourceNode(
   graph,
@@ -382,38 +316,6 @@ export function paintEligibleOutgoingEdgesFromSourceNode(
   );
 }
 
-export function paintEligibleOutgoingEdgesFromSourceNodeToTravelTimeGrid(
-  travelTimeGrid,
-  graph,
-  nodePixels,
-  distSeconds,
-  sourceNodeIndex,
-  allowedModeMask,
-  edgeSlackSeconds,
-  stepStride,
-  edgeTraversalCostSeconds,
-) {
-  return forEachEligibleOutgoingEdgeFromSourceNode(
-    graph,
-    nodePixels,
-    distSeconds,
-    sourceNodeIndex,
-    allowedModeMask,
-    edgeSlackSeconds,
-    edgeTraversalCostSeconds,
-    (x0, y0, startSeconds, x1, y1, expectedTargetSeconds) =>
-      paintInterpolatedEdgeTravelTimesToGrid(
-        travelTimeGrid,
-        x0,
-        y0,
-        startSeconds,
-        x1,
-        y1,
-        expectedTargetSeconds,
-        { stepStride },
-      ),
-  );
-}
 
 export function paintSettledBatchToGrid(pixelGrid, nodePixels, distSeconds, settledBatch, options = {}) {
   validatePixelGrid(pixelGrid);
@@ -448,33 +350,6 @@ export function paintSettledBatchToGrid(pixelGrid, nodePixels, distSeconds, sett
   return paintedCount;
 }
 
-export function paintSettledBatchTravelTimesToGrid(
-  travelTimeGrid,
-  nodePixels,
-  distSeconds,
-  settledBatch,
-) {
-  validateTravelTimeGrid(travelTimeGrid);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  validateSettledBatch(settledBatch);
-
-  let paintedCount = 0;
-  for (const nodeIndex of settledBatch) {
-    if (nodeIndex < 0 || nodeIndex >= nodePixels.nodePixelX.length) {
-      continue;
-    }
-    if (!(distSeconds[nodeIndex] < Infinity)) {
-      continue;
-    }
-    const xPx = nodePixels.nodePixelX[nodeIndex];
-    const yPx = nodePixels.nodePixelY[nodeIndex];
-    if (setTravelTimePixelMin(travelTimeGrid, xPx, yPx, distSeconds[nodeIndex])) {
-      paintedCount += 1;
-    }
-  }
-  return paintedCount;
-}
 
 export function paintSettledBatchEdgeInterpolationsToGrid(
   pixelGrid,
@@ -521,42 +396,6 @@ export function paintSettledBatchEdgeInterpolationsToGrid(
   return paintedCount;
 }
 
-export function paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
-  travelTimeGrid,
-  graph,
-  nodePixels,
-  distSeconds,
-  settledBatch,
-  allowedModeMask,
-  options = {},
-) {
-  validateTravelTimeGrid(travelTimeGrid);
-  validateGraphForRouting(graph);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  validateSettledBatch(settledBatch);
-  const {
-    edgeSlackSeconds,
-    stepStride,
-    edgeTraversalCostSeconds,
-  } = normalizeEdgeInterpolationOptions(graph, allowedModeMask, options);
-
-  let paintedCount = 0;
-  for (const sourceNodeIndex of settledBatch) {
-    paintedCount += paintEligibleOutgoingEdgesFromSourceNodeToTravelTimeGrid(
-      travelTimeGrid,
-      graph,
-      nodePixels,
-      distSeconds,
-      sourceNodeIndex,
-      allowedModeMask,
-      edgeSlackSeconds,
-      stepStride,
-      edgeTraversalCostSeconds,
-    );
-  }
-  return paintedCount;
-}
 
 export function paintAllReachableEdgeInterpolationsToGrid(
   pixelGrid,
@@ -600,40 +439,6 @@ export function paintAllReachableEdgeInterpolationsToGrid(
   return paintedCount;
 }
 
-export function paintAllReachableEdgeInterpolationsToTravelTimeGrid(
-  travelTimeGrid,
-  graph,
-  nodePixels,
-  distSeconds,
-  allowedModeMask,
-  options = {},
-) {
-  validateTravelTimeGrid(travelTimeGrid);
-  validateGraphForRouting(graph);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  const {
-    edgeSlackSeconds,
-    stepStride,
-    edgeTraversalCostSeconds,
-  } = normalizeEdgeInterpolationOptions(graph, allowedModeMask, options);
-
-  let paintedCount = 0;
-  for (let sourceNodeIndex = 0; sourceNodeIndex < graph.header.nNodes; sourceNodeIndex += 1) {
-    paintedCount += paintEligibleOutgoingEdgesFromSourceNodeToTravelTimeGrid(
-      travelTimeGrid,
-      graph,
-      nodePixels,
-      distSeconds,
-      sourceNodeIndex,
-      allowedModeMask,
-      edgeSlackSeconds,
-      stepStride,
-      edgeTraversalCostSeconds,
-    );
-  }
-  return paintedCount;
-}
 
 export function createEdgeVertexBufferBuilder(initialCapacityFloats = 32768) {
   if (!Number.isInteger(initialCapacityFloats) || initialCapacityFloats <= 0) {

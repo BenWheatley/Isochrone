@@ -4,13 +4,10 @@
 // There is one map, described once, and two ways of putting it somewhere -
 // which is what stops the screen and the sheet drifting apart.
 //
-// It is a canvas rather than an SVG layer over the canvas because there is no
-// reason for a second surface: 2D gives repeating pattern fills, an even-odd
-// fill rule, strokes and haloed text, which is the whole of what this draws.
-// The overlay that used to hold it had its own lifetime and its own hit
-// testing, and every bug in this area came from that - a hidden canvas that
-// stopped receiving pointer events, a fill rule one browser honoured and
-// another did not, a region left on screen after the map beneath it changed.
+// It draws into the map canvas rather than a layer over it, so the map has one
+// surface with one lifetime and one set of pointer handlers. 2D gives
+// repeating pattern fills, an even-odd fill rule, strokes and haloed text,
+// which is the whole of what this draws.
 
 const HALO_WIDTH_RATIO = 0.45;
 const LABEL_FONT_FAMILY = "'Helvetica Neue', Helvetica, Arial, sans-serif";

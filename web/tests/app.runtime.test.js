@@ -10,9 +10,9 @@ import {
   computeExportDistanceScaleBar,
   createWebGlIsochroneRenderer,
   createNodeSpatialIndex,
-  clearTravelTimeGrid,
+  clearGrid,
   createPixelGrid,
-  createTravelTimeGrid,
+  setPixel,
   createWalkingSearchState,
   ensureWasmSupportOrShowError,
   findNearestNodeIndexForModeFromSpatialIndex,
@@ -48,13 +48,11 @@ import {
   layoutMapViewportToContainGraph,
   rerenderIsochroneFromSnapshot,
   rerenderIsochroneFromSnapshotWithStatus,
-  restoreColourRenderingSurface,
   renderIsochroneLegendIfNeeded,
   runSearchTimeSliced,
   computeRenderGridExtent,
   resolveRenderGridRequirements,
   resolveSpatialIndexCellSizePx,
-  setTravelTimePixelMin,
   shouldUploadEdgeGeometry,
   updateDistanceScaleBar,
   timeToColour,
@@ -1194,11 +1192,8 @@ test('clearRenderedIsochrone clears stale routing snapshot and renderer state be
   };
   const pixelGrid = createPixelGrid(2, 2);
   pixelGrid.rgba.fill(255);
-  const travelTimeGrid = createTravelTimeGrid(2, 2);
-  travelTimeGrid.seconds.fill(12);
   const mapData = {
     pixelGrid,
-    travelTimeGrid,
     lastRoutingSnapshot: { sourceNodeIndex: 42 },
   };
 
@@ -1209,7 +1204,6 @@ test('clearRenderedIsochrone clears stale routing snapshot and renderer state be
   for (let i = 3; i < pixelGrid.rgba.length; i += 4) {
     assert.equal(pixelGrid.rgba[i], 0);
   }
-  assert.ok(Array.from(travelTimeGrid.seconds).every((value) => value === -1));
 });
 
 test('timeToColour wraps to the beginning after each configured cycle', () => {
@@ -2220,17 +2214,17 @@ test('grid writes use graph coordinates and clip outside the grid extent', () =>
   // Painters are unaware of the offset: they write graph pixel coordinates and
   // the grid subtracts its own origin, so anything off-extent falls out
   // through the bounds check that was already there.
-  const grid = createTravelTimeGrid(4, 4, { originXPx: 100, originYPx: 200 });
-  clearTravelTimeGrid(grid);
+  const grid = createPixelGrid(4, 4, { originXPx: 100, originYPx: 200 });
+  clearGrid(grid);
 
-  assert.equal(setTravelTimePixelMin(grid, 100, 200, 30), true, 'grid origin maps to cell 0,0');
-  assert.equal(grid.seconds[0], 30);
-  assert.equal(setTravelTimePixelMin(grid, 103, 203, 45), true);
-  assert.equal(grid.seconds[3 * 4 + 3], 45);
+  assert.equal(setPixel(grid, 100, 200, 1, 2, 3, 255), true, 'grid origin maps to cell 0,0');
+  assert.equal(grid.rgba[0], 1);
+  assert.equal(setPixel(grid, 103, 203, 4, 5, 6, 255), true);
+  assert.equal(grid.rgba[(3 * 4 + 3) * 4], 4);
 
-  assert.equal(setTravelTimePixelMin(grid, 99, 200, 10), false, 'left of the extent');
-  assert.equal(setTravelTimePixelMin(grid, 104, 200, 10), false, 'right of the extent');
-  assert.equal(setTravelTimePixelMin(grid, 100, 199, 10), false, 'above the extent');
+  assert.equal(setPixel(grid, 99, 200, 9, 9, 9, 255), false, 'left of the extent');
+  assert.equal(setPixel(grid, 104, 200, 9, 9, 9, 255), false, 'right of the extent');
+  assert.equal(setPixel(grid, 100, 199, 9, 9, 9, 255), false, 'above the extent');
 });
 
 test('spatial index buckets by node density instead of one cell per pixel', () => {
@@ -2283,33 +2277,18 @@ test('bucketed spatial index still returns the true nearest node', () => {
   }
 });
 
-test('a GPU renderer allocates neither raster fallback grid', () => {
-  // Every render path is
-  //   if (drawTravelTimeEdges) ... else if (drawTravelTimeGrid) ... else pixelGrid
-  // so a renderer that draws edges never reaches either grid. Allocating them
-  // anyway cost Berlin 61 MiB each - more than the canvas they would have been
-  // drawn into - for buffers nothing ever read.
+test('a GPU renderer allocates no raster fallback grid', () => {
+  // A renderer that draws edges never reaches the pixel grid. Allocating it
+  // anyway cost Berlin 61 MiB - more than the canvas it would have been drawn
+  // into - for a buffer nothing ever read.
   const webglRenderer = {
     drawTravelTimeEdges() {},
     drawTravelTimeEdgesFromNodeTimes() {},
-    drawTravelTimeGrid() {},
   };
-  const canvas2dRenderer = {};
 
-  assert.deepEqual(resolveRenderGridRequirements(webglRenderer), {
-    needsTravelTimeGrid: false,
-    needsPixelGrid: false,
-  });
+  assert.deepEqual(resolveRenderGridRequirements(webglRenderer), { needsPixelGrid: false });
   // The 2D fallback has no edge drawing, so it does need one.
-  assert.deepEqual(resolveRenderGridRequirements(canvas2dRenderer), {
-    needsTravelTimeGrid: false,
-    needsPixelGrid: true,
-  });
-  // A renderer with only the grid path gets the grid, not the pixel buffer.
-  assert.deepEqual(resolveRenderGridRequirements({ drawTravelTimeGrid() {} }), {
-    needsTravelTimeGrid: true,
-    needsPixelGrid: false,
-  });
+  assert.deepEqual(resolveRenderGridRequirements({}), { needsPixelGrid: true });
 });
 
 test('runConnectionScanFromWalkingReachableStops changes vehicle between two stops a short walk apart', () => {
@@ -2450,64 +2429,40 @@ test('runConnectionScanFromWalkingReachableStops will not walk past the budget t
   assert.equal(beyondBudget.seedNodeIndices.length, 0);
 });
 
-test('leaving monochrome puts the canvas back for colour rendering', () => {
-  // Monochrome paints into the map canvas itself - there is one surface, and
-  // 2D gives every fill, stroke and haloed label it needs. But a canvas cannot
-  // go from 2D back to WebGL any more than the other way, so returning to
-  // colour has to swap the element, or colour is stuck on the software
-  // fallback for the rest of the session.
-  let rebound = 0;
-  const attributes = new Map([['aria-label', 'Berlin map canvas']]);
-  const canvas = {
-    id: 'isochrone',
-    width: 100,
-    height: 100,
-    className: '',
-    style: { cssText: '' },
-    getAttributeNames: () => [...attributes.keys()],
-    getAttribute: (name) => attributes.get(name),
-    __monochromeContext: {},
-  };
-  const created = [];
-  canvas.ownerDocument = {
-    createElement() {
-      const element = {
-        style: { cssText: '' },
-        setAttribute(name, value) { attributes.set(name, value); },
-        getAttributeNames: () => [],
-        getAttribute: () => null,
-      };
-      created.push(element);
-      return element;
-    },
-  };
-  canvas.parentNode = { replaceChild() {} };
-
+test('the colour basemap and key come back whenever monochrome is not drawn', () => {
+  // Monochrome supplies its own coastline, roads and key, so those are hidden
+  // while it is on screen. Anything that ends without drawing it has to put
+  // them back, or a region part-way through loading shows the chrome of one
+  // map over the drawing of another.
   const shell = {
-    isochroneCanvas: canvas,
+    isochroneCanvas: { width: 100, height: 100, style: {} },
     boundaryCanvas: { style: { visibility: 'hidden' } },
     isochroneLegend: { style: { visibility: 'hidden' } },
-    rebindMapCanvas() { rebound += 1; },
+    mapStyleRadios: [
+      { value: 'colour', checked: false },
+      { value: 'monochrome', checked: true },
+    ],
   };
 
-  restoreColourRenderingSurface(shell);
-
-  assert.equal(created.length, 1, 'the canvas was not replaced');
-  assert.equal(shell.isochroneCanvas, created[0]);
-  assert.equal(shell.isochroneCanvas.__monochromeContext, undefined);
-  // Everything listening was bound to the old node, so it has to be bound to
-  // the new one - a canvas nothing responds to is the same fault as a hidden
-  // one, reached from the other direction.
-  assert.equal(rebound, 1, 'nothing was rebound to the replacement canvas');
+  // No map data at all: mid region switch, before the new graph has arrived.
+  assert.equal(rerenderIsochroneFromSnapshot(shell, null), false);
   assert.equal(shell.boundaryCanvas.style.visibility, '');
   assert.equal(shell.isochroneLegend.style.visibility, '');
-});
 
-test('leaving monochrome refuses to swap the canvas with nothing to rebind', () => {
-  // Rather than leave a map no pointer handler is attached to.
-  const canvas = { id: 'isochrone', style: {}, __monochromeContext: {}, parentNode: null };
-  const shell = { isochroneCanvas: canvas, boundaryCanvas: { style: {} } };
-  restoreColourRenderingSurface(shell);
-  assert.equal(shell.isochroneCanvas, canvas, 'the canvas was swapped with no rebind hook');
-  assert.equal(canvas.__monochromeContext, undefined);
+  // Loaded, but nothing routed on it yet.
+  shell.boundaryCanvas.style.visibility = 'hidden';
+  const mapData = {
+    graph: { header: { nNodes: 4 } },
+    nodePixels: { nodePixelX: new Uint16Array(4), nodePixelY: new Uint16Array(4) },
+    lastRoutingSnapshot: null,
+  };
+  assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), false);
+  assert.equal(shell.boundaryCanvas.style.visibility, '');
+
+  // A snapshot too short for the new graph - the old region's distances
+  // against the new region's nodes.
+  shell.boundaryCanvas.style.visibility = 'hidden';
+  mapData.lastRoutingSnapshot = { distSeconds: new Float32Array(2) };
+  assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), false);
+  assert.equal(shell.boundaryCanvas.style.visibility, '');
 });

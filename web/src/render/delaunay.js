@@ -211,7 +211,6 @@ export function triangulate(coords) {
   quicksort(ids, dists, 0, n - 1);
 
   let hullStart = i0;
-  let hullSize = 3;
   hullNext[i0] = i1; hullPrev[i2] = i1;
   hullNext[i1] = i2; hullPrev[i0] = i2;
   hullNext[i2] = i0; hullPrev[i1] = i0;
@@ -331,7 +330,6 @@ export function triangulate(coords) {
     let t = addTriangle(e, i, hullNext[e], -1, -1, hullTri[e]);
     hullTri[i] = legalize(t + 2);
     hullTri[e] = t;
-    hullSize += 1;
 
     let next = hullNext[e];
     q = hullNext[next];
@@ -339,7 +337,6 @@ export function triangulate(coords) {
       t = addTriangle(next, i, q, hullTri[i], -1, hullTri[next]);
       hullTri[i] = legalize(t + 2);
       hullNext[next] = next;
-      hullSize -= 1;
       next = q;
       q = hullNext[next];
     }
@@ -350,7 +347,6 @@ export function triangulate(coords) {
         legalize(t + 2);
         hullTri[q] = t;
         hullNext[e] = e;
-        hullSize -= 1;
         e = q;
         q = hullPrev[e];
       }

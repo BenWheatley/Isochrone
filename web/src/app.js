@@ -105,13 +105,10 @@ import {
   getOrCreateIsochroneRenderer,
 } from './render/isochrone-renderer.js';
 import { buildMonochromeScene } from './render/monochrome-screen.js';
-import { drawMonochromeScene } from './render/monochrome-canvas.js';
 import {
   clearGrid,
-  clearTravelTimeGrid,
   computeRenderGridExtent,
   createPixelGrid,
-  createTravelTimeGrid,
 } from './render/pixel-grid.js';
 import {
 } from './core/graph-binary.js';
@@ -165,28 +162,19 @@ import {
   collectSettledBatchTravelTimeEdgeVertices,
   createEdgeVertexBufferBuilder,
   paintAllReachableEdgeInterpolationsToGrid,
-  paintAllReachableEdgeInterpolationsToTravelTimeGrid,
   paintReachableNodesToGrid,
-  paintReachableNodesTravelTimesToGrid,
   paintSettledBatchEdgeInterpolationsToGrid,
-  paintSettledBatchEdgeInterpolationsToTravelTimeGrid,
   paintSettledBatchToGrid,
-  paintSettledBatchTravelTimesToGrid,
 } from './render/edge-painting.js';
 export {
   collectAllReachableTravelTimeEdgeVertices,
   collectSettledBatchTravelTimeEdgeVertices,
   interpolateEdgeTravelSeconds,
   paintAllReachableEdgeInterpolationsToGrid,
-  paintAllReachableEdgeInterpolationsToTravelTimeGrid,
   paintInterpolatedEdgeToGrid,
-  paintInterpolatedEdgeTravelTimesToGrid,
   paintReachableNodesToGrid,
-  paintReachableNodesTravelTimesToGrid,
   paintSettledBatchEdgeInterpolationsToGrid,
-  paintSettledBatchEdgeInterpolationsToTravelTimeGrid,
   paintSettledBatchToGrid,
-  paintSettledBatchTravelTimesToGrid,
   rasterizeLinePixels,
 } from './render/edge-painting.js';
 export {
@@ -991,10 +979,8 @@ export async function runWalkingIsochroneFromSourceNode(
         // early. Recompute how far a walker can get from *any* reached stop
         // within one budget and drop everything beyond that, which is what
         // bounds the final leg. Applied whatever the mode selection: the
-        // budget describes the transit journey, and used to be skipped
-        // entirely unless transit was the only mode selected - which left the
-        // control inert in the Walk + Public transit case that is the normal
-        // way to use it.
+        // budget describes the transit journey, so it means the same thing in
+        // the Walk + Public transit case as in transit alone.
         applyTransitWalkBudgetReachability(
           mapData,
           transitDistSeconds,
@@ -1568,20 +1554,13 @@ function getOrBuildStaticEdgeNodeIndexedVertexDataForModeFromMapData(
  * work in graph space throughout.
  */
 /**
- * Which raster fallback grids a renderer will actually reach.
+ * Whether a renderer will actually reach the raster fallback grid.
  *
- * Every render path is the same ladder: draw edges if it can, else fill the
- * travel-time grid, else the pixel grid. A WebGL renderer can draw edges, so
- * it takes the first rung and touches neither grid - even though it also
- * exposes drawTravelTimeGrid, which is why capability alone is the wrong test.
+ * Every render path draws edges if it can and falls back to the pixel grid if
+ * it cannot. A WebGL renderer draws edges, so it never touches the grid.
  */
 export function resolveRenderGridRequirements(renderer) {
-  const drawsEdges = typeof renderer?.drawTravelTimeEdges === 'function';
-  const drawsTravelTimeGrid = typeof renderer?.drawTravelTimeGrid === 'function';
-  return {
-    needsTravelTimeGrid: !drawsEdges && drawsTravelTimeGrid,
-    needsPixelGrid: !drawsEdges && !drawsTravelTimeGrid,
-  };
+  return { needsPixelGrid: typeof renderer?.drawTravelTimeEdges !== 'function' };
 }
 
 function translateViewportIntoGrid(viewport, fitBoundingBoxPx, grid) {
@@ -1611,98 +1590,44 @@ function translateViewportIntoGrid(viewport, fitBoundingBoxPx, grid) {
 
 const MONOCHROME_PATTERN_COUNT = 2;
 
-/**
- * Swaps the map canvas for a fresh one, so a 2D context can be had after WebGL
- * has claimed the old one, and hands back the node that replaced it.
- *
- * Returns null when there is no rebind hook: every pointer handler in
- * canvas-routing is bound to the node, so replacing it without rebinding would
- * leave a map nothing was listening to - the same fault as hiding it, arrived
- * at from the other direction.
- */
-function replaceMapCanvasElement(shell) {
-  const canvas = shell.isochroneCanvas;
-  if (typeof shell.rebindMapCanvas !== 'function' || !canvas.parentNode) {
-    return null;
+function setMapChromeVisibility(shell, visibility) {
+  if (shell?.boundaryCanvas?.style) {
+    shell.boundaryCanvas.style.visibility = visibility;
   }
-  const replacement = canvas.ownerDocument.createElement('canvas');
-  replacement.id = canvas.id;
-  replacement.width = canvas.width;
-  replacement.height = canvas.height;
-  replacement.className = canvas.className;
-  for (const name of canvas.getAttributeNames()) {
-    if (name !== 'id' && name !== 'width' && name !== 'height' && name !== 'class') {
-      replacement.setAttribute(name, canvas.getAttribute(name));
-    }
+  if (shell?.isochroneLegend?.style) {
+    shell.isochroneLegend.style.visibility = visibility;
   }
-  replacement.style.cssText = canvas.style.cssText;
-  canvas.parentNode.replaceChild(replacement, canvas);
-  shell.isochroneCanvas = replacement;
-  shell.mapCanvas = replacement;
-  shell.rebindMapCanvas(replacement);
-  return replacement;
 }
 
-/**
- * Puts the map back the way colour rendering needs it.
- *
- * Monochrome leaves the canvas holding a 2D context, and a canvas cannot go
- * back from 2D to WebGL any more than it can go the other way - so returning
- * to colour swaps the element too, or every colour render afterwards would be
- * stuck on the software fallback for the rest of the session.
- */
+/** Brings back the colour basemap and key. */
 export function restoreColourRenderingSurface(shell) {
-  if (!shell || !shell.isochroneCanvas) {
-    return;
-  }
-  if (shell.isochroneCanvas.__monochromeContext) {
-    const replacement = replaceMapCanvasElement(shell);
-    if (replacement !== null) {
-      delete replacement.__monochromeContext;
-    } else {
-      // No way to rebind, so the element stays and so does its 2D context;
-      // colour still draws, just through the fallback renderer.
-      delete shell.isochroneCanvas.__monochromeContext;
-    }
-  }
-  if (shell.boundaryCanvas && shell.boundaryCanvas.style) {
-    shell.boundaryCanvas.style.visibility = '';
-  }
-  if (shell.isochroneLegend && shell.isochroneLegend.style) {
-    shell.isochroneLegend.style.visibility = '';
-  }
+  setMapChromeVisibility(shell, '');
 }
 
+/**
+ * Monochrome, drawn by whichever renderer the canvas already has.
+ *
+ * The scene is geometry and a fill: band polygons through a hatch, the
+ * contours between them, and their values. WebGL draws it with three programs,
+ * the 2D renderer with pattern fills and strokes. Nothing about the mode
+ * depends on which, so selecting it swaps nothing.
+ */
 function renderMonochromeSnapshot(shell, mapData, snapshot, options) {
-  const canvas = shell.isochroneCanvas;
-  syncCanvasToDisplaySize(canvas);
-  const context = acquireMonochromeContext(shell);
-  if (!context) {
+  const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
+  updateRenderBackendBadge(shell, renderer);
+  if (typeof renderer.drawMonochromeScene !== 'function') {
     return false;
   }
-  // Cleared, never hidden. Every pointer handler in canvas-routing is bound to
-  // this element, and visibility:hidden takes it out of hit testing - which is
-  // exactly how monochrome came to have no pan and no zoom.
-  const renderer = getOrCreateIsochroneRenderer(canvas);
-  if (typeof renderer.clear === 'function') {
-    renderer.clear();
-  }
-  // The colour basemap goes too. A blue sea under a black-and-white isochrone
-  // is not monochrome, and the scene draws its own coastline and roads - from
-  // the same projection, so they register.
-  if (shell.boundaryCanvas && shell.boundaryCanvas.style) {
-    shell.boundaryCanvas.style.visibility = 'hidden';
-  }
-  // The colour key would be describing bands that are not on screen. A key
-  // showing the actual hatches belongs here instead, and is the next thing
-  // this mode needs.
-  if (shell.isochroneLegend && shell.isochroneLegend.style) {
-    shell.isochroneLegend.style.visibility = 'hidden';
-  }
+  syncCanvasToDisplaySize(shell.isochroneCanvas);
+
+  // The colour basemap and key describe a map that is not on screen. The scene
+  // draws its own coastline and roads, from the same projection, so they
+  // register with the bands laid over them.
+  setMapChromeVisibility(shell, 'hidden');
 
   const scene = buildMonochromeScene(mapData, snapshot, {
-    widthPx: canvas.width,
-    heightPx: canvas.height,
+    widthPx: shell.isochroneCanvas.width,
+    heightPx: shell.isochroneCanvas.height,
     viewport: options.viewport,
     fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
     allowedModeMask: options.allowedModeMask,
@@ -1713,55 +1638,26 @@ function renderMonochromeSnapshot(shell, mapData, snapshot, options) {
     cycleMinutes: options.colourCycleMinutes,
     patternCount: MONOCHROME_PATTERN_COUNT,
     projectedBoundary: mapData.projectedBoundary ?? null,
+    collectTriangles: true,
   });
 
   if (scene === null) {
-    context.setTransform(1, 0, 0, 1, 0, 0);
-    context.clearRect(0, 0, canvas.width, canvas.height);
+    if (typeof renderer.clear === 'function') {
+      renderer.clear();
+    }
     return false;
   }
-  drawMonochromeScene(context, scene);
+  renderer.drawMonochromeScene(scene);
   return true;
-}
-
-/**
- * A 2D context for the map canvas.
- *
- * A canvas that has ever held a WebGL context can never give a 2D one, so
- * switching to monochrome on a WebGL-rendered map means replacing the element
- * - cloning it, swapping it in, and rebinding what was listening. Everything
- * bound to a canvas is bound to that node, so this returns null rather than
- * guessing when the caller has not provided a way to rebind.
- */
-function acquireMonochromeContext(shell) {
-  const canvas = shell.isochroneCanvas;
-  const existing = canvas.__monochromeContext;
-  if (existing) {
-    return existing;
-  }
-  const renderer = canvas.__isochroneRenderer;
-  if (renderer && renderer.mode !== 'canvas-2d') {
-    const replacement = replaceMapCanvasElement(shell);
-    if (replacement === null) {
-      return null;
-    }
-  }
-  const context = shell.isochroneCanvas.getContext('2d');
-  if (context) {
-    shell.isochroneCanvas.__monochromeContext = context;
-  }
-  return context;
 }
 
 export function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   if (!shell || typeof shell !== 'object' || !shell.isochroneCanvas) {
     return false;
   }
-  // The overlay holds a picture of one particular snapshot, so anything that
-  // ends this function without drawing a new one has to take the old one down.
-  // Leaving it up is how a region switch left the previous city on screen -
-  // unclickable, because the pointer handlers had moved on with the canvas
-  // beneath it.
+  // Anything that ends without drawing a monochrome scene puts the colour
+  // basemap and key back, so a region part-way through loading never shows the
+  // chrome of one map over the drawing of another.
   if (!mapData || typeof mapData !== 'object' || !mapData.graph || !mapData.nodePixels) {
     restoreColourRenderingSurface(shell);
     return false;
@@ -1796,10 +1692,9 @@ export function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
 
   // Monochrome is a different drawing entirely - filled hatched bands with
   // labelled contours, not coloured lines - so it takes its own path rather
-  // than re-tinting this one, and lands in an SVG layer above the canvas.
-  // Read from the shell unless a caller overrides it. Threading it through
-  // every call site meant any path that forgot silently reverted the map to
-  // colour, which is what happened on the redraw after a print dialog closed.
+  // than re-tinting this one. Read from the shell unless a caller overrides
+  // it, so that a path which does not thread the style through cannot quietly
+  // put the map back into colour.
   const mapStyle = options.mapStyle ?? getMapStyleFromShell(shell);
   if (normalizeMapStyle(mapStyle) === MAP_STYLE_MONOCHROME) {
     return renderMonochromeSnapshot(shell, mapData, snapshot, {
@@ -1816,7 +1711,6 @@ export function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   const supportsGpuEdgeInterpolation = typeof renderer.drawTravelTimeEdges === 'function';
   const supportsGpuIndexedEdgeInterpolation =
     typeof renderer.drawTravelTimeEdgesFromNodeTimes === 'function';
-  const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
   // Under the transit-only sentinel mask no real road/ferry edge ever
   // matches allowedModeMask, so the isochrone is carried entirely by the
   // transit connections the CSA scan found. Those come with their own
@@ -1894,32 +1788,6 @@ export function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
     snapshot.edgeTraversalCostSeconds,
     mapData.graph.header.nEdges,
   );
-
-  if (supportsGpuTravelTimeRendering && mapData.travelTimeGrid) {
-    clearTravelTimeGrid(mapData.travelTimeGrid);
-    paintAllReachableEdgeInterpolationsToTravelTimeGrid(
-      mapData.travelTimeGrid,
-      mapData.graph,
-      mapData.nodePixels,
-      distSeconds,
-      allowedModeMask,
-      {
-        stepStride: FINAL_EDGE_INTERPOLATION_STEP_STRIDE,
-        edgeTraversalCostSeconds,
-      },
-    );
-    paintReachableNodesTravelTimesToGrid(
-      mapData.travelTimeGrid,
-      mapData.nodePixels,
-      distSeconds,
-    );
-    renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
-      cycleMinutes: colourCycleMinutes,
-      colourTheme,
-      ...translateViewportIntoGrid(viewport, mapData.boundaryFitBoundingBoxPx, mapData.travelTimeGrid),
-    });
-    return true;
-  }
 
   if (mapData.pixelGrid) {
     clearGrid(mapData.pixelGrid);
@@ -2412,27 +2280,18 @@ export async function initializeMapData(shell, options = {}) {
     const nodePixels = precomputeNodePixelCoordinates(graph);
     const nodeModeMask = precomputeNodeModeMask(graph);
     const nodeSpatialIndex = createNodeSpatialIndex(graph, nodePixels);
-    // Render grids are raster fallbacks, allocated only for a renderer that
-    // will actually reach them. Every render path is
-    //   if (drawTravelTimeEdges) ... else if (drawTravelTimeGrid) ... else pixelGrid
-    // and a WebGL renderer has drawTravelTimeEdges, so it always takes the
-    // first branch and touches neither grid. Allocating them regardless cost
-    // Berlin 61 MiB each - far more than the canvas they would have been
-    // drawn into - for buffers nothing read.
+    // The pixel grid is a raster fallback, allocated only for a renderer that
+    // will actually reach it: a WebGL renderer draws edges and never touches
+    // it, and on Berlin the buffer is 61 MiB - far more than the canvas it
+    // would have been drawn into.
     const renderGridExtent = computeRenderGridExtent(graph.header, boundaryFitBoundingBoxPx);
-    const { needsTravelTimeGrid, needsPixelGrid } = resolveRenderGridRequirements(renderer);
+    const { needsPixelGrid } = resolveRenderGridRequirements(renderer);
 
     const pixelGrid = needsPixelGrid
       ? createPixelGrid(renderGridExtent.widthPx, renderGridExtent.heightPx, renderGridExtent)
       : null;
-    const travelTimeGrid = needsTravelTimeGrid
-      ? createTravelTimeGrid(renderGridExtent.widthPx, renderGridExtent.heightPx, renderGridExtent)
-      : null;
     if (pixelGrid) {
       clearGrid(pixelGrid);
-    }
-    if (travelTimeGrid) {
-      clearTravelTimeGrid(travelTimeGrid);
     }
 
     return {
@@ -2448,7 +2307,6 @@ export async function initializeMapData(shell, options = {}) {
       nodeModeMask,
       nodeSpatialIndex,
       pixelGrid,
-      travelTimeGrid,
       renderGridExtent,
       viewport: createDefaultMapViewport({ fitBoundingBoxPx: boundaryFitBoundingBoxPx }),
       edgeCostPrecomputeKernel,
@@ -2540,12 +2398,9 @@ export function precomputeNodePixelCoordinates(graph) {
 
 export {
   clearGrid,
-  clearTravelTimeGrid,
   computeRenderGridExtent,
   createPixelGrid,
-  createTravelTimeGrid,
   setPixel,
-  setTravelTimePixelMin,
 } from './render/pixel-grid.js';
 
 
@@ -2583,9 +2438,6 @@ export function clearRenderedIsochrone(shell, mapData = null) {
   if (mapData && typeof mapData === 'object') {
     if (mapData.pixelGrid) {
       clearGrid(mapData.pixelGrid);
-    }
-    if (mapData.travelTimeGrid) {
-      clearTravelTimeGrid(mapData.travelTimeGrid);
     }
     mapData.lastRoutingSnapshot = null;
   }
@@ -2729,7 +2581,6 @@ function renderInitialPassByBackend(renderContext) {
   const {
     incrementalRender,
     supportsGpuEdgeInterpolation,
-    supportsGpuTravelTimeRendering,
     renderer,
     shell,
     mapData,
@@ -2741,13 +2592,6 @@ function renderInitialPassByBackend(renderContext) {
 
   if (supportsGpuEdgeInterpolation) {
     renderer.clear();
-  } else if (supportsGpuTravelTimeRendering) {
-    clearTravelTimeGrid(mapData.travelTimeGrid);
-    renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
-      cycleMinutes: getColourCycleMinutesFromShell(shell),
-      colourTheme: renderContext.colourTheme,
-      ...translateViewportIntoGrid(viewport, mapData.boundaryFitBoundingBoxPx, mapData.travelTimeGrid),
-    });
   } else {
     clearGrid(mapData.pixelGrid);
     blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
@@ -2760,7 +2604,6 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
   const {
     incrementalRender,
     supportsGpuEdgeInterpolation,
-    supportsGpuTravelTimeRendering,
     profileMs,
     searchState,
     mapData,
@@ -2806,36 +2649,6 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
       }),
     );
     paintedNodeCount = settledNodeCount;
-  } else if (supportsGpuTravelTimeRendering) {
-    paintedEdgeCount += profileMs('onSlicePaintMs', () =>
-      paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
-        mapData.travelTimeGrid,
-        searchState.graph,
-        mapData.nodePixels,
-        searchState.distSeconds,
-        settledBatch,
-        allowedModeMask,
-        {
-          stepStride: interactiveEdgeStepStride,
-          edgeTraversalCostSeconds,
-        },
-      ),
-    );
-    paintedNodeCount += profileMs('onSlicePaintMs', () =>
-      paintSettledBatchTravelTimesToGrid(
-        mapData.travelTimeGrid,
-        mapData.nodePixels,
-        searchState.distSeconds,
-        settledBatch,
-      ),
-    );
-    profileMs('onSliceDrawMs', () =>
-      renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
-        cycleMinutes: colourCycleMinutes,
-        colourTheme,
-        ...translateViewportIntoGrid(viewport, mapData.boundaryFitBoundingBoxPx, mapData.travelTimeGrid),
-      }),
-    );
   } else {
     paintedEdgeCount += profileMs('onSlicePaintMs', () =>
       paintSettledBatchEdgeInterpolationsToGrid(
@@ -2876,7 +2689,6 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
 function renderFinalPassByBackend(renderContext, paintCounts) {
   const {
     supportsGpuEdgeInterpolation,
-    supportsGpuTravelTimeRendering,
     profileMs,
     searchState,
     mapData,
@@ -2961,37 +2773,6 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
     } else {
       paintedNodeCount = countFiniteTravelTimes(searchState.distSeconds);
     }
-  } else if (supportsGpuTravelTimeRendering) {
-    profileMs('finalDrawMs', () => {
-      clearTravelTimeGrid(mapData.travelTimeGrid);
-    });
-    paintedEdgeCount = profileMs('finalPaintMs', () =>
-      paintAllReachableEdgeInterpolationsToTravelTimeGrid(
-        mapData.travelTimeGrid,
-        searchState.graph,
-        mapData.nodePixels,
-        searchState.distSeconds,
-        allowedModeMask,
-        {
-          stepStride: finalEdgeStepStride,
-          edgeTraversalCostSeconds,
-        },
-      ),
-    );
-    paintedNodeCount = profileMs('finalPaintMs', () =>
-      paintReachableNodesTravelTimesToGrid(
-        mapData.travelTimeGrid,
-        mapData.nodePixels,
-        searchState.distSeconds,
-      ),
-    );
-    profileMs('finalDrawMs', () =>
-      renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
-        cycleMinutes: colourCycleMinutes,
-        colourTheme,
-        ...translateViewportIntoGrid(viewport, mapData.boundaryFitBoundingBoxPx, mapData.travelTimeGrid),
-      }),
-    );
   } else {
     profileMs('finalDrawMs', () => {
       clearGrid(mapData.pixelGrid);
@@ -3045,13 +2826,6 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   updateRenderBackendBadge(shell, renderer);
   const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;
   const supportsGpuEdgeInterpolation = typeof renderer.drawTravelTimeEdges === 'function';
-  const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
-  // Only the branch that actually runs needs its grid: a renderer that can
-  // draw edges never reaches the travel-time grid, whatever else it exposes.
-  if (!supportsGpuEdgeInterpolation && supportsGpuTravelTimeRendering && !mapData.travelTimeGrid) {
-    throw new Error('mapData.travelTimeGrid is required for GPU travel-time rendering');
-  }
-
   const alpha = options.alpha ?? 255;
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   const colourTheme = normalizeIsochroneTheme(
@@ -3137,7 +2911,6 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
     searchState,
     renderer,
     supportsGpuEdgeInterpolation,
-    supportsGpuTravelTimeRendering,
     incrementalRender,
     profileMs,
     allowedModeMask,
@@ -3416,7 +3189,7 @@ export function runGpuCpuParityDiagnostic(renderer, mapData, searchState, option
   const perChannelThreshold = clampInt(Math.round(options.perChannelThreshold ?? 64), 0, 255);
 
   // Sized from the render extent rather than from mapData.pixelGrid, which a
-  // GPU renderer no longer allocates - this only ever needed the dimensions.
+  // GPU renderer does not allocate - only the dimensions are needed here.
   const referenceExtent = mapData.pixelGrid
     ?? mapData.renderGridExtent
     ?? computeRenderGridExtent(mapData.graph.header, mapData.boundaryFitBoundingBoxPx ?? null);
@@ -3618,19 +3391,6 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
     }
     let initializedMapData = null;
     let routingBinding = null;
-    // Switching to monochrome needs a 2D context, and a canvas that has held
-    // WebGL can never give one - so the element is replaced. Everything
-    // listening was bound to the old node, so it has to be bound again to the
-    // new one; without this hook the swap is refused rather than silently
-    // producing a map nothing responds to.
-    shell.rebindMapCanvas = () => {
-      if (routingBinding?.dispose) {
-        routingBinding.dispose();
-      }
-      routingBinding = initializedMapData
-        ? bindCanvasClickRouting(shell, initializedMapData, { autoStartFromLocation: false })
-        : null;
-    };
     let currentLocationId = null;
     let isLocationLoading = false;
     const redrawLoadedMap = (mapData) => {
