@@ -91,7 +91,6 @@ export function initializeAppShell(doc, options = {}) {
     resolvedDocument.querySelectorAll('input[name="primary-mouse-button"]'),
   );
   const mapStyleRadios = Array.from(resolvedDocument.querySelectorAll('input[name="map-style"]'));
-  const monochromeOverlay = resolvedDocument.getElementById('monochrome-overlay');
   const modeCheckboxGroup = resolvedDocument.getElementById('mode-checkbox-group');
   const modeCheckboxes = Array.from(resolvedDocument.querySelectorAll('.mode-checkbox'));
   const colourCycleMinutesInput = resolvedDocument.getElementById('colour-cycle-minutes');
@@ -169,9 +168,6 @@ export function initializeAppShell(doc, options = {}) {
   }
   if (mapStyleRadios.length !== 2 || mapStyleRadios.some((radio) => radio.tagName !== 'INPUT')) {
     throw new Error('index.html is missing two <input type="radio" name="map-style"> elements');
-  }
-  if (!monochromeOverlay) {
-    throw new Error('index.html is missing <div id="monochrome-overlay">');
   }
   if (
     primaryMouseButtonRadios.length !== 2
@@ -313,7 +309,6 @@ export function initializeAppShell(doc, options = {}) {
     unitSystemRadios,
     speedUnitLabelElements,
     mapStyleRadios,
-    monochromeOverlay,
     primaryMouseButtonRadios,
     modeCheckboxGroup,
     modeCheckboxes,

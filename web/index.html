@@ -276,11 +276,6 @@
             aria-label="Berlin district boundary basemap"
           ></canvas>
           <canvas id="isochrone" width="1024" height="768" aria-label="Berlin map canvas"></canvas>
-          <!-- Monochrome draws filled, hatched bands and labelled contours,
-               which is vector work rather than per-pixel work, so it goes in an
-               SVG layer over the canvas instead of into it. Empty and inert in
-               colour mode. -->
-          <div id="monochrome-overlay" class="monochrome-overlay" aria-hidden="true" hidden></div>
         </div>
         <div id="loading" role="status" aria-live="polite">
           <div id="loading-text" data-i18n="body.loading.boundaries">Loading district boundaries...</div>

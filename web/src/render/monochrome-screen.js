@@ -13,10 +13,15 @@
 
 import { DEFAULT_COLOUR_CYCLE_MINUTES, EDGE_MODE_WATER_BIT } from '../config/constants.js';
 import { resolveViewportFrame } from '../core/viewport.js';
-import { buildMonochromeIsochroneSvg } from '../export/monochrome-svg.js';
+import { buildMonochromeIsochroneSvg, planContourLabels } from '../export/monochrome-svg.js';
 import { buildBandRegions, DEFAULT_MAX_TRIANGLE_SPAN_M } from './band-regions.js';
 import { triangulate } from './delaunay.js';
-import { HATCH_PATTERN_LADDER, selectHatchPatterns } from './hatch.js';
+import {
+  HATCH_PATTERN_LADDER,
+  selectHatchPatterns,
+  WATER_HATCH_PATTERN,
+  WATER_INK,
+} from './hatch.js';
 
 /**
  * The pair a map uses for hatched-and-clear.
@@ -171,7 +176,16 @@ function collectVisibleRoadSegments(graph, nodePixels, frame, widthPx, heightPx)
  * Returns null when there is nothing reachable to draw, so the caller can
  * leave the overlay empty rather than showing an empty frame.
  */
-export function buildMonochromeScreenSvg(mapData, snapshot, options = {}) {
+/**
+ * Everything the monochrome map is made of, in one description: the bands and
+ * their rings, the basemap under them, and the transform that puts them on the
+ * output.
+ *
+ * Separated from any way of drawing it, because there are two - a canvas on
+ * screen and SVG for export - and they must not be allowed to become two
+ * different maps. Whatever is wrong here is wrong in both, which is the point.
+ */
+export function buildMonochromeScene(mapData, snapshot, options = {}) {
   const graph = mapData.graph;
   const widthPx = options.widthPx;
   const heightPx = options.heightPx;
@@ -258,15 +272,31 @@ export function buildMonochromeScreenSvg(mapData, snapshot, options = {}) {
       paths: feature.paths.map((path) => path.map(([graphX, graphY]) => [graphX, graphY])),
     }));
 
-  return buildMonochromeIsochroneSvg({
+  const labelFontSize = options.labelFontSize ?? 12;
+  // Planned on the scene rather than inside a renderer, so the screen and the
+  // exported sheet put every value in the same place. Labels that moved
+  // between them would be two maps with one name.
+  const { labels, gaps } = planContourLabels(bands, {
+    transform,
+    fontSize: labelFontSize,
+    widthPx,
+    heightPx,
+    spacingPx: options.labelSpacingPx,
+  });
+
+  return {
     widthPx,
     heightPx,
     bands,
     transform,
+    labels,
+    labelGaps: gaps,
+    waterPattern: WATER_HATCH_PATTERN,
+    waterInk: WATER_INK,
     bandsIncludeHoles: true,
     ink: options.ink ?? '#000000',
     paper: options.paper ?? '#ffffff',
-    labelFontSize: options.labelFontSize ?? 12,
+    labelFontSize,
     contourStrokeWidth: 0.9,
     roadStrokeWidth: 0.3,
     patternScale: options.patternScale ?? 1,
@@ -281,5 +311,11 @@ export function buildMonochromeScreenSvg(mapData, snapshot, options = {}) {
         heightPx,
       ),
     },
-  });
+  };
+}
+
+/** The same scene, serialised as SVG. Used by the export and print paths. */
+export function buildMonochromeScreenSvg(mapData, snapshot, options = {}) {
+  const scene = buildMonochromeScene(mapData, snapshot, options);
+  return scene === null ? null : buildMonochromeIsochroneSvg(scene);
 }

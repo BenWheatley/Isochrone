@@ -48,6 +48,7 @@ import {
   layoutMapViewportToContainGraph,
   rerenderIsochroneFromSnapshot,
   rerenderIsochroneFromSnapshotWithStatus,
+  restoreColourRenderingSurface,
   renderIsochroneLegendIfNeeded,
   runSearchTimeSliced,
   computeRenderGridExtent,
@@ -2449,48 +2450,64 @@ test('runConnectionScanFromWalkingReachableStops will not walk past the budget t
   assert.equal(beyondBudget.seedNodeIndices.length, 0);
 });
 
-test('the monochrome overlay never outlives the map it was drawn from', () => {
-  // It holds a picture of one snapshot. If a path can end without drawing a
-  // new one and without taking the old one down, a region switch leaves the
-  // previous city on screen - unclickable, because the pointer handlers move
-  // on with the canvas beneath it - and switching back to colour then draws
-  // the new region over the top of it.
-  const overlay = { hidden: false, innerHTML: '<svg>stale</svg>' };
+test('leaving monochrome puts the canvas back for colour rendering', () => {
+  // Monochrome paints into the map canvas itself - there is one surface, and
+  // 2D gives every fill, stroke and haloed label it needs. But a canvas cannot
+  // go from 2D back to WebGL any more than the other way, so returning to
+  // colour has to swap the element, or colour is stuck on the software
+  // fallback for the rest of the session.
+  let rebound = 0;
+  const attributes = new Map([['aria-label', 'Berlin map canvas']]);
+  const canvas = {
+    id: 'isochrone',
+    width: 100,
+    height: 100,
+    className: '',
+    style: { cssText: '' },
+    getAttributeNames: () => [...attributes.keys()],
+    getAttribute: (name) => attributes.get(name),
+    __monochromeContext: {},
+  };
+  const created = [];
+  canvas.ownerDocument = {
+    createElement() {
+      const element = {
+        style: { cssText: '' },
+        setAttribute(name, value) { attributes.set(name, value); },
+        getAttributeNames: () => [],
+        getAttribute: () => null,
+      };
+      created.push(element);
+      return element;
+    },
+  };
+  canvas.parentNode = { replaceChild() {} };
+
   const shell = {
-    isochroneCanvas: { width: 100, height: 100, style: {} },
+    isochroneCanvas: canvas,
     boundaryCanvas: { style: { visibility: 'hidden' } },
     isochroneLegend: { style: { visibility: 'hidden' } },
-    monochromeOverlay: overlay,
-    mapStyleRadios: [
-      { value: 'colour', checked: false },
-      { value: 'monochrome', checked: true },
-    ],
+    rebindMapCanvas() { rebound += 1; },
   };
 
-  // No map data at all: mid region switch, before the new graph has arrived.
-  assert.equal(rerenderIsochroneFromSnapshot(shell, null), false);
-  assert.equal(overlay.hidden, true);
-  assert.equal(overlay.innerHTML, '');
+  restoreColourRenderingSurface(shell);
 
-  // Map data present but nothing routed on it yet: the new region has loaded
-  // and the user has not clicked.
-  overlay.hidden = false;
-  overlay.innerHTML = '<svg>stale</svg>';
-  const mapData = {
-    graph: { header: { nNodes: 4 } },
-    nodePixels: { nodePixelX: new Uint16Array(4), nodePixelY: new Uint16Array(4) },
-    lastRoutingSnapshot: null,
-  };
-  assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), false);
-  assert.equal(overlay.hidden, true);
-  assert.equal(overlay.innerHTML, '');
+  assert.equal(created.length, 1, 'the canvas was not replaced');
+  assert.equal(shell.isochroneCanvas, created[0]);
+  assert.equal(shell.isochroneCanvas.__monochromeContext, undefined);
+  // Everything listening was bound to the old node, so it has to be bound to
+  // the new one - a canvas nothing responds to is the same fault as a hidden
+  // one, reached from the other direction.
+  assert.equal(rebound, 1, 'nothing was rebound to the replacement canvas');
+  assert.equal(shell.boundaryCanvas.style.visibility, '');
+  assert.equal(shell.isochroneLegend.style.visibility, '');
+});
 
-  // A snapshot too short for the new graph - the old region's distances
-  // against the new region's nodes.
-  overlay.hidden = false;
-  overlay.innerHTML = '<svg>stale</svg>';
-  mapData.lastRoutingSnapshot = { distSeconds: new Float32Array(2) };
-  assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), false);
-  assert.equal(overlay.hidden, true);
-  assert.equal(overlay.innerHTML, '');
+test('leaving monochrome refuses to swap the canvas with nothing to rebind', () => {
+  // Rather than leave a map no pointer handler is attached to.
+  const canvas = { id: 'isochrone', style: {}, __monochromeContext: {}, parentNode: null };
+  const shell = { isochroneCanvas: canvas, boundaryCanvas: { style: {} } };
+  restoreColourRenderingSurface(shell);
+  assert.equal(shell.isochroneCanvas, canvas, 'the canvas was swapped with no rebind hook');
+  assert.equal(canvas.__monochromeContext, undefined);
 });

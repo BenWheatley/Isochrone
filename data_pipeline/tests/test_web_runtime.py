@@ -102,7 +102,6 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
         "location-select",
         "controls-menu",
         "controls-menu-summary",
-        "monochrome-overlay",
         "theme-radio-group",
         "primary-mouse-button-group",
         "map-style-radio-group",
@@ -158,12 +157,6 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
         "map-style-radio-group",
     ):
         assert parsed.elements_by_id[group_id].tag == "fieldset", group_id
-
-    # The monochrome isochrone is vector - hatched bands and labelled contours
-    # - so it lands in an SVG layer over the canvas rather than inside it.
-    overlay = parsed.elements_by_id["monochrome-overlay"]
-    assert overlay.tag == "div"
-    assert "hidden" in overlay.attrs, "the overlay must start hidden, for colour mode"
 
     speed_group = parsed.elements_by_id["speed-group"]
     assert speed_group.attrs.get("role") == "group"

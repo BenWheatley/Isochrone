@@ -323,6 +323,78 @@ function escapeXmlText(value) {
  * true annuli with transparent hatches, so the bands do not have to be
  * overpainted opaquely and whatever is drawn beneath still shows through.
  */
+
+/**
+ * Where every contour's value goes, and which stretch of contour to leave out
+ * for it.
+ *
+ * Planned once, on the scene, rather than inside a renderer: the screen and the
+ * exported sheet are the same map, and labels that moved between them would be
+ * two maps with one name.
+ */
+export function planContourLabels(bands, options = {}) {
+  const transform = options.transform ?? ((x, y) => [x, y]);
+  const fontSize = options.fontSize ?? 12;
+  const spacingPx = options.spacingPx
+    ?? Math.max(320, Math.min(options.widthPx ?? 1000, options.heightPx ?? 1000) / 3);
+
+  // Contours crowd wherever the gradient is steep, which is exactly where
+  // several rings would all want labelling in the same few centimetres.
+  const claimedBoxes = [];
+  const claim = (placement, text) => {
+    const halfWidth = (text.length * fontSize * LABEL_WIDTH_PER_CHARACTER) / 2 + fontSize * 0.4;
+    const halfHeight = fontSize * 0.9;
+    const box = {
+      left: placement.x - halfWidth,
+      right: placement.x + halfWidth,
+      top: placement.y - halfHeight,
+      bottom: placement.y + halfHeight,
+    };
+    const collides = claimedBoxes.some((other) =>
+      box.left < other.right && box.right > other.left
+      && box.top < other.bottom && box.bottom > other.top);
+    if (collides) {
+      return false;
+    }
+    claimedBoxes.push(box);
+    return true;
+  };
+
+  const labels = [];
+  const gaps = new Map();
+  for (const band of bands) {
+    if (!band.label) {
+      continue;
+    }
+    for (const ring of band.rings) {
+      // A hole is the boundary with the faster band inside it, and carries
+      // that band's value, not this one's. Labelling it here would print two
+      // different times along one line.
+      if (ring.isHole) {
+        continue;
+      }
+      const candidates = placeContourLabels(ring.points, {
+        transform,
+        text: band.label,
+        fontSize,
+        spacingPx,
+      });
+      const placed = candidates.filter((candidate) => claim(candidate, band.label));
+      if (placed.length === 0) {
+        continue;
+      }
+      // Only the first placement breaks this ring's path; the rest rely on
+      // their halo. Breaking a ring in several places would need the path
+      // split into runs, and the halo already clears the line under the text.
+      gaps.set(ring, placed[0]);
+      for (const placement of placed) {
+        labels.push({ ...placement, text: band.label });
+      }
+    }
+  }
+  return { labels, gaps };
+}
+
 export function buildMonochromeIsochroneSvg(scene) {
   const { widthPx, heightPx, bands } = scene;
   if (!Number.isFinite(widthPx) || !Number.isFinite(heightPx)) {
@@ -451,25 +523,19 @@ export function buildMonochromeIsochroneSvg(scene) {
     return true;
   };
 
-  const labelSpacingPx = scene.labelSpacingPx ?? Math.max(320, Math.min(widthPx, heightPx) / 3);
+  const plan = scene.labels
+    ? { labels: scene.labels, gaps: scene.labelGaps ?? new Map() }
+    : planContourLabels(bands, {
+      transform,
+      fontSize,
+      widthPx,
+      heightPx,
+      spacingPx: scene.labelSpacingPx,
+    });
+
   for (const band of bands) {
     for (const ring of band.rings) {
-      const candidates = band.label && ring.isHole !== true
-        ? placeContourLabels(ring.points, {
-          transform,
-          text: band.label,
-          fontSize,
-          spacingPx: labelSpacingPx,
-        })
-        : [];
-      // Rotation is ignored when testing for a clash: an axis-aligned box
-      // around the unrotated run is a little generous, which is the side to
-      // err on when the alternative is two values printed over each other.
-      const placed = candidates.filter((candidate) => claim(candidate, band.label));
-      // Only the first placement can break this ring's path; the rest rely on
-      // their halo. Breaking a ring in several places would need the path
-      // split into runs, and the halo already clears the line under the text.
-      const gap = placed[0] ?? null;
+      const gap = plan.gaps.get(ring) ?? null;
       const pathData = gap
         ? ringPathWithGap(ring.points, transform, gap)
         : ringToPathData(ring.points, transform);
@@ -482,16 +548,19 @@ export function buildMonochromeIsochroneSvg(scene) {
         `<path d="${pathData}" fill="none" stroke="${ink}"`
         + ` stroke-width="${formatSvgNumber(strokeWidth)}" stroke-linejoin="round" />`,
       );
-      for (const placement of placed) {
-        labels.push(renderHaloedLabel(placement, band.label, {
-          fontSize,
-          ink,
-          paper,
-          followContour: scene.labelsFollowContour !== false,
-        }));
-      }
     }
   }
+  for (const label of plan.labels) {
+    labels.push(renderHaloedLabel(label, label.text, {
+      fontSize,
+      ink,
+      paper,
+      // Along the contour unless a caller says otherwise: that is what an
+      // isoline label does, on a weather chart or an Ordnance Survey sheet.
+      followContour: scene.labelsFollowContour !== false,
+    }));
+  }
+
   parts.push(...labels);
   if (scene.legend !== false) {
     parts.push(buildLegendMarkup(bands, { widthPx, heightPx, ink, paper, fontSize, scene }));

@@ -104,7 +104,8 @@ import {
   blitPixelGridToCanvas,
   getOrCreateIsochroneRenderer,
 } from './render/isochrone-renderer.js';
-import { buildMonochromeScreenSvg } from './render/monochrome-screen.js';
+import { buildMonochromeScene } from './render/monochrome-screen.js';
+import { drawMonochromeScene } from './render/monochrome-canvas.js';
 import {
   clearGrid,
   clearTravelTimeGrid,
@@ -1610,11 +1611,59 @@ function translateViewportIntoGrid(viewport, fitBoundingBoxPx, grid) {
 
 const MONOCHROME_PATTERN_COUNT = 2;
 
-function hideMonochromeOverlay(shell) {
-  const overlay = shell.monochromeOverlay;
-  if (overlay && overlay.hidden !== true) {
-    overlay.hidden = true;
-    overlay.innerHTML = '';
+/**
+ * Swaps the map canvas for a fresh one, so a 2D context can be had after WebGL
+ * has claimed the old one, and hands back the node that replaced it.
+ *
+ * Returns null when there is no rebind hook: every pointer handler in
+ * canvas-routing is bound to the node, so replacing it without rebinding would
+ * leave a map nothing was listening to - the same fault as hiding it, arrived
+ * at from the other direction.
+ */
+function replaceMapCanvasElement(shell) {
+  const canvas = shell.isochroneCanvas;
+  if (typeof shell.rebindMapCanvas !== 'function' || !canvas.parentNode) {
+    return null;
+  }
+  const replacement = canvas.ownerDocument.createElement('canvas');
+  replacement.id = canvas.id;
+  replacement.width = canvas.width;
+  replacement.height = canvas.height;
+  replacement.className = canvas.className;
+  for (const name of canvas.getAttributeNames()) {
+    if (name !== 'id' && name !== 'width' && name !== 'height' && name !== 'class') {
+      replacement.setAttribute(name, canvas.getAttribute(name));
+    }
+  }
+  replacement.style.cssText = canvas.style.cssText;
+  canvas.parentNode.replaceChild(replacement, canvas);
+  shell.isochroneCanvas = replacement;
+  shell.mapCanvas = replacement;
+  shell.rebindMapCanvas(replacement);
+  return replacement;
+}
+
+/**
+ * Puts the map back the way colour rendering needs it.
+ *
+ * Monochrome leaves the canvas holding a 2D context, and a canvas cannot go
+ * back from 2D to WebGL any more than it can go the other way - so returning
+ * to colour swaps the element too, or every colour render afterwards would be
+ * stuck on the software fallback for the rest of the session.
+ */
+export function restoreColourRenderingSurface(shell) {
+  if (!shell || !shell.isochroneCanvas) {
+    return;
+  }
+  if (shell.isochroneCanvas.__monochromeContext) {
+    const replacement = replaceMapCanvasElement(shell);
+    if (replacement !== null) {
+      delete replacement.__monochromeContext;
+    } else {
+      // No way to rebind, so the element stays and so does its 2D context;
+      // colour still draws, just through the fallback renderer.
+      delete shell.isochroneCanvas.__monochromeContext;
+    }
   }
   if (shell.boundaryCanvas && shell.boundaryCanvas.style) {
     shell.boundaryCanvas.style.visibility = '';
@@ -1624,13 +1673,13 @@ function hideMonochromeOverlay(shell) {
   }
 }
 
-function renderMonochromeSnapshotToOverlay(shell, mapData, snapshot, options) {
-  const overlay = shell.monochromeOverlay;
-  if (!overlay) {
-    return false;
-  }
+function renderMonochromeSnapshot(shell, mapData, snapshot, options) {
   const canvas = shell.isochroneCanvas;
   syncCanvasToDisplaySize(canvas);
+  const context = acquireMonochromeContext(shell);
+  if (!context) {
+    return false;
+  }
   // Cleared, never hidden. Every pointer handler in canvas-routing is bound to
   // this element, and visibility:hidden takes it out of hit testing - which is
   // exactly how monochrome came to have no pan and no zoom.
@@ -1651,7 +1700,7 @@ function renderMonochromeSnapshotToOverlay(shell, mapData, snapshot, options) {
     shell.isochroneLegend.style.visibility = 'hidden';
   }
 
-  const markup = buildMonochromeScreenSvg(mapData, snapshot, {
+  const scene = buildMonochromeScene(mapData, snapshot, {
     widthPx: canvas.width,
     heightPx: canvas.height,
     viewport: options.viewport,
@@ -1666,9 +1715,42 @@ function renderMonochromeSnapshotToOverlay(shell, mapData, snapshot, options) {
     projectedBoundary: mapData.projectedBoundary ?? null,
   });
 
-  overlay.hidden = false;
-  overlay.innerHTML = markup ?? '';
+  if (scene === null) {
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    return false;
+  }
+  drawMonochromeScene(context, scene);
   return true;
+}
+
+/**
+ * A 2D context for the map canvas.
+ *
+ * A canvas that has ever held a WebGL context can never give a 2D one, so
+ * switching to monochrome on a WebGL-rendered map means replacing the element
+ * - cloning it, swapping it in, and rebinding what was listening. Everything
+ * bound to a canvas is bound to that node, so this returns null rather than
+ * guessing when the caller has not provided a way to rebind.
+ */
+function acquireMonochromeContext(shell) {
+  const canvas = shell.isochroneCanvas;
+  const existing = canvas.__monochromeContext;
+  if (existing) {
+    return existing;
+  }
+  const renderer = canvas.__isochroneRenderer;
+  if (renderer && renderer.mode !== 'canvas-2d') {
+    const replacement = replaceMapCanvasElement(shell);
+    if (replacement === null) {
+      return null;
+    }
+  }
+  const context = shell.isochroneCanvas.getContext('2d');
+  if (context) {
+    shell.isochroneCanvas.__monochromeContext = context;
+  }
+  return context;
 }
 
 export function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
@@ -1681,7 +1763,7 @@ export function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   // unclickable, because the pointer handlers had moved on with the canvas
   // beneath it.
   if (!mapData || typeof mapData !== 'object' || !mapData.graph || !mapData.nodePixels) {
-    hideMonochromeOverlay(shell);
+    restoreColourRenderingSurface(shell);
     return false;
   }
 
@@ -1694,11 +1776,11 @@ export function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
       && !(distSeconds instanceof Float64Array)
     )
   ) {
-    hideMonochromeOverlay(shell);
+    restoreColourRenderingSurface(shell);
     return false;
   }
   if (distSeconds.length < mapData.graph.header.nNodes) {
-    hideMonochromeOverlay(shell);
+    restoreColourRenderingSurface(shell);
     return false;
   }
 
@@ -1720,14 +1802,14 @@ export function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   // colour, which is what happened on the redraw after a print dialog closed.
   const mapStyle = options.mapStyle ?? getMapStyleFromShell(shell);
   if (normalizeMapStyle(mapStyle) === MAP_STYLE_MONOCHROME) {
-    return renderMonochromeSnapshotToOverlay(shell, mapData, snapshot, {
+    return renderMonochromeSnapshot(shell, mapData, snapshot, {
       ...options,
       allowedModeMask,
       colourCycleMinutes,
       viewport,
     });
   }
-  hideMonochromeOverlay(shell);
+  restoreColourRenderingSurface(shell);
 
   const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
   updateRenderBackendBadge(shell, renderer);
@@ -3536,6 +3618,19 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
     }
     let initializedMapData = null;
     let routingBinding = null;
+    // Switching to monochrome needs a 2D context, and a canvas that has held
+    // WebGL can never give one - so the element is replaced. Everything
+    // listening was bound to the old node, so it has to be bound again to the
+    // new one; without this hook the swap is refused rather than silently
+    // producing a map nothing responds to.
+    shell.rebindMapCanvas = () => {
+      if (routingBinding?.dispose) {
+        routingBinding.dispose();
+      }
+      routingBinding = initializedMapData
+        ? bindCanvasClickRouting(shell, initializedMapData, { autoStartFromLocation: false })
+        : null;
+    };
     let currentLocationId = null;
     let isLocationLoading = false;
     const redrawLoadedMap = (mapData) => {
@@ -3613,7 +3708,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
       // Down before the new region starts loading, not after it arrives: an
       // overlay drawn from the old map data has nothing to do with the region
       // now being fetched, and a load takes seconds.
-      hideMonochromeOverlay(shell);
+      restoreColourRenderingSurface(shell);
 
       const { boundaryUrl, graphUrl } = buildLocationAssetUrls(nextLocation);
       try {
