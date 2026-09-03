@@ -2473,13 +2473,54 @@ test('the colour basemap and key come back whenever monochrome is not drawn', ()
   assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), false);
   assert.equal(shell.boundaryCanvas.style.visibility, '');
 
-  // Routed, but the origin reaches nowhere at all, so there is no scene to
-  // draw. This is the case that used the chrome's own absence as the answer:
-  // hidden basemap, hidden key, cleared canvas - a blank window.
-  shell.boundaryCanvas.style.visibility = 'hidden';
-  shell.isochroneLegend.style.visibility = 'hidden';
-  mapData.lastRoutingSnapshot = { distSeconds: new Float32Array(4).fill(Infinity) };
-  assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), false);
-  assert.equal(shell.boundaryCanvas.style.visibility, '', 'basemap is back');
-  assert.equal(shell.isochroneLegend.style.visibility, '', 'key is back');
+});
+
+test('an origin that reaches nowhere still draws a monochrome map', () => {
+  // A field with no bands in it is not a failure to draw: the coastline and
+  // the roads are still there, and that is what a reader needs to see. Two
+  // answers to this have already been wrong - clearing the canvas under hidden
+  // chrome, which is a blank window, and putting the chrome back, which
+  // answers a monochrome setting with the colour basemap.
+  const drawnScenes = [];
+  const shell = {
+    isochroneCanvas: {
+      width: 100,
+      height: 100,
+      style: {},
+      __isochroneRenderer: {
+        draw() {},
+        drawMonochromeScene(scene) {
+          drawnScenes.push(scene);
+        },
+        clear() {},
+      },
+    },
+    boundaryCanvas: { style: { visibility: 'hidden' } },
+    isochroneLegend: { style: { visibility: 'hidden' } },
+    mapStyleRadios: [
+      { value: 'colour', checked: false },
+      { value: 'monochrome', checked: true },
+    ],
+  };
+  const mapData = {
+    graph: {
+      header: { nNodes: 4, gridWidthPx: 100, gridHeightPx: 100, pixelSizeM: 10 },
+      nodeU32: new Uint32Array(16),
+      nodeU16: new Uint16Array(32),
+      edgeU32: new Uint32Array(0),
+      edgeModeMask: new Uint8Array(0),
+      edgeRoadClassId: new Uint8Array(0),
+    },
+    nodePixels: {
+      nodePixelX: Uint16Array.of(10, 20, 20, 10),
+      nodePixelY: Uint16Array.of(10, 10, 20, 20),
+    },
+    lastRoutingSnapshot: { distSeconds: new Float32Array(4).fill(Infinity) },
+  };
+
+  assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), true);
+  assert.equal(drawnScenes.length, 1, 'a scene was drawn');
+  assert.deepEqual(drawnScenes[0].bands, [], 'and it has no bands to draw');
+  assert.equal(shell.boundaryCanvas.style.visibility, 'hidden', 'the colour basemap stays down');
+  assert.equal(shell.isochroneLegend.style.visibility, 'hidden', 'and so does the colour key');
 });

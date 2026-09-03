@@ -1636,12 +1636,12 @@ function renderMonochromeSnapshot(shell, mapData, snapshot, options) {
     collectTriangles: true,
   });
 
-  // Built before the chrome comes down, and the chrome goes back up if there
-  // was nothing to build. Hiding it first meant a scene that could not be made
-  // left the whole window empty - no basemap, no key, no bands - which reads
-  // as a broken page rather than as an origin that reaches nowhere.
+  // A scene with no bands in it still draws: the coastline and the roads are
+  // part of it. So the only way to get here is a canvas with no size, where
+  // nothing renders under either style - and putting the colour basemap back
+  // would answer a monochrome setting with a different map rather than a
+  // degraded one.
   if (scene === null) {
-    restoreColourRenderingSurface(shell);
     if (typeof renderer.clear === 'function') {
       renderer.clear();
     }

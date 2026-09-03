@@ -149,6 +149,41 @@ function getOrMeasureLongestReachableSeconds(snapshot) {
   return longest;
 }
 
+/**
+ * The bands worth drawing at this zoom.
+ *
+ * Below about the minimum output area a pocket is a speck rather than a
+ * feature. That is expressed in output pixels, so it means the same thing on
+ * screen and on a poster - which makes it the one part of a band that depends
+ * on the zoom, and so the one part computed per frame rather than cached.
+ *
+ * It declutters; it is not a visibility gate. An origin that only reaches a
+ * small disconnected fragment - a courtyard, a gated estate, an island - is
+ * all specks at low zoom, and dropping every one of them would empty the map
+ * instead of showing the little there is to show.
+ */
+function selectDrawableBands(mapData, triangulation, snapshot, thresholds, frame, options, graph) {
+  const regions = getOrBuildBandRegions(mapData, triangulation, snapshot, {
+    thresholds,
+    collectTriangles: options.collectTriangles === true,
+    // The limit is a real distance, but the triangulation lives in graph
+    // pixels - the space the viewport already works in - so it converts here.
+    maxTriangleSpanM: (options.maxTriangleSpanM ?? DEFAULT_MAX_TRIANGLE_SPAN_M)
+      / graph.header.pixelSizeM,
+  });
+
+  const minimumOutputArea = options.minimumRingOutputArea ?? 90;
+  const minimumRingArea = minimumOutputArea / (frame.effectiveScale * frame.effectiveScale);
+  const drawable = [];
+  for (const region of regions.bands) {
+    const rings = region.rings.filter((ring) => Math.abs(ring.signedArea) >= minimumRingArea);
+    if (rings.length > 0) {
+      drawable.push({ ...region, rings });
+    }
+  }
+  return drawable.length > 0 ? drawable : regions.bands;
+}
+
 function formatBandLabel(minutes, formatMinutes) {
   if (typeof formatMinutes === 'function') {
     return formatMinutes(minutes);
@@ -293,9 +328,6 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
   // every frame at whatever resolution happened to be on screen, which is what
   // made the bands mottle when zoomed and cost megabytes of markup per pan.
   const triangulation = getOrBuildNodeTriangulation(mapData);
-  if (triangulation.triangles.length === 0) {
-    return null;
-  }
 
   const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   const patternCount = options.patternCount ?? 2;
@@ -313,42 +345,14 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
   ) {
     thresholds.push(seconds);
   }
-  if (thresholds.length === 0) {
-    return null;
-  }
 
-  const regions = getOrBuildBandRegions(mapData, triangulation, snapshot, {
-    thresholds,
-    collectTriangles: options.collectTriangles === true,
-    // The limit is a real distance, but the triangulation lives in graph
-    // pixels - the space the viewport already works in - so it converts here.
-    maxTriangleSpanM: (options.maxTriangleSpanM ?? DEFAULT_MAX_TRIANGLE_SPAN_M)
-      / graph.header.pixelSizeM,
-  });
-
-  // Below about this many square pixels on the finished map, a pocket is a
-  // speck rather than a feature. Expressed in output pixels, so it means the
-  // same thing on screen and on a poster - which makes it the one part of a
-  // band that depends on the zoom, and so the one part applied per frame.
-  const minimumOutputArea = options.minimumRingOutputArea ?? 90;
-  const minimumRingArea = minimumOutputArea / (frame.effectiveScale * frame.effectiveScale);
-  let visibleRegionBands = [];
-  for (const region of regions.bands) {
-    const rings = region.rings.filter((ring) => Math.abs(ring.signedArea) >= minimumRingArea);
-    if (rings.length > 0) {
-      visibleRegionBands.push({ ...region, rings });
-    }
-  }
-  // Decluttering, not a visibility gate. An origin that only reaches a small
-  // disconnected fragment - a courtyard, a gated estate, an island - is all
-  // specks at low zoom, and dropping every one of them would blank the map
-  // instead of showing the little there is to show.
-  if (visibleRegionBands.length === 0) {
-    visibleRegionBands = regions.bands;
-  }
-  if (visibleRegionBands.length === 0) {
-    return null;
-  }
+  // A field with no bands in it is still a monochrome map: it has a coastline
+  // and it has roads. Treating a bandless field as a failure to build the
+  // scene put the colour basemap back on screen under a monochrome setting,
+  // which is a different map, not a degraded one.
+  const visibleRegionBands = thresholds.length > 0 && triangulation.triangles.length > 0
+    ? selectDrawableBands(mapData, triangulation, snapshot, thresholds, frame, options, graph)
+    : [];
 
   // Graph pixels straight to canvas pixels: the same frame the basemap and the
   // edge renderer use, so everything registers without a second thought.
