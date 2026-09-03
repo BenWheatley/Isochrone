@@ -1671,11 +1671,17 @@ function renderMonochromeSnapshotToOverlay(shell, mapData, snapshot, options) {
   return true;
 }
 
-function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
+export function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   if (!shell || typeof shell !== 'object' || !shell.isochroneCanvas) {
     return false;
   }
+  // The overlay holds a picture of one particular snapshot, so anything that
+  // ends this function without drawing a new one has to take the old one down.
+  // Leaving it up is how a region switch left the previous city on screen -
+  // unclickable, because the pointer handlers had moved on with the canvas
+  // beneath it.
   if (!mapData || typeof mapData !== 'object' || !mapData.graph || !mapData.nodePixels) {
+    hideMonochromeOverlay(shell);
     return false;
   }
 
@@ -1688,9 +1694,11 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
       && !(distSeconds instanceof Float64Array)
     )
   ) {
+    hideMonochromeOverlay(shell);
     return false;
   }
   if (distSeconds.length < mapData.graph.header.nNodes) {
+    hideMonochromeOverlay(shell);
     return false;
   }
 
@@ -3601,6 +3609,11 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
       if (shell.printButton) {
         shell.printButton.disabled = true;
       }
+
+      // Down before the new region starts loading, not after it arrives: an
+      // overlay drawn from the old map data has nothing to do with the region
+      // now being fetched, and a load takes seconds.
+      hideMonochromeOverlay(shell);
 
       const { boundaryUrl, graphUrl } = buildLocationAssetUrls(nextLocation);
       try {
