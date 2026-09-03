@@ -216,6 +216,12 @@ export function buildBandRegions(triangulation, distSeconds, options = {}) {
     return low;
   };
 
+  // The clipped pieces themselves, kept as triangles per band. Merging them
+  // into rings is what a stroked outline and an SVG fill need; a GPU wants the
+  // area, and the pieces already are the area - each is convex, so a fan off
+  // its first vertex triangulates it exactly with no tessellation step.
+  const wantsTriangles = options.collectTriangles === true;
+  const trianglesByBand = new Map();
   let clippedPieces = 0;
   let spannedTriangles = 0;
   for (let t = 0; t < triangles.length; t += 3) {
@@ -263,6 +269,19 @@ export function buildBandRegions(triangulation, distSeconds, options = {}) {
       for (let index = 0; index < keys.length; index += 1) {
         addEdge(bandIndex, keys[index], keys[(index + 1) % keys.length]);
       }
+      if (wantsTriangles) {
+        let fan = trianglesByBand.get(bandIndex);
+        if (fan === undefined) {
+          fan = [];
+          trianglesByBand.set(bandIndex, fan);
+        }
+        const [originX, originY] = positionOf(keys[0]);
+        for (let index = 1; index + 1 < keys.length; index += 1) {
+          const [x1, y1] = positionOf(keys[index]);
+          const [x2, y2] = positionOf(keys[index + 1]);
+          fan.push(originX, originY, x1, y1, x2, y2);
+        }
+      }
     }
   }
 
@@ -270,7 +289,11 @@ export function buildBandRegions(triangulation, distSeconds, options = {}) {
   for (const [bandIndex, edges] of [...edgesByBand.entries()].sort((x, y) => x[0] - y[0])) {
     const rings = stitchRings(edges, positionOf, minimumRingArea);
     if (rings.length > 0) {
-      bands.push({ bandIndex, rings });
+      const band = { bandIndex, rings };
+      if (wantsTriangles) {
+        band.triangles = Float32Array.from(trianglesByBand.get(bandIndex) ?? []);
+      }
+      bands.push(band);
     }
   }
   return { bands, clippedPieces, spannedTriangles, maxTriangleSpanM: maxSpanM };
