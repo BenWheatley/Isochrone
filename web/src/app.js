@@ -1620,11 +1620,6 @@ function renderMonochromeSnapshot(shell, mapData, snapshot, options) {
   }
   syncCanvasToDisplaySize(shell.isochroneCanvas);
 
-  // The colour basemap and key describe a map that is not on screen. The scene
-  // draws its own coastline and roads, from the same projection, so they
-  // register with the bands laid over them.
-  setMapChromeVisibility(shell, 'hidden');
-
   const scene = buildMonochromeScene(mapData, snapshot, {
     widthPx: shell.isochroneCanvas.width,
     heightPx: shell.isochroneCanvas.height,
@@ -1641,12 +1636,22 @@ function renderMonochromeSnapshot(shell, mapData, snapshot, options) {
     collectTriangles: true,
   });
 
+  // Built before the chrome comes down, and the chrome goes back up if there
+  // was nothing to build. Hiding it first meant a scene that could not be made
+  // left the whole window empty - no basemap, no key, no bands - which reads
+  // as a broken page rather than as an origin that reaches nowhere.
   if (scene === null) {
+    restoreColourRenderingSurface(shell);
     if (typeof renderer.clear === 'function') {
       renderer.clear();
     }
     return false;
   }
+
+  // The colour basemap and key describe a map that is not on screen. The scene
+  // draws its own coastline and roads, from the same projection, so they
+  // register with the bands laid over them.
+  setMapChromeVisibility(shell, 'hidden');
   renderer.drawMonochromeScene(scene);
   return true;
 }

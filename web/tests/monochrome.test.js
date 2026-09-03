@@ -18,6 +18,7 @@ import {
   placeContourLabel,
   placeContourLabels,
 } from '../src/export/monochrome-svg.js';
+import { buildMonochromeScene } from '../src/render/monochrome-screen.js';
 
 // How far apart two hatches must sit in ink coverage to stay apart once the
 // greys are gone. The colour palette this replaces shipped with two bands
@@ -410,4 +411,52 @@ test('a label gap is a short forward run, never a wrap around the ring', () => {
       `gap spans ${span} of ${count} points, which is a stretch of contour, not a label`,
     );
   }
+});
+
+/**
+ * A graph of a few nodes in one small cluster, with no edges: enough for a
+ * triangulation and a travel-time field, nothing to draw as roads.
+ */
+function buildTinyClusterMapData() {
+  const nodeCount = 4;
+  return {
+    graph: {
+      header: { nNodes: nodeCount, gridWidthPx: 400, gridHeightPx: 400, pixelSizeM: 10 },
+      nodeU32: new Uint32Array(nodeCount * 4),
+      nodeU16: new Uint16Array(nodeCount * 8),
+      edgeU32: new Uint32Array(0),
+      edgeModeMask: new Uint8Array(0),
+      edgeRoadClassId: new Uint8Array(0),
+    },
+    nodePixels: {
+      nodePixelX: Uint16Array.of(200, 210, 210, 200),
+      nodePixelY: Uint16Array.of(200, 200, 210, 210),
+    },
+  };
+}
+
+test('the speck filter declutters the map, it never empties it', () => {
+  // An origin that only reaches a small disconnected fragment - a courtyard, a
+  // gated estate, an island - is all specks at low zoom. Dropping every ring
+  // below the minimum then left no band at all, and a scene of no bands is no
+  // scene: the caller blanked the window rather than showing the little there
+  // was to show.
+  const mapData = buildTinyClusterMapData();
+  const snapshot = { distSeconds: Float32Array.of(0, 120, 240, 360) };
+  const options = { widthPx: 400, heightPx: 400, cycleMinutes: 10, patternCount: 2 };
+
+  const drawn = buildMonochromeScene(mapData, snapshot, options);
+  assert.ok(drawn, 'the cluster is drawable at all');
+
+  // Every ring in it is now far below the threshold.
+  const decluttered = buildMonochromeScene(mapData, snapshot, {
+    ...options,
+    minimumRingOutputArea: 1e12,
+  });
+  assert.ok(decluttered, 'a map of nothing but specks still draws its specks');
+  assert.ok(decluttered.bands.length > 0, 'and has bands in it to draw');
+  assert.ok(
+    decluttered.bands.every((band) => band.rings.length > 0),
+    'every band it reports is one with geometry',
+  );
 });

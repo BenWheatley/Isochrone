@@ -20,6 +20,7 @@ import {
   HATCH_PATTERN_LADDER,
   selectHatchPatterns,
   WATER_HATCH_PATTERN,
+  ROAD_INK,
   WATER_INK,
 } from './hatch.js';
 
@@ -36,6 +37,9 @@ import {
 const MAP_HATCH_PAIR = [HATCH_PATTERN_LADDER[0], HATCH_PATTERN_LADDER[1]];
 
 const TRIANGULATION_PROPERTY = '__nodeTriangulation';
+const BAND_REGION_CACHE_PROPERTY = '__monochromeBandRegions';
+const ROAD_SEGMENT_CACHE_PROPERTY = '__monochromeRoadSegments';
+const LONGEST_REACHABLE_PROPERTY = '__longestReachableSeconds';
 // Roads are for orientation, so they have to stay legible as roads. Portsmouth's
 // whole network inside a 250px island is a grey wash, not a street map, so at
 // low zoom only the more important roads are drawn.
@@ -95,6 +99,56 @@ function getOrBuildNodeTriangulation(mapData) {
   return triangulation;
 }
 
+/**
+ * The band regions for a routing snapshot, built once and kept.
+ *
+ * Bands are geometry in graph space: which triangle falls in which time band
+ * is a property of the field, not of where the map happens to be scrolled to.
+ * Paris costs about 1.5 s to classify and stitch, so recomputing it per frame
+ * held panning to under one frame a second; cached, a pan is a transform.
+ *
+ * Built with no minimum ring area, because that threshold is the one part of a
+ * band that does depend on the zoom. It is applied to the cached rings each
+ * frame instead, which is exact: stitchRings only ever drops rings below it,
+ * and each ring carries the signed area the test needs.
+ *
+ * Keyed on the snapshot object, which routing replaces wholesale on every run.
+ * The distance array alone would not do: the routing kernel reuses its output
+ * buffers, so the same Float32Array can come back holding a different field.
+ */
+function getOrBuildBandRegions(mapData, triangulation, snapshot, options) {
+  const key = `${options.thresholds.join(',')}|${options.maxTriangleSpanM}|${options.collectTriangles}`;
+  const cached = mapData[BAND_REGION_CACHE_PROPERTY];
+  if (cached && cached.snapshot === snapshot && cached.key === key) {
+    return cached.regions;
+  }
+  const regions = buildBandRegions(triangulation, snapshot.distSeconds, {
+    thresholds: options.thresholds,
+    collectTriangles: options.collectTriangles,
+    minimumRingArea: 0,
+    maxTriangleSpanM: options.maxTriangleSpanM,
+  });
+  mapData[BAND_REGION_CACHE_PROPERTY] = { snapshot, key, regions };
+  return regions;
+}
+
+/** The slowest reached time, which sets how many bands there are. */
+function getOrMeasureLongestReachableSeconds(snapshot) {
+  const cached = snapshot[LONGEST_REACHABLE_PROPERTY];
+  if (cached !== undefined) {
+    return cached;
+  }
+  let longest = 0;
+  for (let index = 0; index < snapshot.distSeconds.length; index += 1) {
+    const seconds = snapshot.distSeconds[index];
+    if (Number.isFinite(seconds) && seconds > longest) {
+      longest = seconds;
+    }
+  }
+  snapshot[LONGEST_REACHABLE_PROPERTY] = longest;
+  return longest;
+}
+
 function formatBandLabel(minutes, formatMinutes) {
   if (typeof formatMinutes === 'function') {
     return formatMinutes(minutes);
@@ -115,18 +169,31 @@ function formatBandLabel(minutes, formatMinutes) {
  * the roads and the bands registered with each other. Visibility is still
  * judged in canvas pixels, since that is what "on screen" means.
  */
-function collectVisibleRoadSegments(graph, nodePixels, frame, widthPx, heightPx) {
-  const minimumRoadClass = minimumRoadClassForScale(frame.effectiveScale);
+/**
+ * Every drawable road at or above a class, deduplicated, in graph pixels.
+ *
+ * The graph stores each road twice, once per direction, so drawing it needs a
+ * seen-set over half a million edges - and that set does not depend on the
+ * viewport at all. Built once per class and kept, so a pan only has to decide
+ * what is on screen.
+ */
+function getOrBuildRoadSegmentsForClass(mapData, graph, nodePixels, minimumRoadClass) {
+  let cache = mapData[ROAD_SEGMENT_CACHE_PROPERTY];
+  if (cache === undefined) {
+    cache = new Map();
+    mapData[ROAD_SEGMENT_CACHE_PROPERTY] = cache;
+  }
+  const cached = cache.get(minimumRoadClass);
+  if (cached !== undefined) {
+    return cached;
+  }
+
   const segments = [];
   const nodeCount = graph.header.nNodes;
-  const toCanvasX = (graphPx) => (graphPx - frame.offsetXPx) * frame.effectiveScale;
-  const toCanvasY = (graphPx) => (graphPx - frame.offsetYPx) * frame.effectiveScale;
   const seen = new Set();
   for (let sourceIndex = 0; sourceIndex < nodeCount; sourceIndex += 1) {
     const firstEdge = graph.nodeU32[sourceIndex * 4 + 2];
     const edgeCount = graph.nodeU16[sourceIndex * 8 + 6];
-    const x0 = toCanvasX(nodePixels.nodePixelX[sourceIndex]);
-    const y0 = toCanvasY(nodePixels.nodePixelY[sourceIndex]);
     for (let edgeIndex = firstEdge; edgeIndex < firstEdge + edgeCount; edgeIndex += 1) {
       // A ferry is not a road. Drawn as one it is a long straight line
       // striking out to sea and off the map, which is worse than useless as
@@ -147,16 +214,6 @@ function collectVisibleRoadSegments(graph, nodePixels, frame, widthPx, heightPx)
       if (seen.has(key)) {
         continue;
       }
-      const x1 = toCanvasX(nodePixels.nodePixelX[targetIndex]);
-      const y1 = toCanvasY(nodePixels.nodePixelY[targetIndex]);
-      const offScreen =
-        (x0 < 0 && x1 < 0)
-        || (y0 < 0 && y1 < 0)
-        || (x0 > widthPx && x1 > widthPx)
-        || (y0 > heightPx && y1 > heightPx);
-      if (offScreen) {
-        continue;
-      }
       seen.add(key);
       segments.push(
         nodePixels.nodePixelX[sourceIndex],
@@ -166,7 +223,38 @@ function collectVisibleRoadSegments(graph, nodePixels, frame, widthPx, heightPx)
       );
     }
   }
-  return Float64Array.from(segments);
+  const packed = Float32Array.from(segments);
+  cache.set(minimumRoadClass, packed);
+  return packed;
+}
+
+/** Those of them that fall in the frame, in graph pixels. */
+function collectVisibleRoadSegments(mapData, graph, nodePixels, frame, widthPx, heightPx) {
+  const all = getOrBuildRoadSegmentsForClass(
+    mapData, graph, nodePixels, minimumRoadClassForScale(frame.effectiveScale),
+  );
+  const toCanvasX = (graphPx) => (graphPx - frame.offsetXPx) * frame.effectiveScale;
+  const toCanvasY = (graphPx) => (graphPx - frame.offsetYPx) * frame.effectiveScale;
+  const visible = new Float64Array(all.length);
+  let written = 0;
+  for (let index = 0; index + 3 < all.length; index += 4) {
+    const x0 = toCanvasX(all[index]);
+    const x1 = toCanvasX(all[index + 2]);
+    if ((x0 < 0 && x1 < 0) || (x0 > widthPx && x1 > widthPx)) {
+      continue;
+    }
+    const y0 = toCanvasY(all[index + 1]);
+    const y1 = toCanvasY(all[index + 3]);
+    if ((y0 < 0 && y1 < 0) || (y0 > heightPx && y1 > heightPx)) {
+      continue;
+    }
+    visible[written] = all[index];
+    visible[written + 1] = all[index + 1];
+    visible[written + 2] = all[index + 2];
+    visible[written + 3] = all[index + 3];
+    written += 4;
+  }
+  return visible.subarray(0, written);
 }
 
 /**
@@ -216,13 +304,7 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
   const bandSeconds = (cycleMinutes * 60) / patterns.length;
   const maxBands = options.maxBands ?? 40;
 
-  let longestReachableSeconds = 0;
-  for (let index = 0; index < snapshot.distSeconds.length; index += 1) {
-    const seconds = snapshot.distSeconds[index];
-    if (Number.isFinite(seconds) && seconds > longestReachableSeconds) {
-      longestReachableSeconds = seconds;
-    }
-  }
+  const longestReachableSeconds = getOrMeasureLongestReachableSeconds(snapshot);
   const thresholds = [];
   for (
     let seconds = bandSeconds;
@@ -235,20 +317,36 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
     return null;
   }
 
-  // Below about this many square pixels on the finished map, a pocket is a
-  // speck rather than a feature. Expressed in output pixels and converted, so
-  // it means the same thing on screen and on a poster.
-  const minimumOutputArea = options.minimumRingOutputArea ?? 90;
-  const regions = buildBandRegions(triangulation, snapshot.distSeconds, {
+  const regions = getOrBuildBandRegions(mapData, triangulation, snapshot, {
     thresholds,
     collectTriangles: options.collectTriangles === true,
-    minimumRingArea: minimumOutputArea / (frame.effectiveScale * frame.effectiveScale),
     // The limit is a real distance, but the triangulation lives in graph
     // pixels - the space the viewport already works in - so it converts here.
     maxTriangleSpanM: (options.maxTriangleSpanM ?? DEFAULT_MAX_TRIANGLE_SPAN_M)
       / graph.header.pixelSizeM,
   });
-  if (regions.bands.length === 0) {
+
+  // Below about this many square pixels on the finished map, a pocket is a
+  // speck rather than a feature. Expressed in output pixels, so it means the
+  // same thing on screen and on a poster - which makes it the one part of a
+  // band that depends on the zoom, and so the one part applied per frame.
+  const minimumOutputArea = options.minimumRingOutputArea ?? 90;
+  const minimumRingArea = minimumOutputArea / (frame.effectiveScale * frame.effectiveScale);
+  let visibleRegionBands = [];
+  for (const region of regions.bands) {
+    const rings = region.rings.filter((ring) => Math.abs(ring.signedArea) >= minimumRingArea);
+    if (rings.length > 0) {
+      visibleRegionBands.push({ ...region, rings });
+    }
+  }
+  // Decluttering, not a visibility gate. An origin that only reaches a small
+  // disconnected fragment - a courtyard, a gated estate, an island - is all
+  // specks at low zoom, and dropping every one of them would blank the map
+  // instead of showing the little there is to show.
+  if (visibleRegionBands.length === 0) {
+    visibleRegionBands = regions.bands;
+  }
+  if (visibleRegionBands.length === 0) {
     return null;
   }
 
@@ -259,12 +357,12 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
     (graphY - frame.offsetYPx) * frame.effectiveScale,
   ];
 
-  const bands = regions.bands.map((region, index) => ({
+  const bands = visibleRegionBands.map((region, index) => ({
     rings: region.rings,
     triangles: region.triangles,
     label: formatBandLabel(thresholds[region.bandIndex] / 60, options.formatMinutes),
     pattern: patterns[region.bandIndex % patterns.length],
-    isLimit: index === regions.bands.length - 1,
+    isLimit: index === visibleRegionBands.length - 1,
   }));
 
   const waterFeatures = (options.projectedBoundary?.waterFeatures ?? [])
@@ -294,6 +392,7 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
     labelGaps: gaps,
     waterPattern: WATER_HATCH_PATTERN,
     waterInk: WATER_INK,
+    roadInk: ROAD_INK,
     bandsIncludeHoles: true,
     ink: options.ink ?? '#000000',
     paper: options.paper ?? '#ffffff',
@@ -305,6 +404,7 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
     basemap: {
       waterFeatures,
       roadSegments: collectVisibleRoadSegments(
+        mapData,
         graph,
         mapData.nodePixels,
         frame,

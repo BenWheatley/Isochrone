@@ -444,7 +444,7 @@ export function buildMonochromeIsochroneSvg(scene) {
       // taken out of it.
       parts.push(
         `<path d="${data}" fill="url(#${WATER_HATCH_PATTERN.id})" fill-rule="evenodd" stroke="none" />`,
-        `<path d="${data}" fill="none" stroke="${waterInk}" stroke-width="${contourWidth}" />`,
+        `<path d="${data}" fill="none" stroke="${ink}" stroke-width="${contourWidth}" />`,
       );
     }
   }
@@ -459,7 +459,7 @@ export function buildMonochromeIsochroneSvg(scene) {
       );
     }
     parts.push(
-      `<path d="${commands.join('')}" fill="none" stroke="${ink}"`
+      `<path d="${commands.join('')}" fill="none" stroke="${scene.roadInk ?? ink}"`
       + ` stroke-width="${scene.roadStrokeWidth ?? 0.35}" stroke-linecap="round" />`,
     );
   }

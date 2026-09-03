@@ -2435,7 +2435,14 @@ test('the colour basemap and key come back whenever monochrome is not drawn', ()
   // them back, or a region part-way through loading shows the chrome of one
   // map over the drawing of another.
   const shell = {
-    isochroneCanvas: { width: 100, height: 100, style: {} },
+    isochroneCanvas: {
+      width: 100,
+      height: 100,
+      style: {},
+      // No WebGL, so the 2D fallback is built - which is all this needs: the
+      // scene never gets as far as being drawn.
+      getContext: (kind) => (kind === '2d' ? { canvas: null, clearRect() {} } : null),
+    },
     boundaryCanvas: { style: { visibility: 'hidden' } },
     isochroneLegend: { style: { visibility: 'hidden' } },
     mapStyleRadios: [
@@ -2452,7 +2459,7 @@ test('the colour basemap and key come back whenever monochrome is not drawn', ()
   // Loaded, but nothing routed on it yet.
   shell.boundaryCanvas.style.visibility = 'hidden';
   const mapData = {
-    graph: { header: { nNodes: 4 } },
+    graph: { header: { nNodes: 4, gridWidthPx: 100, gridHeightPx: 100, pixelSizeM: 10 } },
     nodePixels: { nodePixelX: new Uint16Array(4), nodePixelY: new Uint16Array(4) },
     lastRoutingSnapshot: null,
   };
@@ -2465,4 +2472,14 @@ test('the colour basemap and key come back whenever monochrome is not drawn', ()
   mapData.lastRoutingSnapshot = { distSeconds: new Float32Array(2) };
   assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), false);
   assert.equal(shell.boundaryCanvas.style.visibility, '');
+
+  // Routed, but the origin reaches nowhere at all, so there is no scene to
+  // draw. This is the case that used the chrome's own absence as the answer:
+  // hidden basemap, hidden key, cleared canvas - a blank window.
+  shell.boundaryCanvas.style.visibility = 'hidden';
+  shell.isochroneLegend.style.visibility = 'hidden';
+  mapData.lastRoutingSnapshot = { distSeconds: new Float32Array(4).fill(Infinity) };
+  assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), false);
+  assert.equal(shell.boundaryCanvas.style.visibility, '', 'basemap is back');
+  assert.equal(shell.isochroneLegend.style.visibility, '', 'key is back');
 });

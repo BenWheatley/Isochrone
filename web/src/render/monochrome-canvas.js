@@ -126,7 +126,7 @@ export function drawMonochromeScene(context, scene, options = {}) {
       context.moveTo(x0, y0);
       context.lineTo(x1, y1);
     }
-    context.strokeStyle = ink;
+    context.strokeStyle = scene.roadInk ?? ink;
     context.lineWidth = scene.roadStrokeWidth;
     context.stroke();
   }

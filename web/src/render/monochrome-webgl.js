@@ -389,7 +389,7 @@ export function drawMonochromeSceneWebGl(state, scene) {
         false,
       );
     }
-    drawTriangles(state, Float32Array.from(quads), ink, viewport);
+    drawTriangles(state, Float32Array.from(quads), parseCssColour(scene.roadInk ?? scene.ink), viewport);
   }
 
   let drawnBands = 0;

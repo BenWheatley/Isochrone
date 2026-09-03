@@ -62,12 +62,20 @@ export const HATCH_PATTERN_LADDER = [
  * particular cannot be confused with the bare-paper rung.
  */
 /**
- * Half-strength grey, not black. One bit is what this mode is designed to
- * survive, not a constraint it has to obey everywhere - and where grey is
- * available the sea is the first thing that should use it, because it covers
- * more of the sheet than anything else and has the least to say.
+ * Light grey, not black. One bit is what this mode is designed to survive, not
+ * a constraint it has to obey everywhere - and where grey is available the sea
+ * is the first thing that should use it, because it covers more of the sheet
+ * than anything else and has the least to say. The coastline itself stays full
+ * ink: it is a hard boundary and has to read as one.
  */
-export const WATER_INK = '#808080';
+export const WATER_INK = '#c4c4c4';
+
+/**
+ * Roads are for orientation, so they sit below the isochrone in the visual
+ * hierarchy but above the sea. Half-strength grey puts them there: legible as
+ * a street network, never mistaken for a contour.
+ */
+export const ROAD_INK = '#808080';
 
 export const WATER_HATCH_PATTERN = {
   id: 'mono-water',
