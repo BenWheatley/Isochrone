@@ -2429,19 +2429,25 @@ test('runConnectionScanFromWalkingReachableStops will not walk past the budget t
   assert.equal(beyondBudget.seedNodeIndices.length, 0);
 });
 
-test('the colour basemap and key come back whenever monochrome is not drawn', () => {
+test('the colour basemap and key come back only when there is no map to draw', () => {
   // Monochrome supplies its own coastline, roads and key, so those are hidden
-  // while it is on screen. Anything that ends without drawing it has to put
-  // them back, or a region part-way through loading shows the chrome of one
-  // map over the drawing of another.
+  // while it is on screen. The colour chrome is the right answer when there is
+  // no map data at all - mid region switch, before the new graph has arrived -
+  // and the wrong answer once there is, because a loaded region has a
+  // monochrome map to show whether or not anything has been routed on it yet.
+  const drawnScenes = [];
   const shell = {
     isochroneCanvas: {
       width: 100,
       height: 100,
       style: {},
-      // No WebGL, so the 2D fallback is built - which is all this needs: the
-      // scene never gets as far as being drawn.
-      getContext: (kind) => (kind === '2d' ? { canvas: null, clearRect() {} } : null),
+      __isochroneRenderer: {
+        draw() {},
+        drawMonochromeScene(scene) {
+          drawnScenes.push(scene);
+        },
+        clear() {},
+      },
     },
     boundaryCanvas: { style: { visibility: 'hidden' } },
     isochroneLegend: { style: { visibility: 'hidden' } },
@@ -2451,28 +2457,41 @@ test('the colour basemap and key come back whenever monochrome is not drawn', ()
     ],
   };
 
-  // No map data at all: mid region switch, before the new graph has arrived.
   assert.equal(rerenderIsochroneFromSnapshot(shell, null), false);
   assert.equal(shell.boundaryCanvas.style.visibility, '');
   assert.equal(shell.isochroneLegend.style.visibility, '');
 
-  // Loaded, but nothing routed on it yet.
+  // Loaded, but nothing routed on it yet: a monochrome basemap, not a colour
+  // one, and drawn without waiting on a triangulation that has no bands to
+  // classify.
   shell.boundaryCanvas.style.visibility = 'hidden';
+  shell.isochroneLegend.style.visibility = 'hidden';
   const mapData = {
-    graph: { header: { nNodes: 4, gridWidthPx: 100, gridHeightPx: 100, pixelSizeM: 10 } },
-    nodePixels: { nodePixelX: new Uint16Array(4), nodePixelY: new Uint16Array(4) },
+    graph: {
+      header: { nNodes: 4, gridWidthPx: 100, gridHeightPx: 100, pixelSizeM: 10 },
+      nodeU32: new Uint32Array(16),
+      nodeU16: new Uint16Array(32),
+      edgeU32: new Uint32Array(0),
+      edgeModeMask: new Uint8Array(0),
+      edgeRoadClassId: new Uint8Array(0),
+    },
+    nodePixels: {
+      nodePixelX: Uint16Array.of(10, 20, 20, 10),
+      nodePixelY: Uint16Array.of(10, 10, 20, 20),
+    },
     lastRoutingSnapshot: null,
   };
-  assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), false);
-  assert.equal(shell.boundaryCanvas.style.visibility, '');
+  assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), true);
+  assert.equal(shell.boundaryCanvas.style.visibility, 'hidden');
+  assert.deepEqual(drawnScenes.at(-1).bands, []);
+  assert.equal(mapData.__nodeTriangulation, undefined, 'no triangulation was built');
 
   // A snapshot too short for the new graph - the old region's distances
-  // against the new region's nodes.
-  shell.boundaryCanvas.style.visibility = 'hidden';
+  // against the new region's nodes - is no field at all, and is treated as one.
   mapData.lastRoutingSnapshot = { distSeconds: new Float32Array(2) };
-  assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), false);
-  assert.equal(shell.boundaryCanvas.style.visibility, '');
-
+  assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), true);
+  assert.equal(shell.boundaryCanvas.style.visibility, 'hidden');
+  assert.deepEqual(drawnScenes.at(-1).bands, []);
 });
 
 test('an origin that reaches nowhere still draws a monochrome map', () => {

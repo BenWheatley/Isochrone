@@ -39,6 +39,7 @@ const MAP_HATCH_PAIR = [HATCH_PATTERN_LADDER[0], HATCH_PATTERN_LADDER[1]];
 const TRIANGULATION_PROPERTY = '__nodeTriangulation';
 const BAND_REGION_CACHE_PROPERTY = '__monochromeBandRegions';
 const ROAD_SEGMENT_CACHE_PROPERTY = '__monochromeRoadSegments';
+const LAND_TEST_CACHE_PROPERTY = '__monochromeLandTest';
 const LONGEST_REACHABLE_PROPERTY = '__longestReachableSeconds';
 // Roads are for orientation, so they have to stay legible as roads. Portsmouth's
 // whole network inside a 250px island is a grey wash, not a street map, so at
@@ -127,6 +128,7 @@ function getOrBuildBandRegions(mapData, triangulation, snapshot, options) {
     collectTriangles: options.collectTriangles,
     minimumRingArea: 0,
     maxTriangleSpanM: options.maxTriangleSpanM,
+    isPocketLand: options.isPocketLand,
   });
   mapData[BAND_REGION_CACHE_PROPERTY] = { snapshot, key, regions };
   return regions;
@@ -166,6 +168,7 @@ function selectDrawableBands(mapData, triangulation, snapshot, thresholds, frame
   const regions = getOrBuildBandRegions(mapData, triangulation, snapshot, {
     thresholds,
     collectTriangles: options.collectTriangles === true,
+    isPocketLand: getOrBuildLandTest(mapData, options.projectedBoundary ?? null),
     // The limit is a real distance, but the triangulation lives in graph
     // pixels - the space the viewport already works in - so it converts here.
     maxTriangleSpanM: (options.maxTriangleSpanM ?? DEFAULT_MAX_TRIANGLE_SPAN_M)
@@ -182,6 +185,44 @@ function selectDrawableBands(mapData, triangulation, snapshot, thresholds, frame
     }
   }
   return drawable.length > 0 ? drawable : regions.bands;
+}
+
+/**
+ * Whether a point that carries no nodes is land.
+ *
+ * The coastline and inland water are already loaded and projected for the
+ * basemap, so the answer is a point-in-polygon test against them under the
+ * even-odd rule - which is how those rings are drawn, islands and all. Without
+ * a basemap there is no evidence either way and every enclosed pocket stays a
+ * hole.
+ */
+function getOrBuildLandTest(mapData, projectedBoundary) {
+  const cached = mapData[LAND_TEST_CACHE_PROPERTY];
+  if (cached !== undefined && cached.boundary === projectedBoundary) {
+    return cached.test;
+  }
+  const paths = [
+    ...(projectedBoundary?.waterFeatures ?? []),
+    ...(projectedBoundary?.inlandWaterFeatures ?? []),
+  ].flatMap((feature) => feature.paths);
+
+  const test = paths.length === 0
+    ? undefined
+    : (x, y) => {
+      let inside = false;
+      for (const path of paths) {
+        for (let index = 0, previous = path.length - 1; index < path.length; previous = index, index += 1) {
+          const [x0, y0] = path[previous];
+          const [x1, y1] = path[index];
+          if ((y0 > y) !== (y1 > y) && x < x0 + ((y - y0) / (y1 - y0)) * (x1 - x0)) {
+            inside = !inside;
+          }
+        }
+      }
+      return !inside;
+    };
+  mapData[LAND_TEST_CACHE_PROPERTY] = { boundary: projectedBoundary, test };
+  return test;
 }
 
 function formatBandLabel(minutes, formatMinutes) {
@@ -321,20 +362,18 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
     fitBoundingBoxPx: options.fitBoundingBoxPx ?? null,
   });
 
-  // Vector, not raster. The triangulation of the node positions is a static
-  // property of the region, so it is built once and kept: a routing run only
-  // reclassifies triangles, and panning or zooming is then a pure transform
-  // with nothing to recompute. A raster had to be rebuilt and re-contoured
-  // every frame at whatever resolution happened to be on screen, which is what
-  // made the bands mottle when zoomed and cost megabytes of markup per pan.
-  const triangulation = getOrBuildNodeTriangulation(mapData);
-
   const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   const patternCount = options.patternCount ?? 2;
   const patterns = options.patterns
     ?? (patternCount === 2 ? MAP_HATCH_PAIR : selectHatchPatterns(patternCount));
   const bandSeconds = (cycleMinutes * 60) / patterns.length;
-  const maxBands = options.maxBands ?? 40;
+  // A ceiling on work, not on what the map is allowed to say. At 40 it was the
+  // latter: fifteen-minute bands stopped at ten hours, so walking across Cyprus
+  // left most of the island in no band at all and only the fragments inside the
+  // limit were drawn - a scatter of specks reading as noise rather than as a
+  // map. The bound is here for a cycle short enough to ask for thousands of
+  // bands, which is a different thing entirely.
+  const maxBands = options.maxBands ?? 400;
 
   const longestReachableSeconds = getOrMeasureLongestReachableSeconds(snapshot);
   const thresholds = [];
@@ -350,7 +389,12 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
   // and it has roads. Treating a bandless field as a failure to build the
   // scene put the colour basemap back on screen under a monochrome setting,
   // which is a different map, not a degraded one.
-  const visibleRegionBands = thresholds.length > 0 && triangulation.triangles.length > 0
+  //
+  // The triangulation is only reached from here, which is what makes a
+  // basemap-only scene cheap enough to draw the instant a region loads: it is
+  // the expensive half of a region switch, and nothing without bands needs it.
+  const triangulation = thresholds.length > 0 ? getOrBuildNodeTriangulation(mapData) : null;
+  const visibleRegionBands = triangulation !== null && triangulation.triangles.length > 0
     ? selectDrawableBands(mapData, triangulation, snapshot, thresholds, frame, options, graph)
     : [];
 

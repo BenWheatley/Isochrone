@@ -460,3 +460,27 @@ test('the speck filter declutters the map, it never empties it', () => {
     'every band it reports is one with geometry',
   );
 });
+
+test('the band count is bounded by the field, not by a fixed ceiling', () => {
+  // Walking across Cyprus takes far longer than the ten hours forty bands of
+  // fifteen minutes can describe. Everything past the ceiling fell into no
+  // band at all, so most of the island drew as bare paper with a scatter of
+  // fragments in it - the map reporting the limit of its own loop rather than
+  // anything about the ground.
+  const mapData = buildTinyClusterMapData();
+  const distSeconds = Float64Array.of(0, 30 * 3600, 60 * 3600, 90 * 3600);
+  const scene = buildMonochromeScene(mapData, { distSeconds }, {
+    widthPx: 400,
+    heightPx: 400,
+    cycleMinutes: 30,
+    patternCount: 2,
+  });
+
+  assert.ok(scene, 'a scene was built');
+  // 90 hours in fifteen-minute bands, of which the two triangles cover a run.
+  assert.ok(
+    scene.bands.length > 40,
+    `only ${scene.bands.length} bands, so a ceiling is still truncating the field`,
+  );
+  assert.match(scene.bands.at(-1).label, /\d+\s*h/, 'the last band is labelled in hours');
+});

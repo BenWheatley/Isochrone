@@ -148,6 +148,142 @@ function clipToValue(polygon, thresholdSeconds, thresholdIndex, keepBelow, verti
  * back in the triangulation's own coordinates, so a caller scales them into
  * whatever it is drawing into - which is the point of doing this in vector.
  */
+/**
+ * Which triangles are part of the drawn surface.
+ *
+ * A triangle is dropped if any corner was never reached, or if it is too long
+ * to be evidence of anything - three nodes a kilometre apart say nothing about
+ * the ground between them, and joining them fills open country with a band
+ * nobody can stand in.
+ *
+ * Span alone is too blunt on its own, though, because it is one distance
+ * applied to a network whose sampling is not uniform. A field or a park inside
+ * a town is bounded by dense roads but has few nodes of its own, so every
+ * triangle crossing it is long and all of them are dropped - punching a hole
+ * through a band in ground the router reaches perfectly well.
+ *
+ * The distinction span cannot make is between open country and an enclosed
+ * pocket, and the triangulation does know that one: open country connects to
+ * the outside, a pocket does not. So the dropped triangles are flooded inwards
+ * from the hull, and whatever the flood never arrives at is enclosed by drawn
+ * ground on every side.
+ *
+ * That still leaves two things that look identical from here - a field and a
+ * lake, both being enclosed ground with no nodes on it - so an enclosed pocket
+ * is only reinstated where isPocketLand says it is land. Without that evidence
+ * a pocket stays a hole, which is the safer of the two errors: an unfilled
+ * field understates the map, a filled lake asserts something false.
+ */
+function selectDrawnTriangles(triangulation, distSeconds, maxSpanSquared, isPocketLand) {
+  const { triangles, halfedges, coords } = triangulation;
+  const triangleCount = triangles.length / 3;
+  const drawn = new Uint8Array(triangleCount);
+  const spanned = new Uint8Array(triangleCount);
+  let spannedTriangles = 0;
+
+  for (let t = 0; t < triangleCount; t += 1) {
+    const a = triangles[t * 3];
+    const b = triangles[t * 3 + 1];
+    const c = triangles[t * 3 + 2];
+    if (
+      !Number.isFinite(distSeconds[a])
+      || !Number.isFinite(distSeconds[b])
+      || !Number.isFinite(distSeconds[c])
+    ) {
+      continue;
+    }
+    if (longestEdgeSquared(coords, a, b, c) > maxSpanSquared) {
+      spanned[t] = 1;
+      spannedTriangles += 1;
+      continue;
+    }
+    drawn[t] = 1;
+  }
+
+  let enclosedTriangles = 0;
+  if (typeof isPocketLand === 'function' && spannedTriangles > 0) {
+    const visited = new Uint8Array(triangleCount);
+    const stack = [];
+
+    // Everything not drawn, flooded inwards from the hull. What it reaches is
+    // open country.
+    for (let t = 0; t < triangleCount; t += 1) {
+      if (drawn[t] || visited[t]) {
+        continue;
+      }
+      if (halfedges[t * 3] === -1 || halfedges[t * 3 + 1] === -1 || halfedges[t * 3 + 2] === -1) {
+        visited[t] = 1;
+        stack.push(t);
+      }
+    }
+    while (stack.length > 0) {
+      const t = stack.pop();
+      for (let corner = 0; corner < 3; corner += 1) {
+        const opposite = halfedges[t * 3 + corner];
+        if (opposite === -1) {
+          continue;
+        }
+        const neighbour = (opposite / 3) | 0;
+        if (!drawn[neighbour] && !visited[neighbour]) {
+          visited[neighbour] = 1;
+          stack.push(neighbour);
+        }
+      }
+    }
+
+    // What is left forms the enclosed pockets, one flood each. The land test
+    // runs once per pocket rather than once per triangle: a pocket is one
+    // piece of ground, and testing thousands of triangles to say the same
+    // thing about it would cost more than the whole classification.
+    for (let seed = 0; seed < triangleCount; seed += 1) {
+      if (drawn[seed] || visited[seed]) {
+        continue;
+      }
+      const pocket = [];
+      visited[seed] = 1;
+      stack.push(seed);
+      while (stack.length > 0) {
+        const t = stack.pop();
+        pocket.push(t);
+        for (let corner = 0; corner < 3; corner += 1) {
+          const opposite = halfedges[t * 3 + corner];
+          if (opposite === -1) {
+            continue;
+          }
+          const neighbour = (opposite / 3) | 0;
+          if (!drawn[neighbour] && !visited[neighbour]) {
+            visited[neighbour] = 1;
+            stack.push(neighbour);
+          }
+        }
+      }
+      const [sampleX, sampleY] = triangleCentroid(coords, triangles, pocket[0]);
+      if (!isPocketLand(sampleX, sampleY)) {
+        continue;
+      }
+      for (const t of pocket) {
+        if (spanned[t]) {
+          drawn[t] = 1;
+          enclosedTriangles += 1;
+          spannedTriangles -= 1;
+        }
+      }
+    }
+  }
+
+  return { drawn, spannedTriangles, enclosedTriangles };
+}
+
+function triangleCentroid(coords, triangles, triangleIndex) {
+  const a = triangles[triangleIndex * 3];
+  const b = triangles[triangleIndex * 3 + 1];
+  const c = triangles[triangleIndex * 3 + 2];
+  return [
+    (coords[2 * a] + coords[2 * b] + coords[2 * c]) / 3,
+    (coords[2 * a + 1] + coords[2 * b + 1] + coords[2 * c + 1]) / 3,
+  ];
+}
+
 export function buildBandRegions(triangulation, distSeconds, options = {}) {
   const { triangles, coords } = triangulation;
   const thresholds = options.thresholds;
@@ -223,21 +359,19 @@ export function buildBandRegions(triangulation, distSeconds, options = {}) {
   const wantsTriangles = options.collectTriangles === true;
   const trianglesByBand = new Map();
   let clippedPieces = 0;
-  let spannedTriangles = 0;
+  const { drawn, spannedTriangles, enclosedTriangles } = selectDrawnTriangles(
+    triangulation, distSeconds, maxSpanSquared, options.isPocketLand,
+  );
   for (let t = 0; t < triangles.length; t += 3) {
+    if (!drawn[t / 3]) {
+      continue;
+    }
     const a = triangles[t];
     const b = triangles[t + 1];
     const c = triangles[t + 2];
     const ta = distSeconds[a];
     const tb = distSeconds[b];
     const tc = distSeconds[c];
-    if (!Number.isFinite(ta) || !Number.isFinite(tb) || !Number.isFinite(tc)) {
-      continue;
-    }
-    if (longestEdgeSquared(coords, a, b, c) > maxSpanSquared) {
-      spannedTriangles += 1;
-      continue;
-    }
 
     const lowestBand = bandIndexOf(Math.min(ta, tb, tc));
     const highestBand = bandIndexOf(Math.max(ta, tb, tc));
@@ -296,7 +430,7 @@ export function buildBandRegions(triangulation, distSeconds, options = {}) {
       bands.push(band);
     }
   }
-  return { bands, clippedPieces, spannedTriangles, maxTriangleSpanM: maxSpanM };
+  return { bands, clippedPieces, spannedTriangles, enclosedTriangles, maxTriangleSpanM: maxSpanM };
 }
 
 function stitchRings(edges, positionOf, minimumRingArea) {

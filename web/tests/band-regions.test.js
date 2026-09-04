@@ -148,6 +148,45 @@ test('an unreachable pocket becomes a hole, and a gap is not bridged', () => {
   assert.ok(lakeArea > expected * 0.5, `hole covers only ${lakeArea.toFixed(0)}`);
 });
 
+test('an enclosed pocket on land is drawn, one on water stays a hole', () => {
+  // A field or a park inside a town is bounded by dense roads and has few
+  // nodes of its own, so every triangle across it is too long for the span
+  // limit and the whole thing drops out - a hole punched through a band in
+  // ground the router reaches perfectly well. From the triangulation a field
+  // and a lake look identical, so the coastline is what tells them apart.
+  const { points, seconds } = radialLattice();
+  const kept = [];
+  const keptSeconds = [];
+  for (let index = 0; index < seconds.length; index += 1) {
+    const x = points[index * 2];
+    const y = points[index * 2 + 1];
+    if (Math.hypot(x - 300, y - 300) < 80) {
+      continue;
+    }
+    kept.push(x, y);
+    keptSeconds.push(seconds[index]);
+  }
+  const lattice = triangulate(Float64Array.from(kept));
+  const field = Float64Array.from(keptSeconds);
+  const options = { thresholds: [1e9], maxTriangleSpanM: 30 };
+
+  const asWater = buildBandRegions(lattice, field, { ...options, isPocketLand: () => false });
+  assert.equal(asWater.enclosedTriangles, 0, 'water was filled in');
+  assert.equal(asWater.bands[0].rings.filter((ring) => ring.isHole).length, 1);
+
+  const asLand = buildBandRegions(lattice, field, { ...options, isPocketLand: () => true });
+  assert.ok(asLand.enclosedTriangles > 0, 'the pocket was not reinstated');
+  assert.equal(
+    asLand.bands[0].rings.filter((ring) => ring.isHole).length,
+    0,
+    'land was left as a hole',
+  );
+  assert.ok(
+    asLand.spannedTriangles < asWater.spannedTriangles,
+    'reinstating a pocket should leave fewer triangles dropped for spanning',
+  );
+});
+
 test('disjoint reachable areas come back as separate rings', () => {
   // What a transit isochrone does: reachable here, and also over there.
   const points = [];

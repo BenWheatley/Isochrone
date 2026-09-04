@@ -1590,6 +1590,10 @@ function translateViewportIntoGrid(viewport, fitBoundingBoxPx, grid) {
 
 const MONOCHROME_PATTERN_COUNT = 2;
 
+// Stands in for a routing result that has not happened yet. A field of no
+// length reaches nowhere, so the scene it builds is the basemap alone.
+const EMPTY_TRAVEL_TIME_FIELD = new Float32Array(0);
+
 function setMapChromeVisibility(shell, visibility) {
   if (shell?.boundaryCanvas?.style) {
     shell.boundaryCanvas.style.visibility = visibility;
@@ -1670,29 +1674,20 @@ export function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
 
   const snapshot = options.snapshot ?? mapData.lastRoutingSnapshot ?? null;
   const distSeconds = snapshot?.distSeconds ?? null;
-  if (
-    !snapshot
-    || (
-      !(distSeconds instanceof Float32Array)
-      && !(distSeconds instanceof Float64Array)
-    )
-  ) {
-    restoreColourRenderingSurface(shell);
-    return false;
-  }
-  if (distSeconds.length < mapData.graph.header.nNodes) {
-    restoreColourRenderingSurface(shell);
-    return false;
-  }
+  const hasRoutedField = Boolean(snapshot)
+    && (distSeconds instanceof Float32Array || distSeconds instanceof Float64Array)
+    && distSeconds.length >= mapData.graph.header.nNodes;
 
   const colourCycleMinutes = options.colourCycleMinutes
-    ?? snapshot.colourCycleMinutes
+    ?? snapshot?.colourCycleMinutes
     ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   const colourTheme = normalizeIsochroneTheme(
     options.colourTheme ?? resolveIsochroneTheme(),
     'dark',
   );
-  const allowedModeMask = options.allowedModeMask ?? snapshot.allowedModeMask ?? EDGE_MODE_CAR_BIT;
+  const allowedModeMask = options.allowedModeMask
+    ?? snapshot?.allowedModeMask
+    ?? EDGE_MODE_CAR_BIT;
   const viewport = options.viewport ?? mapData.viewport;
 
   // Monochrome is a different drawing entirely - filled hatched bands with
@@ -1702,14 +1697,23 @@ export function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
   // put the map back into colour.
   const mapStyle = options.mapStyle ?? getMapStyleFromShell(shell);
   if (normalizeMapStyle(mapStyle) === MAP_STYLE_MONOCHROME) {
-    return renderMonochromeSnapshot(shell, mapData, snapshot, {
-      ...options,
-      allowedModeMask,
-      colourCycleMinutes,
-      viewport,
-    });
+    // A region that has loaded but not yet routed still has a map to show, and
+    // it is a monochrome one. Standing in an empty field for the real one draws
+    // the coastline and roads without touching the triangulation - the
+    // expensive half of a region switch - so the switch lands immediately in
+    // the right style instead of sitting on the colour basemap for a second or
+    // two while the bands are worked out.
+    return renderMonochromeSnapshot(
+      shell,
+      mapData,
+      hasRoutedField ? snapshot : { distSeconds: EMPTY_TRAVEL_TIME_FIELD },
+      { ...options, allowedModeMask, colourCycleMinutes, viewport },
+    );
   }
   restoreColourRenderingSurface(shell);
+  if (!hasRoutedField) {
+    return false;
+  }
 
   const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
   updateRenderBackendBadge(shell, renderer);
@@ -3470,10 +3474,14 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         shell.printButton.disabled = true;
       }
 
-      // Down before the new region starts loading, not after it arrives: an
-      // overlay drawn from the old map data has nothing to do with the region
-      // now being fetched, and a load takes seconds.
-      restoreColourRenderingSurface(shell);
+      // The colour chrome describes whichever map is on screen, so it comes
+      // back only for a style that wants it. Forcing it on here put the colour
+      // basemap up for the whole of a load under a monochrome setting, and
+      // left it there afterwards because nothing on the success path asked for
+      // a render.
+      if (normalizeMapStyle(getMapStyleFromShell(shell)) !== MAP_STYLE_MONOCHROME) {
+        restoreColourRenderingSurface(shell);
+      }
 
       const { boundaryUrl, graphUrl } = buildLocationAssetUrls(nextLocation);
       try {
@@ -3489,6 +3497,9 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         shell.locationSelect.value = nextLocation.id;
         persistLocationIdToLocation(nextLocation.id);
         routingBinding = bindCanvasClickRouting(shell, mapData);
+        // A region that has arrived but not been routed on still has a map to
+        // draw, in whichever style is selected.
+        redrawLoadedMap(mapData);
         return true;
       } catch (error) {
         initializedMapData = previousMapData;
