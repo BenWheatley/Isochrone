@@ -88,12 +88,20 @@ function getOrBuildNodeTriangulation(mapData) {
   if (cached) {
     return cached;
   }
-  const nodePixels = mapData.nodePixels;
-  const nodeCount = nodePixels.nodePixelX.length;
+  // Taken from map space at full precision, not from nodePixels. That is the
+  // same positions divided by the graph's pixel size and rounded to whole
+  // units - a 10 m lattice on London - which turns every straight road into a
+  // run of exactly collinear points and every busy junction into exact
+  // duplicates. Those are the two inputs a circumcircle predicate handles
+  // worst, and nothing downstream wants the rounding either.
+  const graph = mapData.graph;
+  const header = graph.header;
+  const nodeCount = header.nNodes;
+  const maxYPx = header.gridHeightPx - 1;
   const coords = new Float64Array(nodeCount * 2);
   for (let index = 0; index < nodeCount; index += 1) {
-    coords[index * 2] = nodePixels.nodePixelX[index];
-    coords[index * 2 + 1] = nodePixels.nodePixelY[index];
+    coords[index * 2] = graph.nodeI32[index * 4] / header.pixelSizeM;
+    coords[index * 2 + 1] = maxYPx - graph.nodeI32[index * 4 + 1] / header.pixelSizeM;
   }
   const triangulation = triangulate(coords);
   mapData[TRIANGULATION_PROPERTY] = triangulation;

@@ -419,9 +419,18 @@ test('a label gap is a short forward run, never a wrap around the ring', () => {
  */
 function buildTinyClusterMapData() {
   const nodeCount = 4;
+  // Map space, in metres: the same four corners the graph pixels below stand
+  // for, at pixelSizeM 10 with the northing axis flipped against gridHeightPx.
+  const nodeI32 = Int32Array.from([
+    2000, 1990, 0, 0,
+    2100, 1990, 0, 0,
+    2100, 1890, 0, 0,
+    2000, 1890, 0, 0,
+  ]);
   return {
     graph: {
       header: { nNodes: nodeCount, gridWidthPx: 400, gridHeightPx: 400, pixelSizeM: 10 },
+      nodeI32,
       nodeU32: new Uint32Array(nodeCount * 4),
       nodeU16: new Uint16Array(nodeCount * 8),
       edgeU32: new Uint32Array(0),

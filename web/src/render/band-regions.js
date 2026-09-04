@@ -55,7 +55,33 @@ function longestEdgeSquared(coords, a, b, c) {
  * (edge, threshold) makes their pieces cancel on integer equality, with no
  * floating-point comparison anywhere in the merge.
  */
-function createVertexTable(coords, pointCount) {
+// Vertex identity, packed into numbers rather than strings.
+//
+// Every merge in here is a lookup on a pair of vertex ids, several million of
+// them on a city the size of London, and a template literal per lookup costs
+// more than the merge it keys - it was over half the running time, the
+// collector it fed included. A pair packs into one double instead: ids below
+// 2^25, two of them at a stride of 2^26, which leaves the product inside the
+// 2^53 a double holds exactly.
+const NEGATIVE_ID_BASE = 1 << 25;
+const ID_STRIDE = 1 << 26;
+
+function normaliseVertexId(key) {
+  return key >= 0 ? key : NEGATIVE_ID_BASE + (-1 - key);
+}
+
+function denormaliseVertexId(id) {
+  return id < NEGATIVE_ID_BASE ? id : -1 - (id - NEGATIVE_ID_BASE);
+}
+
+function guardVertexId(id) {
+  if (id >= NEGATIVE_ID_BASE) {
+    throw new Error(`band region vertex id ${id} exceeds the packing range`);
+  }
+  return id;
+}
+
+function createVertexTable(coords, pointCount, thresholdCount) {
   const crossingIds = new Map();
   const crossingX = [];
   const crossingY = [];
@@ -67,8 +93,7 @@ function createVertexTable(coords, pointCount) {
     crossingKey(a, b, thresholdIndex, thresholdSeconds, secondsAt) {
       const low = a < b ? a : b;
       const high = a < b ? b : a;
-      const edgeKey = low * pointCount + high;
-      const key = `${edgeKey}:${thresholdIndex}`;
+      const key = (low * pointCount + high) * thresholdCount + thresholdIndex;
       const existing = crossingIds.get(key);
       if (existing !== undefined) {
         return existing;
@@ -78,7 +103,7 @@ function createVertexTable(coords, pointCount) {
       const span = highSeconds - lowSeconds;
       const fraction = span === 0 ? 0.5 : (thresholdSeconds - lowSeconds) / span;
       const clamped = Math.min(1, Math.max(0, fraction));
-      const id = pointCount + crossingX.length;
+      const id = guardVertexId(pointCount + crossingX.length);
       crossingX.push(coords[2 * low] + (coords[2 * high] - coords[2 * low]) * clamped);
       crossingY.push(coords[2 * low + 1] + (coords[2 * high + 1] - coords[2 * low + 1]) * clamped);
       crossingIds.set(key, id);
@@ -301,7 +326,7 @@ export function buildBandRegions(triangulation, distSeconds, options = {}) {
   const minimumRingArea = options.minimumRingArea ?? 0;
   const maxSpanSquared = maxSpanM * maxSpanM;
   const pointCount = coords.length >> 1;
-  const vertices = createVertexTable(coords, pointCount);
+  const vertices = createVertexTable(coords, pointCount, thresholds.length);
 
   const edgesByBand = new Map();
   const interpolatedPoints = [];
@@ -313,6 +338,7 @@ export function buildBandRegions(triangulation, distSeconds, options = {}) {
     // it needs no shared identity - only a unique one.
     const [fromX, fromY] = vertices.positionOf(vertex.interpolated.from.key);
     const [toX, toY] = vertices.positionOf(vertex.interpolated.to.key);
+    guardVertexId(interpolatedPoints.length / 2);
     const id = -1 - interpolatedPoints.length / 2;
     interpolatedPoints.push(
       fromX + (toX - fromX) * vertex.interpolated.fraction,
@@ -331,15 +357,17 @@ export function buildBandRegions(triangulation, distSeconds, options = {}) {
     }
     let edges = edgesByBand.get(bandIndex);
     if (edges === undefined) {
-      edges = new Map();
+      edges = new Set();
       edgesByBand.set(bandIndex, edges);
     }
-    const reverseKey = `${to}|${from}`;
+    const fromId = normaliseVertexId(from);
+    const toId = normaliseVertexId(to);
+    const reverseKey = toId * ID_STRIDE + fromId;
     if (edges.has(reverseKey)) {
       edges.delete(reverseKey);
       return;
     }
-    edges.set(`${from}|${to}`, [from, to]);
+    edges.add(fromId * ID_STRIDE + toId);
   };
 
   const bandIndexOf = (seconds) => {
@@ -435,7 +463,10 @@ export function buildBandRegions(triangulation, distSeconds, options = {}) {
 
 function stitchRings(edges, positionOf, minimumRingArea) {
   const outgoing = new Map();
-  for (const [from, to] of edges.values()) {
+  for (const key of edges) {
+    const fromId = Math.floor(key / ID_STRIDE);
+    const from = denormaliseVertexId(fromId);
+    const to = denormaliseVertexId(key - fromId * ID_STRIDE);
     const list = outgoing.get(from);
     if (list === undefined) outgoing.set(from, [to]); else list.push(to);
   }
