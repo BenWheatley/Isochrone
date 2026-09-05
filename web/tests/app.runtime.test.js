@@ -2468,10 +2468,12 @@ test('the colour basemap and key come back only when there is no map to draw', (
   shell.isochroneLegend.style.visibility = 'hidden';
   const mapData = {
     graph: {
-      header: { nNodes: 4, gridWidthPx: 100, gridHeightPx: 100, pixelSizeM: 10 },
+      header: { nNodes: 4, nEdges: 0, gridWidthPx: 100, gridHeightPx: 100, pixelSizeM: 10 },
+      nodeI32: new Int32Array(16),
       nodeU32: new Uint32Array(16),
       nodeU16: new Uint16Array(32),
       edgeU32: new Uint32Array(0),
+      edgeU16: new Uint16Array(0),
       edgeModeMask: new Uint8Array(0),
       edgeRoadClassId: new Uint8Array(0),
     },
@@ -2483,15 +2485,14 @@ test('the colour basemap and key come back only when there is no map to draw', (
   };
   assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), true);
   assert.equal(shell.boundaryCanvas.style.visibility, 'hidden');
-  assert.deepEqual(drawnScenes.at(-1).bands, []);
-  assert.equal(mapData.__nodeTriangulation, undefined, 'no triangulation was built');
+  assert.equal(drawnScenes.at(-1).ribbons, null, 'nothing reachable, so no zones to draw');
 
   // A snapshot too short for the new graph - the old region's distances
   // against the new region's nodes - is no field at all, and is treated as one.
   mapData.lastRoutingSnapshot = { distSeconds: new Float32Array(2) };
   assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), true);
   assert.equal(shell.boundaryCanvas.style.visibility, 'hidden');
-  assert.deepEqual(drawnScenes.at(-1).bands, []);
+  assert.equal(drawnScenes.at(-1).ribbons, null);
 });
 
 test('an origin that reaches nowhere still draws a monochrome map', () => {
@@ -2523,10 +2524,12 @@ test('an origin that reaches nowhere still draws a monochrome map', () => {
   };
   const mapData = {
     graph: {
-      header: { nNodes: 4, gridWidthPx: 100, gridHeightPx: 100, pixelSizeM: 10 },
+      header: { nNodes: 4, nEdges: 0, gridWidthPx: 100, gridHeightPx: 100, pixelSizeM: 10 },
+      nodeI32: new Int32Array(16),
       nodeU32: new Uint32Array(16),
       nodeU16: new Uint16Array(32),
       edgeU32: new Uint32Array(0),
+      edgeU16: new Uint16Array(0),
       edgeModeMask: new Uint8Array(0),
       edgeRoadClassId: new Uint8Array(0),
     },
@@ -2539,7 +2542,7 @@ test('an origin that reaches nowhere still draws a monochrome map', () => {
 
   assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), true);
   assert.equal(drawnScenes.length, 1, 'a scene was drawn');
-  assert.deepEqual(drawnScenes[0].bands, [], 'and it has no bands to draw');
+  assert.equal(drawnScenes[0].ribbons, null, 'and it has no zones to draw');
   assert.equal(shell.boundaryCanvas.style.visibility, 'hidden', 'the colour basemap stays down');
   assert.equal(shell.isochroneLegend.style.visibility, 'hidden', 'and so does the colour key');
 });

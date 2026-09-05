@@ -46,6 +46,96 @@ void main(void) {
   gl_FragColor = u_ink;
 }`;
 
+// The zone around a way.
+//
+// One instance per segment, and the segment stays in graph pixels: the vertex
+// program expands it into a rectangle of the output width, so a pan or a zoom
+// is a change of two uniforms rather than a rebuild of several million quads
+// on the CPU. The rectangle is padded by the half width all round, and the
+// fragment program cuts the actual zone out of it by distance - which rounds
+// the ends and the joins, and makes overlapping ways merge exactly.
+const RIBBON_VERTEX_SOURCE = `
+attribute vec2 a_corner;
+attribute vec2 a_from;
+attribute float a_fromSeconds;
+attribute vec2 a_to;
+attribute float a_toSeconds;
+uniform highp vec2 u_viewportPx;
+uniform highp vec2 u_originPx;
+uniform highp float u_scale;
+uniform highp float u_halfWidthPx;
+varying highp vec2 v_from;
+varying highp vec2 v_to;
+varying highp vec2 v_seconds;
+void main(void) {
+  vec2 from = (a_from - u_originPx) * u_scale;
+  vec2 to = (a_to - u_originPx) * u_scale;
+  v_from = from;
+  v_to = to;
+  v_seconds = vec2(a_fromSeconds, a_toSeconds);
+  vec2 along = to - from;
+  float length = length(along);
+  vec2 direction = length > 0.0 ? along / length : vec2(1.0, 0.0);
+  vec2 across = vec2(-direction.y, direction.x);
+  vec2 base = a_corner.x < 0.0 ? from : to;
+  vec2 screen = base
+    + direction * (a_corner.x * u_halfWidthPx)
+    + across * (a_corner.y * u_halfWidthPx);
+  vec2 clip = (screen / u_viewportPx) * 2.0 - 1.0;
+  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+}`;
+
+// Three passes share this program, told apart by uniforms: the outline at a
+// wider half width, the paper that covers its inside, and one pass per inked
+// pattern. A fragment's band comes from its distance along the way, so a
+// boundary falls mid-way exactly where the interpolated time puts it.
+//
+// The contour is not drawn here. It is a line across the zone, and where a way
+// is shorter than the zone is wide - a 20 m street against a 15 mm zone, which
+// is most of a city at any zoom that fits one on screen - the whole zone holds
+// one time and there is no direction along the way to place a line by. It is
+// drawn from the crossing points instead, the same geometry the export uses.
+const RIBBON_FRAGMENT_SOURCE = `
+precision highp float;
+uniform highp vec2 u_viewportPx;
+uniform highp float u_halfWidthPx;
+uniform highp float u_bandSeconds;
+uniform highp float u_patternCount;
+uniform highp float u_patternIndex;
+uniform highp vec2 u_tileSizePx;
+uniform highp float u_useTile;
+uniform sampler2D u_tile;
+uniform vec4 u_ink;
+varying highp vec2 v_from;
+varying highp vec2 v_to;
+varying highp vec2 v_seconds;
+void main(void) {
+  vec2 screen = vec2(gl_FragCoord.x, u_viewportPx.y - gl_FragCoord.y);
+  vec2 along = v_to - v_from;
+  float lengthSquared = dot(along, along);
+  float travelled = lengthSquared > 0.0
+    ? clamp(dot(screen - v_from, along) / lengthSquared, 0.0, 1.0)
+    : 0.0;
+  if (distance(screen, v_from + along * travelled) > u_halfWidthPx) {
+    discard;
+  }
+  float seconds = mix(v_seconds.x, v_seconds.y, travelled);
+
+  if (u_patternIndex >= 0.0) {
+    float band = floor(seconds / u_bandSeconds);
+    if (abs(mod(band, u_patternCount) - u_patternIndex) > 0.5) {
+      discard;
+    }
+  }
+  if (u_useTile > 0.5) {
+    vec4 texel = texture2D(u_tile, fract(screen / u_tileSizePx));
+    if (texel.a < 0.5) {
+      discard;
+    }
+  }
+  gl_FragColor = u_ink;
+}`;
+
 const LINE_VERTEX_SOURCE = FILL_VERTEX_SOURCE;
 const LINE_FRAGMENT_SOURCE = `
 precision mediump float;
@@ -289,16 +379,48 @@ export function createMonochromeWebGlPainter(gl, options = {}) {
       return canvas;
     });
 
+  // Instancing is what keeps the ways in graph space. Core in WebGL 2, an
+  // extension in WebGL 1 that has been present on essentially every
+  // implementation for a decade; without it there is no ribbon program and the
+  // caller falls back to the 2D renderer.
+  const instancing = resolveInstancing(gl);
   const fillProgram = createWebGlProgram(gl, FILL_VERTEX_SOURCE, FILL_FRAGMENT_SOURCE);
   const lineProgram = createWebGlProgram(gl, LINE_VERTEX_SOURCE, LINE_FRAGMENT_SOURCE);
   const glyphProgram = createWebGlProgram(gl, GLYPH_VERTEX_SOURCE, GLYPH_FRAGMENT_SOURCE);
 
+  const ribbonProgram = instancing === null
+    ? null
+    : createWebGlProgram(gl, RIBBON_VERTEX_SOURCE, RIBBON_FRAGMENT_SOURCE);
+
   const state = {
     gl,
     createCanvas,
+    instancing,
     tiles: new Map(),
     buffer: gl.createBuffer(),
     glyphBuffer: gl.createBuffer(),
+    ribbonBuffer: gl.createBuffer(),
+    ribbonCornerBuffer: gl.createBuffer(),
+    ribbonSegments: null,
+    ribbon: ribbonProgram === null ? null : {
+      program: ribbonProgram,
+      corner: gl.getAttribLocation(ribbonProgram, 'a_corner'),
+      from: gl.getAttribLocation(ribbonProgram, 'a_from'),
+      fromSeconds: gl.getAttribLocation(ribbonProgram, 'a_fromSeconds'),
+      to: gl.getAttribLocation(ribbonProgram, 'a_to'),
+      toSeconds: gl.getAttribLocation(ribbonProgram, 'a_toSeconds'),
+      viewport: gl.getUniformLocation(ribbonProgram, 'u_viewportPx'),
+      origin: gl.getUniformLocation(ribbonProgram, 'u_originPx'),
+      scale: gl.getUniformLocation(ribbonProgram, 'u_scale'),
+      halfWidth: gl.getUniformLocation(ribbonProgram, 'u_halfWidthPx'),
+      bandSeconds: gl.getUniformLocation(ribbonProgram, 'u_bandSeconds'),
+      patternCount: gl.getUniformLocation(ribbonProgram, 'u_patternCount'),
+      patternIndex: gl.getUniformLocation(ribbonProgram, 'u_patternIndex'),
+      tileSize: gl.getUniformLocation(ribbonProgram, 'u_tileSizePx'),
+      useTile: gl.getUniformLocation(ribbonProgram, 'u_useTile'),
+      tile: gl.getUniformLocation(ribbonProgram, 'u_tile'),
+      ink: gl.getUniformLocation(ribbonProgram, 'u_ink'),
+    },
     fill: {
       program: fillProgram,
       position: gl.getAttribLocation(fillProgram, 'a_position'),
@@ -323,6 +445,157 @@ export function createMonochromeWebGlPainter(gl, options = {}) {
     },
   };
   return state;
+}
+
+/**
+ * Instanced drawing, whichever way this context provides it.
+ *
+ * Returns null when neither is available, which is the one case the ribbon
+ * program cannot be built for.
+ */
+function resolveInstancing(gl) {
+  if (typeof gl.drawArraysInstanced === 'function' && typeof gl.vertexAttribDivisor === 'function') {
+    return {
+      divisor: (location, divisor) => gl.vertexAttribDivisor(location, divisor),
+      draw: (mode, first, count, instances) =>
+        gl.drawArraysInstanced(mode, first, count, instances),
+    };
+  }
+  const extension = gl.getExtension?.('ANGLE_instanced_arrays') ?? null;
+  if (extension === null) {
+    return null;
+  }
+  return {
+    divisor: (location, divisor) => extension.vertexAttribDivisorANGLE(location, divisor),
+    draw: (mode, first, count, instances) =>
+      extension.drawArraysInstancedANGLE(mode, first, count, instances),
+  };
+}
+
+// The padded rectangle every segment is expanded into, as two triangles: the
+// first coordinate runs along the way, the second across it.
+const RIBBON_CORNERS = Float32Array.of(
+  -1, -1, 1, -1, 1, 1,
+  -1, -1, 1, 1, -1, 1,
+);
+
+/**
+ * Uploads the ways once and points the ribbon program at them.
+ *
+ * The segment buffer is the colour renderer's own edge vertex data, unchanged:
+ * six floats per segment, being both ends in graph pixels with the travel time
+ * at each. Nothing is repacked, so the two modes cannot drift into describing
+ * different journeys.
+ */
+function bindRibbonSegments(state, segments, firstInstance) {
+  const { gl, ribbon, instancing } = state;
+  if (state.ribbonSegments !== segments) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, state.ribbonBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, segments, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, state.ribbonCornerBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, RIBBON_CORNERS, gl.STATIC_DRAW);
+    state.ribbonSegments = segments;
+  }
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, state.ribbonCornerBuffer);
+  gl.enableVertexAttribArray(ribbon.corner);
+  gl.vertexAttribPointer(ribbon.corner, 2, gl.FLOAT, false, 0, 0);
+  instancing.divisor(ribbon.corner, 0);
+
+  // The instance range is chosen by moving the attribute offsets rather than
+  // by a first-instance argument, which WebGL's instanced draw does not take.
+  const stride = 24;
+  const base = firstInstance * stride;
+  gl.bindBuffer(gl.ARRAY_BUFFER, state.ribbonBuffer);
+  for (const [location, size, offset] of [
+    [ribbon.from, 2, 0],
+    [ribbon.fromSeconds, 1, 8],
+    [ribbon.to, 2, 12],
+    [ribbon.toSeconds, 1, 20],
+  ]) {
+    gl.enableVertexAttribArray(location);
+    gl.vertexAttribPointer(location, size, gl.FLOAT, false, stride, base + offset);
+    instancing.divisor(location, 1);
+  }
+}
+
+/** One pass over a range of the ways, with whatever this pass is drawing. */
+function drawRibbonPass(state, scene, viewport, pass) {
+  const { gl, ribbon, instancing } = state;
+  const segments = scene.ribbons.ordered.data;
+  const instances = Math.floor(segments.length / 6);
+  gl.uniform2f(ribbon.viewport, viewport[0], viewport[1]);
+  gl.uniform2f(ribbon.origin, scene.frame.offsetXPx, scene.frame.offsetYPx);
+  gl.uniform1f(ribbon.scale, scene.frame.effectiveScale);
+  gl.uniform1f(ribbon.halfWidth, pass.halfWidthPx);
+  gl.uniform1f(ribbon.bandSeconds, scene.ribbons.bandSeconds);
+  gl.uniform1f(ribbon.patternCount, scene.ribbons.patterns.length);
+  gl.uniform1f(ribbon.patternIndex, -1);
+  gl.uniform4fv(ribbon.ink, pass.ink);
+  if (pass.tile) {
+    gl.uniform1f(ribbon.useTile, 1);
+    gl.uniform2f(ribbon.tileSize, pass.tile.sizePx, pass.tile.sizePx);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, pass.tile.texture);
+    gl.uniform1i(ribbon.tile, 0);
+  } else {
+    gl.uniform1f(ribbon.useTile, 0);
+  }
+  void instances;
+  instancing.draw(gl.TRIANGLES, 0, 6, pass.count);
+}
+
+/**
+ * The isochrone, as a zone of fixed output width around every reachable way.
+ *
+ * Three passes, in this order because each covers the one before it where they
+ * overlap: the outline, drawn wider than the zone so only the outside of the
+ * union survives; the paper that covers its inside; and one pass for each
+ * inked pattern, which draws only the bands that pattern belongs to.
+ */
+function drawRibbons(state, scene, viewport, ink, paper) {
+  const { gl, ribbon } = state;
+  if (!ribbon || !scene.ribbons || scene.ribbons.ordered.data.length < 6) {
+    return 0;
+  }
+  const { ordered, patterns, widthPx, outlinePx } = scene.ribbons;
+  const half = widthPx / 2;
+  const total = Math.floor(ordered.data.length / 6);
+  gl.useProgram(ribbon.program);
+
+  // The outline of the union, in one pass over everything: drawn wider than
+  // the zone, so all of it that survives is the outside edge.
+  bindRibbonSegments(state, ordered.data, 0);
+  drawRibbonPass(state, scene, viewport, {
+    halfWidthPx: half + outlinePx,
+    count: total,
+    ink,
+  });
+
+  // Then band by band, farthest first, so the nearer time is what covers any
+  // ground two bands both reach.
+  for (const range of ordered.ranges) {
+    if (range.count === 0) {
+      continue;
+    }
+    bindRibbonSegments(state, ordered.data, range.first);
+    drawRibbonPass(state, scene, viewport, { halfWidthPx: half, count: range.count, ink: paper });
+
+    const pattern = patterns[((range.band % patterns.length) + patterns.length) % patterns.length];
+    if (pattern.lines.length === 0) {
+      continue;
+    }
+    const tile = getOrCreateTileTexture(state, pattern, scene.patternScale, scene.ink);
+    if (tile) {
+      drawRibbonPass(state, scene, viewport, {
+        halfWidthPx: half,
+        count: range.count,
+        tile,
+        ink,
+      });
+    }
+  }
+  return total;
 }
 
 function drawTriangles(state, vertices, ink, viewport) {
@@ -360,12 +633,18 @@ export function drawMonochromeSceneWebGl(state, scene) {
   gl.clearColor(paper[0], paper[1], paper[2], 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
-  // Water, then roads, then the band tint over them, then contours: the hatch
-  // discards between its strokes, so the linework beneath shows through, the
-  // way a screen tint prints over it.
+  // The sea's ruling, then the zones, then the linework over both.
   const basemap = scene.basemap ?? {};
   if (scene.waterPattern && basemap.waterFeatures?.length) {
     fillWaterThroughStencil(state, scene, viewport);
+  }
+
+  const drawnSegments = drawRibbons(state, scene, viewport, ink, paper);
+
+  // The linework goes over the zones, not under them. A zone is opaque paper
+  // where its hatch is not inked, so anything drawn first is covered - and a
+  // reader needs the coast and the streets to place the isochrone against.
+  if (scene.waterPattern && basemap.waterFeatures?.length) {
     const outline = [];
     for (const feature of basemap.waterFeatures) {
       for (const path of feature.paths) {
@@ -389,57 +668,15 @@ export function drawMonochromeSceneWebGl(state, scene) {
         false,
       );
     }
-    drawTriangles(state, Float32Array.from(quads), parseCssColour(scene.roadInk ?? scene.ink), viewport);
+    drawTriangles(
+      state, Float32Array.from(quads), parseCssColour(scene.roadInk ?? scene.ink), viewport,
+    );
   }
 
-  let drawnBands = 0;
-  for (const band of scene.bands) {
-    if (band.pattern.lines.length === 0 || !band.triangles || band.triangles.length < 6) {
-      continue;
-    }
-    const tile = getOrCreateTileTexture(state, band.pattern, scene.patternScale, scene.ink);
-    if (!tile) {
-      continue;
-    }
-    const { fill } = state;
-    const projected = new Float32Array(band.triangles.length);
-    for (let index = 0; index < band.triangles.length; index += 2) {
-      const [x, y] = transform(band.triangles[index], band.triangles[index + 1]);
-      projected[index] = x;
-      projected[index + 1] = y;
-    }
-    gl.useProgram(fill.program);
-    gl.bindBuffer(gl.ARRAY_BUFFER, state.buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, projected, gl.DYNAMIC_DRAW);
-    gl.enableVertexAttribArray(fill.position);
-    gl.vertexAttribPointer(fill.position, 2, gl.FLOAT, false, 0, 0);
-    gl.uniform2f(fill.viewport, viewport[0], viewport[1]);
-    gl.uniform2f(fill.tileSize, tile.sizePx, tile.sizePx);
-    gl.uniform4fv(fill.ink, ink);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, tile.texture);
-    gl.uniform1i(fill.tile, 0);
-    gl.drawArrays(gl.TRIANGLES, 0, projected.length / 2);
-    drawnBands += 1;
-  }
 
-  // The outermost contour is the limit of travel, not another band edge, and
-  // is drawn heavier: bare paper inside it is otherwise the same white as
-  // ground nobody can reach at all.
-  const contours = [];
-  const limits = [];
-  for (const band of scene.bands) {
-    const target = band.isLimit ? limits : contours;
-    const width = band.isLimit ? scene.contourStrokeWidth * 2.2 : scene.contourStrokeWidth;
-    for (const ring of band.rings) {
-      appendThickPolyline(target, ring.points, transform, width, true);
-    }
-  }
-  drawTriangles(state, Float32Array.from(contours), ink, viewport);
-  drawTriangles(state, Float32Array.from(limits), ink, viewport);
 
   drawSceneLabels(state, scene, viewport, ink, paper);
-  return drawnBands;
+  return drawnSegments;
 }
 
 /**

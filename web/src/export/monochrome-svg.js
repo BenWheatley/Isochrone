@@ -8,6 +8,7 @@
 
 import { patternCoverageRatio, WATER_HATCH_PATTERN, WATER_INK } from '../render/hatch.js';
 
+
 const LABEL_FONT_FAMILY = "'Helvetica Neue', Helvetica, Arial, sans-serif";
 // Rough advance width per character as a fraction of font size. Only needs to
 // be close: it sizes the gap a label sits in, and a little slack either side
@@ -66,216 +67,6 @@ function ringToPathData(points, transform, { reversed = false } = {}) {
   return `${parts.join('')}Z`;
 }
 
-function ringPerimeter(points, transform, closed = true) {
-  const count = points.length / 2;
-  let total = 0;
-  let [previousX, previousY] = transform(points[0], points[1]);
-  const last = closed ? count : count - 1;
-  for (let index = 1; index <= last; index += 1) {
-    const wrapped = index % count;
-    const [x, y] = transform(points[wrapped * 2], points[wrapped * 2 + 1]);
-    total += Math.hypot(x - previousX, y - previousY);
-    previousX = x;
-    previousY = y;
-  }
-  return total;
-}
-
-/**
- * Where to write a contour's value, and how much of the contour to leave out
- * so the text has clear paper under it.
- *
- * The label goes on the straightest stretch the ring offers: text set along a
- * tight bend is unreadable, and a bend is also where the eye most wants the
- * line itself to be unbroken. Straightness is scored as the total turning
- * across a window the length of the label.
- */
-/**
- * Several placements along one contour, so that a label is always in view
- * rather than having to be hunted for. A long ring gets one roughly every
- * `spacingPx`; a short one gets a single label, or none.
- */
-export function placeContourLabels(points, options = {}) {
-  const transform = options.transform ?? ((x, y) => [x, y]);
-  const spacingPx = options.spacingPx ?? Number.POSITIVE_INFINITY;
-  const perimeter = ringPerimeter(points, transform);
-  const wanted = Math.max(1, Math.min(6, Math.floor(perimeter / spacingPx)));
-  if (wanted === 1) {
-    const single = placeContourLabel(points, options);
-    return single ? [single] : [];
-  }
-
-  // Cut the ring into equal *lengths*, not equal numbers of points. A ring
-  // from a triangulation has points bunched wherever the network is dense, so
-  // slicing by index puts several labels in one crowded corner and none along
-  // a long smooth run - which is exactly what made their positions look
-  // arbitrary.
-  const count = points.length / 2;
-  const cumulative = new Float64Array(count + 1);
-  for (let index = 0; index < count; index += 1) {
-    const next = (index + 1) % count;
-    const [x0, y0] = transform(points[index * 2], points[index * 2 + 1]);
-    const [x1, y1] = transform(points[next * 2], points[next * 2 + 1]);
-    cumulative[index + 1] = cumulative[index] + Math.hypot(x1 - x0, y1 - y0);
-  }
-  const indexAtLength = (target) => {
-    let low = 0;
-    let high = count;
-    while (low < high) {
-      const mid = (low + high) >> 1;
-      if (cumulative[mid] < target) low = mid + 1; else high = mid;
-    }
-    return Math.min(count - 1, low);
-  };
-
-  const placements = [];
-  for (let slice = 0; slice < wanted; slice += 1) {
-    const from = indexAtLength((slice * perimeter) / wanted);
-    const to = indexAtLength(((slice + 1) * perimeter) / wanted);
-    if (to - from < 8) {
-      continue;
-    }
-    const sliceSpan = points.subarray(from * 2, to * 2);
-    const placement = placeContourLabel(sliceSpan, { ...options, closed: false });
-    if (placement) {
-      // The gap indices come back relative to the slice. Left unshifted they
-      // cut the contour somewhere unrelated to the label, which is how lines
-      // came to break where no value was written and values came to sit on
-      // unbroken lines.
-      placements.push({
-        ...placement,
-        gapStartIndex: placement.gapStartIndex + from,
-        gapEndIndex: placement.gapEndIndex + from,
-      });
-    }
-  }
-  return placements;
-}
-
-export function placeContourLabel(points, options = {}) {
-  const transform = options.transform ?? ((x, y) => [x, y]);
-  const text = options.text ?? '';
-  const fontSize = options.fontSize ?? 11;
-  const labelLength = text.length * fontSize * LABEL_WIDTH_PER_CHARACTER;
-  const count = points.length / 2;
-  if (count < 8 || labelLength <= 0) {
-    return null;
-  }
-  // A label needs the run to be several times its own length, or the gap
-  // swallows the contour it is annotating.
-  // A slice of a ring is an open chain, not a ring of its own. Letting the
-  // window wrap from its end back to its start makes the label's gap span
-  // almost the whole contour once the indices are read back against the ring -
-  // which is how long stretches of isoline came to be missing entirely.
-  const closed = options.closed !== false;
-  const minimumLength = closed ? labelLength * 4 : labelLength * 2;
-  if (ringPerimeter(points, transform, closed) < minimumLength) {
-    return null;
-  }
-
-  const projected = new Array(count);
-  for (let index = 0; index < count; index += 1) {
-    projected[index] = transform(points[index * 2], points[index * 2 + 1]);
-  }
-
-  const windowEndFor = (startIndex) => {
-    let travelled = 0;
-    let index = startIndex;
-    while (travelled < labelLength) {
-      const nextIndex = closed ? (index + 1) % count : index + 1;
-      if (nextIndex >= count) {
-        return -1;
-      }
-      travelled += Math.hypot(
-        projected[nextIndex][0] - projected[index][0],
-        projected[nextIndex][1] - projected[index][1],
-      );
-      index = nextIndex;
-      if (index === startIndex) {
-        break;
-      }
-    }
-    return index;
-  };
-
-  let bestScore = Number.POSITIVE_INFINITY;
-  let bestStart = -1;
-  let bestEnd = -1;
-  for (let startIndex = 0; startIndex < count; startIndex += 1) {
-    const endIndex = windowEndFor(startIndex);
-    if (endIndex === startIndex || endIndex < 0) {
-      continue;
-    }
-    // Turning across the window: the straighter the stretch, the smaller the
-    // gap between its chord and the path walked along it.
-    let walked = 0;
-    let index = startIndex;
-    while (index !== endIndex) {
-      const nextIndex = (index + 1) % count;
-      walked += Math.hypot(
-        projected[nextIndex][0] - projected[index][0],
-        projected[nextIndex][1] - projected[index][1],
-      );
-      index = nextIndex;
-    }
-    const chord = Math.hypot(
-      projected[endIndex][0] - projected[startIndex][0],
-      projected[endIndex][1] - projected[startIndex][1],
-    );
-    // Straightness first, but among equally straight runs prefer the flatter
-    // one: text set near-vertical is legal, and tiring. The penalty is scaled
-    // by the label's own length so it stays comparable with the turning above.
-    const steepness = chord === 0
-      ? 1
-      : Math.abs(projected[endIndex][1] - projected[startIndex][1]) / chord;
-    const score = walked - chord + steepness * labelLength * 0.35;
-    if (score < bestScore) {
-      bestScore = score;
-      bestStart = startIndex;
-      bestEnd = endIndex;
-    }
-  }
-  if (bestStart < 0) {
-    return null;
-  }
-
-  const [startX, startY] = projected[bestStart];
-  const [endX, endY] = projected[bestEnd];
-  let angleDegrees = (Math.atan2(endY - startY, endX - startX) * 180) / Math.PI;
-  // Never set upside down: flip the run rather than let the reader tilt their
-  // head, and keep the result in (-180, 180] so the emitted transform reads as
-  // the angle it is.
-  if (angleDegrees > 90 || angleDegrees < -90) {
-    angleDegrees += 180;
-  }
-  if (angleDegrees > 180) {
-    angleDegrees -= 360;
-  }
-  return {
-    x: (startX + endX) / 2,
-    y: (startY + endY) / 2,
-    angleDegrees,
-    gapStartIndex: bestStart,
-    gapEndIndex: bestEnd,
-  };
-}
-
-/** The ring as an open path that stops short of the label and resumes after
- *  it, so the text sits in clear paper rather than on top of the line. */
-function ringPathWithGap(points, transform, gap) {
-  const count = points.length / 2;
-  const parts = [];
-  let index = gap.gapEndIndex;
-  while (true) {
-    const [x, y] = transform(points[index * 2], points[index * 2 + 1]);
-    parts.push(`${parts.length === 0 ? 'M' : 'L'}${formatSvgNumber(x)} ${formatSvgNumber(y)}`);
-    if (index === gap.gapStartIndex) {
-      break;
-    }
-    index = (index + 1) % count;
-  }
-  return parts.join('');
-}
 
 /**
  * The value, on clear ground.
@@ -332,77 +123,12 @@ function escapeXmlText(value) {
  * exported sheet are the same map, and labels that moved between them would be
  * two maps with one name.
  */
-export function planContourLabels(bands, options = {}) {
-  const transform = options.transform ?? ((x, y) => [x, y]);
-  const fontSize = options.fontSize ?? 12;
-  const spacingPx = options.spacingPx
-    ?? Math.max(320, Math.min(options.widthPx ?? 1000, options.heightPx ?? 1000) / 3);
-
-  // Contours crowd wherever the gradient is steep, which is exactly where
-  // several rings would all want labelling in the same few centimetres.
-  const claimedBoxes = [];
-  const claim = (placement, text) => {
-    const halfWidth = (text.length * fontSize * LABEL_WIDTH_PER_CHARACTER) / 2 + fontSize * 0.4;
-    const halfHeight = fontSize * 0.9;
-    const box = {
-      left: placement.x - halfWidth,
-      right: placement.x + halfWidth,
-      top: placement.y - halfHeight,
-      bottom: placement.y + halfHeight,
-    };
-    const collides = claimedBoxes.some((other) =>
-      box.left < other.right && box.right > other.left
-      && box.top < other.bottom && box.bottom > other.top);
-    if (collides) {
-      return false;
-    }
-    claimedBoxes.push(box);
-    return true;
-  };
-
-  const labels = [];
-  const gaps = new Map();
-  for (const band of bands) {
-    if (!band.label) {
-      continue;
-    }
-    for (const ring of band.rings) {
-      // A hole is the boundary with the faster band inside it, and carries
-      // that band's value, not this one's. Labelling it here would print two
-      // different times along one line.
-      if (ring.isHole) {
-        continue;
-      }
-      const candidates = placeContourLabels(ring.points, {
-        transform,
-        text: band.label,
-        fontSize,
-        spacingPx,
-      });
-      const placed = candidates.filter((candidate) => claim(candidate, band.label));
-      if (placed.length === 0) {
-        continue;
-      }
-      // Only the first placement breaks this ring's path; the rest rely on
-      // their halo. Breaking a ring in several places would need the path
-      // split into runs, and the halo already clears the line under the text.
-      gaps.set(ring, placed[0]);
-      for (const placement of placed) {
-        labels.push({ ...placement, text: band.label });
-      }
-    }
-  }
-  return { labels, gaps };
-}
-
 export function buildMonochromeIsochroneSvg(scene) {
-  const { widthPx, heightPx, bands } = scene;
+  const { widthPx, heightPx } = scene;
   if (!Number.isFinite(widthPx) || !Number.isFinite(heightPx)) {
     throw new Error('scene must carry finite widthPx and heightPx');
   }
-  if (!Array.isArray(bands) || bands.length === 0) {
-    throw new Error('scene must carry at least one band');
-  }
+  const ribbons = scene.ribbons ?? null;
   const transform = scene.transform ?? ((x, y) => [x, y]);
   const ink = scene.ink ?? '#000000';
   const paper = scene.paper ?? '#ffffff';
@@ -414,7 +140,9 @@ export function buildMonochromeIsochroneSvg(scene) {
   // say, so where grey is available it is the first thing that should use it.
   // One bit is what this mode is built to survive, not a rule it must obey.
   const waterInk = scene.waterInk ?? WATER_INK;
-  const bandPatterns = [...new Map(bands.map((band) => [band.pattern.id, band.pattern])).values()];
+  const bandPatterns = ribbons
+    ? [...new Map(ribbons.patterns.map((pattern) => [pattern.id, pattern])).values()]
+    : [];
   // The sea's ruling keeps its own pitch: scaling it with the bands would put
   // it back in competition with them, which is exactly what it must not do.
   const waterPatterns = basemap.waterFeatures?.length ? [WATER_HATCH_PATTERN] : [];
@@ -444,7 +172,71 @@ export function buildMonochromeIsochroneSvg(scene) {
       // taken out of it.
       parts.push(
         `<path d="${data}" fill="url(#${WATER_HATCH_PATTERN.id})" fill-rule="evenodd" stroke="none" />`,
-        `<path d="${data}" fill="none" stroke="${ink}" stroke-width="${contourWidth}" />`,
+      );
+    }
+  }  const labels = [];
+  if (ribbons && ribbons.ordered.data.length >= 6) {
+    const { ordered, patterns, widthPx: ribbonPx, outlinePx } = ribbons;
+
+    const pathForRange = (first, count) => {
+      const commands = [];
+      for (let piece = 0; piece < count; piece += 1) {
+        const offset = (first + piece) * 6;
+        const [x0, y0] = transform(ordered.data[offset], ordered.data[offset + 1]);
+        const [x1, y1] = transform(ordered.data[offset + 3], ordered.data[offset + 4]);
+        commands.push(
+          `M${formatSvgNumber(x0)} ${formatSvgNumber(y0)}L${formatSvgNumber(x1)} ${formatSvgNumber(y1)}`,
+        );
+      }
+      return commands.join('');
+    };
+    const strokeAttributes = (width) => ` stroke-width="${formatSvgNumber(width)}"`
+      + ' stroke-linecap="round" stroke-linejoin="round" />';
+
+    // The outline of the union first, wider than the zone, so all of it that
+    // survives is the outside edge.
+    const allData = pathForRange(0, Math.floor(ordered.data.length / 6));
+    if (allData.length > 0) {
+      parts.push(
+        `<path d="${allData}" fill="none" stroke="${ink}"`
+        + strokeAttributes(ribbonPx + outlinePx * 2),
+      );
+    }
+
+    // Then band by band, farthest first, so the nearer time covers any ground
+    // two bands both reach - which makes the edge between two fills the
+    // isoline itself, with no separate line needed to mark it.
+    for (const range of ordered.ranges) {
+      if (range.count === 0) {
+        continue;
+      }
+      const data = pathForRange(range.first, range.count);
+      if (data.length === 0) {
+        continue;
+      }
+      parts.push(`<path d="${data}" fill="none" stroke="${paper}"` + strokeAttributes(ribbonPx));
+      const pattern = patterns[((range.band % patterns.length) + patterns.length) % patterns.length];
+      if (pattern.lines.length > 0) {
+        parts.push(
+          `<path d="${data}" fill="none" stroke="url(#${pattern.id})"` + strokeAttributes(ribbonPx),
+        );
+      }
+    }
+  }
+
+  // The linework goes over the zones, not under them. A zone is opaque paper
+  // where its hatch is not inked, so anything drawn first is covered - and a
+  // reader needs the coast and the streets to place the isochrone against.
+  if (basemap.waterFeatures?.length) {
+    const coastData = basemap.waterFeatures
+      .flatMap((feature) => feature.paths)
+      .map((path) => ringToPathData(Float64Array.from(path.flat()), transform))
+      .filter((data) => data.length > 0)
+      .join('');
+    if (coastData.length > 0) {
+      parts.push(
+        `<path d="${coastData}" fill="none" stroke="${ink}"`
+        + ` stroke-width="${contourWidth}" />`,
       );
     }
   }
@@ -464,68 +256,15 @@ export function buildMonochromeIsochroneSvg(scene) {
     );
   }
 
-  // Fills first, then every contour, then every label: a label must never be
-  // crossed by a line belonging to a band drawn after it.
-  for (let index = 0; index < bands.length; index += 1) {
-    const band = bands[index];
-    if (band.pattern.lines.length === 0) {
-      continue;
-    }
-    // Rings built from a triangulation already carry their own holes, wound
-    // oppositely, so a band is a finished annulus and needs nothing added.
-    // Rings from contouring do not: each outlines everything within a
-    // threshold, so the band inwards has to be subtracted, wound the other way
-    // - under even-odd the direction would not matter, but under non-zero a
-    // same-wound inner ring adds instead, and every band paints as a full disc
-    // over its neighbour. Reversing makes it correct under either rule.
-    const inner = scene.bandsIncludeHoles === true || index === 0
-      ? []
-      : bands[index - 1].rings;
-    const pathData = band.rings
-      .map((ring) => ringToPathData(ring.points, transform))
-      .concat(inner.map((ring) => ringToPathData(ring.points, transform, { reversed: true })))
-      .join('');
-    if (pathData.length === 0) {
-      continue;
-    }
-    parts.push(
-      `<path d="${pathData}" fill="url(#${band.pattern.id})" fill-rule="evenodd" stroke="none" />`,
-    );
-  }
+  // The same zone around the same ways the screen draws, in the same order:
+  // the outline wider than the zone, the paper that covers its inside, then
+  // one stroke per pattern over the pieces whose band that pattern fills.
+  //
+  // A stroke carries one fill for its whole length, so a way has to be cut
+  // where its band changes - which the screen has no need to do, deciding it
+  // per fragment instead. Both cut at the same interpolated point.
 
-  // A solid hairline between bands. At one bit, adjacent hatches moire into
-  // one another without a separating line, and the line is also what a label
-  // sits on.
-  // Collected rather than pushed inline, so every label lands on top of every
-  // contour instead of only the ones already written.
-  const labels = [];
-  const plan = scene.labels
-    ? { labels: scene.labels, gaps: scene.labelGaps ?? new Map() }
-    : planContourLabels(bands, {
-      transform,
-      fontSize,
-      widthPx,
-      heightPx,
-      spacingPx: scene.labelSpacingPx,
-    });
-
-  for (const band of bands) {
-    for (const ring of band.rings) {
-      const gap = plan.gaps.get(ring) ?? null;
-      const pathData = gap
-        ? ringPathWithGap(ring.points, transform, gap)
-        : ringToPathData(ring.points, transform);
-      // The outermost contour is not just another band edge, it is the limit
-      // of travel - and it needs to look like one. A bare-paper band inside it
-      // is otherwise the same white as the ground nobody can reach at all, and
-      // only this line says which side of it the reader is on.
-      const strokeWidth = band.isLimit ? contourWidth * 2.2 : contourWidth;
-      parts.push(
-        `<path d="${pathData}" fill="none" stroke="${ink}"`
-        + ` stroke-width="${formatSvgNumber(strokeWidth)}" stroke-linejoin="round" />`,
-      );
-    }
-  }
+  const plan = { labels: scene.labels ?? [] };
   for (const label of plan.labels) {
     labels.push(renderHaloedLabel(label, label.text, {
       fontSize,
@@ -538,8 +277,8 @@ export function buildMonochromeIsochroneSvg(scene) {
   }
 
   parts.push(...labels);
-  if (scene.legend !== false) {
-    parts.push(buildLegendMarkup(bands, { widthPx, heightPx, ink, paper, fontSize, scene }));
+  if (scene.legend !== false && ribbons) {
+    parts.push(buildLegendMarkup(ribbons, { widthPx, heightPx, ink, paper, fontSize, scene }));
   }
   parts.push('</svg>');
   return parts.join('');
@@ -553,14 +292,13 @@ export function buildMonochromeIsochroneSvg(scene) {
  * One entry per distinct pattern rather than per band, because the patterns
  * repeat - which is what the contour labels are there to resolve.
  */
-function buildLegendMarkup(bands, { widthPx, heightPx, ink, paper, fontSize, scene }) {
+function buildLegendMarkup(ribbons, { widthPx, heightPx, ink, paper, fontSize, scene }) {
   const cycle = [];
-  for (const band of bands) {
-    if (cycle.some((entry) => entry.pattern.id === band.pattern.id)) {
-      break;
+  ribbons.patterns.forEach((pattern, index) => {
+    if (!cycle.some((entry) => entry.pattern.id === pattern.id)) {
+      cycle.push({ pattern, label: ribbons.patternLabels?.[index] ?? '' });
     }
-    cycle.push(band);
-  }
+  });
   if (cycle.length === 0) {
     return '';
   }
@@ -569,19 +307,6 @@ function buildLegendMarkup(bands, { widthPx, heightPx, ink, paper, fontSize, sce
   const boxWidth = swatch + 8 + fontSize * 8;
   const boxHeight = rowHeight * cycle.length + 10;
   const left = 12;
-  const top = heightPx - boxHeight - 12;
-  const rows = cycle.map((band, index) => {
-    const y = top + 5 + index * rowHeight;
-    const fill = band.pattern.lines.length === 0
-      ? paper
-      : `url(#${band.pattern.id})`;
-    return `<rect x="${left + 5}" y="${formatSvgNumber(y)}" width="${swatch}"`
-      + ` height="${swatch}" fill="${fill}" stroke="${ink}" stroke-width="0.7" />`
-      + `<text x="${left + 5 + swatch + 8}" y="${formatSvgNumber(y + swatch / 2)}"`
-      + ` font-family="${LABEL_FONT_FAMILY}" font-size="${fontSize}" fill="${ink}"`
-      + ' dominant-baseline="central">'
-      + `${escapeXmlText(band.label)}</text>`;
-  }).join('');
   // Inside the box, on its own paper. Floating above it, the caption sat
   // straight on the map and was unreadable over the sea's ruling.
   const captionHeight = scene.legendCaption ? fontSize * 1.8 : 0;
@@ -592,24 +317,24 @@ function buildLegendMarkup(bands, { widthPx, heightPx, ink, paper, fontSize, sce
       + ` font-family="${LABEL_FONT_FAMILY}" font-size="${fontSize}" fill="${ink}">`
       + `${escapeXmlText(scene.legendCaption)}</text>`
     : '';
-  const rowsShifted = cycle.map((band, index) => {
+  const rows = cycle.map((entry, index) => {
     const y = boxTop + captionHeight + 5 + index * rowHeight;
-    const fill = band.pattern.lines.length === 0 ? paper : `url(#${band.pattern.id})`;
+    const fill = entry.pattern.lines.length === 0 ? paper : `url(#${entry.pattern.id})`;
     return `<rect x="${left + 5}" y="${formatSvgNumber(y)}" width="${swatch}"`
       + ` height="${swatch}" fill="${fill}" stroke="${ink}" stroke-width="0.7" />`
       + `<text x="${left + 5 + swatch + 8}" y="${formatSvgNumber(y + swatch / 2)}"`
       + ` font-family="${LABEL_FONT_FAMILY}" font-size="${fontSize}" fill="${ink}"`
       + ' dominant-baseline="central">'
-      + `${escapeXmlText(band.label)}</text>`;
+      + `${escapeXmlText(entry.label)}</text>`;
   }).join('');
-  void rows;
   const captionWidth = scene.legendCaption
     ? scene.legendCaption.length * fontSize * LABEL_WIDTH_PER_CHARACTER + 16
     : 0;
+  void widthPx;
   return `<g><rect x="${left}" y="${formatSvgNumber(boxTop)}"`
     + ` width="${formatSvgNumber(Math.max(boxWidth, captionWidth))}"`
     + ` height="${formatSvgNumber(totalHeight)}" fill="${paper}" stroke="${ink}"`
-    + ' stroke-width="0.7" />' + caption + rowsShifted + '</g>';
+    + ' stroke-width="0.7" />' + caption + rows + '</g>';
 }
 
 /** Legend rows showing the actual hatch, not a grey approximation of it. */

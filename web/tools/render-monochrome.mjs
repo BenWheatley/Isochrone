@@ -174,6 +174,7 @@ const svg = buildMonochromeScreenSvg(
     widthPx,
     heightPx,
     allowedModeMask: EDGE_MODE_WALK_BIT,
+    edgeTraversalCostSeconds: edgeCost,
     cycleMinutes,
     patterns,
     projectedBoundary,

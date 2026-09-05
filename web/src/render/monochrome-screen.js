@@ -2,20 +2,26 @@
 //
 // e-ink and total colourblindness are live-viewing cases, so a monochrome mode
 // that only reached the PDF would miss two of the three readers it exists for.
-// The isochrone is drawn as filled hatched bands with labelled contours, into
-// an SVG layer above the map canvas.
+// The isochrone is drawn as hatched bands with labelled contours.
 //
-// Vector throughout. The bands are polygons built from a triangulation of the
-// nodes, not traced out of a raster, so they are the same shapes at any zoom
-// and at any output size. The triangulation is a static property of the region
-// and is kept, so a routing run only reclassifies triangles and panning is a
-// pure transform.
+// Vector throughout, and built around the ways rather than over the nodes: a
+// travel time is defined on the network, so the ground it describes is the
+// ground near the network. See band-ribbons.js for what that means, and why
+// the width of the zone drawn around a way is a length on the finished sheet
+// rather than a distance on the ground.
 
 import { DEFAULT_COLOUR_CYCLE_MINUTES, EDGE_MODE_WATER_BIT } from '../config/constants.js';
 import { resolveViewportFrame } from '../core/viewport.js';
-import { buildMonochromeIsochroneSvg, planContourLabels } from '../export/monochrome-svg.js';
-import { buildBandRegions, DEFAULT_MAX_TRIANGLE_SPAN_M } from './band-regions.js';
-import { triangulate } from './delaunay.js';
+import { buildMonochromeIsochroneSvg } from '../export/monochrome-svg.js';
+import {
+  buildBandOrderedSegments,
+  collectBandBoundaryCrossings,
+  OUTPUT_PIXELS_PER_MM,
+  planRibbonContourLabels,
+  RIBBON_WIDTH_MM,
+  ribbonWidthPx,
+} from './band-ribbons.js';
+import { collectAllReachableTravelTimeEdgeVertices } from './edge-painting.js';
 import {
   HATCH_PATTERN_LADDER,
   selectHatchPatterns,
@@ -36,11 +42,7 @@ import {
  */
 const MAP_HATCH_PAIR = [HATCH_PATTERN_LADDER[0], HATCH_PATTERN_LADDER[1]];
 
-const TRIANGULATION_PROPERTY = '__nodeTriangulation';
-const BAND_REGION_CACHE_PROPERTY = '__monochromeBandRegions';
 const ROAD_SEGMENT_CACHE_PROPERTY = '__monochromeRoadSegments';
-const LAND_TEST_CACHE_PROPERTY = '__monochromeLandTest';
-const LONGEST_REACHABLE_PROPERTY = '__longestReachableSeconds';
 // Roads are for orientation, so they have to stay legible as roads. Portsmouth's
 // whole network inside a 250px island is a grey wash, not a street map, so at
 // low zoom only the more important roads are drawn.
@@ -73,164 +75,45 @@ function minimumRoadClassForScale(effectiveScale) {
 }
 
 /**
- * The region's triangulation, built once and kept on the map data.
+ * The reachable ways, six floats each: both ends in graph pixels with the
+ * travel time at each.
  *
- * It depends only on where the nodes are, which does not change, so rebuilding
- * it per frame - or worse, per pan - would be pure waste. Berlin's 578,000
- * nodes take about 390 ms and yield 1.15 million triangles; every routing run
- * after that only has to decide which band each of them falls in.
- *
- * Built in graph pixels rather than metres, so it shares the space the
- * viewport and the basemap already use and cannot drift out of register.
+ * This is the colour renderer's own edge vertex buffer. Reused when the
+ * routing run already built one for the same modes, so the common case costs
+ * nothing at all and the two modes cannot come to describe different journeys.
  */
-function getOrBuildNodeTriangulation(mapData) {
-  const cached = mapData[TRIANGULATION_PROPERTY];
-  if (cached) {
-    return cached;
+function getReachableWaySegments(mapData, snapshot, options) {
+  const allowedModeMask = options.allowedModeMask ?? snapshot.allowedModeMask;
+  if (
+    snapshot.edgeVertexData instanceof Float32Array
+    && snapshot.edgeVertexDataModeMask === allowedModeMask
+  ) {
+    return snapshot.edgeVertexData;
   }
-  // Taken from map space at full precision, not from nodePixels. That is the
-  // same positions divided by the graph's pixel size and rounded to whole
-  // units - a 10 m lattice on London - which turns every straight road into a
-  // run of exactly collinear points and every busy junction into exact
-  // duplicates. Those are the two inputs a circumcircle predicate handles
-  // worst, and nothing downstream wants the rounding either.
-  const graph = mapData.graph;
-  const header = graph.header;
-  const nodeCount = header.nNodes;
-  const maxYPx = header.gridHeightPx - 1;
-  const coords = new Float64Array(nodeCount * 2);
-  for (let index = 0; index < nodeCount; index += 1) {
-    coords[index * 2] = graph.nodeI32[index * 4] / header.pixelSizeM;
-    coords[index * 2 + 1] = maxYPx - graph.nodeI32[index * 4 + 1] / header.pixelSizeM;
+  const distSeconds = snapshot.distSeconds;
+  if (!(distSeconds?.length >= mapData.graph.header.nNodes)) {
+    return new Float32Array(0);
   }
-  const triangulation = triangulate(coords);
-  mapData[TRIANGULATION_PROPERTY] = triangulation;
-  return triangulation;
-}
-
-/**
- * The band regions for a routing snapshot, built once and kept.
- *
- * Bands are geometry in graph space: which triangle falls in which time band
- * is a property of the field, not of where the map happens to be scrolled to.
- * Paris costs about 1.5 s to classify and stitch, so recomputing it per frame
- * held panning to under one frame a second; cached, a pan is a transform.
- *
- * Built with no minimum ring area, because that threshold is the one part of a
- * band that does depend on the zoom. It is applied to the cached rings each
- * frame instead, which is exact: stitchRings only ever drops rings below it,
- * and each ring carries the signed area the test needs.
- *
- * Keyed on the snapshot object, which routing replaces wholesale on every run.
- * The distance array alone would not do: the routing kernel reuses its output
- * buffers, so the same Float32Array can come back holding a different field.
- */
-function getOrBuildBandRegions(mapData, triangulation, snapshot, options) {
-  const key = `${options.thresholds.join(',')}|${options.maxTriangleSpanM}|${options.collectTriangles}`;
-  const cached = mapData[BAND_REGION_CACHE_PROPERTY];
-  if (cached && cached.snapshot === snapshot && cached.key === key) {
-    return cached.regions;
-  }
-  const regions = buildBandRegions(triangulation, snapshot.distSeconds, {
-    thresholds: options.thresholds,
-    collectTriangles: options.collectTriangles,
-    minimumRingArea: 0,
-    maxTriangleSpanM: options.maxTriangleSpanM,
-    isPocketLand: options.isPocketLand,
-  });
-  mapData[BAND_REGION_CACHE_PROPERTY] = { snapshot, key, regions };
-  return regions;
-}
-
-/** The slowest reached time, which sets how many bands there are. */
-function getOrMeasureLongestReachableSeconds(snapshot) {
-  const cached = snapshot[LONGEST_REACHABLE_PROPERTY];
-  if (cached !== undefined) {
-    return cached;
-  }
-  let longest = 0;
-  for (let index = 0; index < snapshot.distSeconds.length; index += 1) {
-    const seconds = snapshot.distSeconds[index];
-    if (Number.isFinite(seconds) && seconds > longest) {
-      longest = seconds;
+  // An origin on an isolated node reaches nothing, and Portsmouth alone has
+  // 8107 of those. Finding that out costs one pass over the field; walking
+  // every edge in the region to build an empty buffer costs rather more.
+  let reachesAnything = false;
+  for (let node = 0; node < mapData.graph.header.nNodes; node += 1) {
+    if (Number.isFinite(distSeconds[node])) {
+      reachesAnything = true;
+      break;
     }
   }
-  snapshot[LONGEST_REACHABLE_PROPERTY] = longest;
-  return longest;
-}
-
-/**
- * The bands worth drawing at this zoom.
- *
- * Below about the minimum output area a pocket is a speck rather than a
- * feature. That is expressed in output pixels, so it means the same thing on
- * screen and on a poster - which makes it the one part of a band that depends
- * on the zoom, and so the one part computed per frame rather than cached.
- *
- * It declutters; it is not a visibility gate. An origin that only reaches a
- * small disconnected fragment - a courtyard, a gated estate, an island - is
- * all specks at low zoom, and dropping every one of them would empty the map
- * instead of showing the little there is to show.
- */
-function selectDrawableBands(mapData, triangulation, snapshot, thresholds, frame, options, graph) {
-  const regions = getOrBuildBandRegions(mapData, triangulation, snapshot, {
-    thresholds,
-    collectTriangles: options.collectTriangles === true,
-    isPocketLand: getOrBuildLandTest(mapData, options.projectedBoundary ?? null),
-    // The limit is a real distance, but the triangulation lives in graph
-    // pixels - the space the viewport already works in - so it converts here.
-    maxTriangleSpanM: (options.maxTriangleSpanM ?? DEFAULT_MAX_TRIANGLE_SPAN_M)
-      / graph.header.pixelSizeM,
-  });
-
-  const minimumOutputArea = options.minimumRingOutputArea ?? 90;
-  const minimumRingArea = minimumOutputArea / (frame.effectiveScale * frame.effectiveScale);
-  const drawable = [];
-  for (const region of regions.bands) {
-    const rings = region.rings.filter((ring) => Math.abs(ring.signedArea) >= minimumRingArea);
-    if (rings.length > 0) {
-      drawable.push({ ...region, rings });
-    }
+  if (!reachesAnything) {
+    return new Float32Array(0);
   }
-  return drawable.length > 0 ? drawable : regions.bands;
-}
-
-/**
- * Whether a point that carries no nodes is land.
- *
- * The coastline and inland water are already loaded and projected for the
- * basemap, so the answer is a point-in-polygon test against them under the
- * even-odd rule - which is how those rings are drawn, islands and all. Without
- * a basemap there is no evidence either way and every enclosed pocket stays a
- * hole.
- */
-function getOrBuildLandTest(mapData, projectedBoundary) {
-  const cached = mapData[LAND_TEST_CACHE_PROPERTY];
-  if (cached !== undefined && cached.boundary === projectedBoundary) {
-    return cached.test;
-  }
-  const paths = [
-    ...(projectedBoundary?.waterFeatures ?? []),
-    ...(projectedBoundary?.inlandWaterFeatures ?? []),
-  ].flatMap((feature) => feature.paths);
-
-  const test = paths.length === 0
-    ? undefined
-    : (x, y) => {
-      let inside = false;
-      for (const path of paths) {
-        for (let index = 0, previous = path.length - 1; index < path.length; previous = index, index += 1) {
-          const [x0, y0] = path[previous];
-          const [x1, y1] = path[index];
-          if ((y0 > y) !== (y1 > y) && x < x0 + ((y - y0) / (y1 - y0)) * (x1 - x0)) {
-            inside = !inside;
-          }
-        }
-      }
-      return !inside;
-    };
-  mapData[LAND_TEST_CACHE_PROPERTY] = { boundary: projectedBoundary, test };
-  return test;
+  return collectAllReachableTravelTimeEdgeVertices(
+    mapData.graph,
+    mapData.nodePixels,
+    distSeconds,
+    allowedModeMask,
+    { edgeTraversalCostSeconds: options.edgeTraversalCostSeconds },
+  );
 }
 
 function formatBandLabel(minutes, formatMinutes) {
@@ -375,37 +258,6 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
   const patterns = options.patterns
     ?? (patternCount === 2 ? MAP_HATCH_PAIR : selectHatchPatterns(patternCount));
   const bandSeconds = (cycleMinutes * 60) / patterns.length;
-  // A ceiling on work, not on what the map is allowed to say. At 40 it was the
-  // latter: fifteen-minute bands stopped at ten hours, so walking across Cyprus
-  // left most of the island in no band at all and only the fragments inside the
-  // limit were drawn - a scatter of specks reading as noise rather than as a
-  // map. The bound is here for a cycle short enough to ask for thousands of
-  // bands, which is a different thing entirely.
-  const maxBands = options.maxBands ?? 400;
-
-  const longestReachableSeconds = getOrMeasureLongestReachableSeconds(snapshot);
-  const thresholds = [];
-  for (
-    let seconds = bandSeconds;
-    seconds < longestReachableSeconds + bandSeconds && thresholds.length < maxBands;
-    seconds += bandSeconds
-  ) {
-    thresholds.push(seconds);
-  }
-
-  // A field with no bands in it is still a monochrome map: it has a coastline
-  // and it has roads. Treating a bandless field as a failure to build the
-  // scene put the colour basemap back on screen under a monochrome setting,
-  // which is a different map, not a degraded one.
-  //
-  // The triangulation is only reached from here, which is what makes a
-  // basemap-only scene cheap enough to draw the instant a region loads: it is
-  // the expensive half of a region switch, and nothing without bands needs it.
-  const triangulation = thresholds.length > 0 ? getOrBuildNodeTriangulation(mapData) : null;
-  const visibleRegionBands = triangulation !== null && triangulation.triangles.length > 0
-    ? selectDrawableBands(mapData, triangulation, snapshot, thresholds, frame, options, graph)
-    : [];
-
   // Graph pixels straight to canvas pixels: the same frame the basemap and the
   // edge renderer use, so everything registers without a second thought.
   const transform = (graphX, graphY) => [
@@ -413,13 +265,17 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
     (graphY - frame.offsetYPx) * frame.effectiveScale,
   ];
 
-  const bands = visibleRegionBands.map((region, index) => ({
-    rings: region.rings,
-    triangles: region.triangles,
-    label: formatBandLabel(thresholds[region.bandIndex] / 60, options.formatMinutes),
-    pattern: patterns[region.bandIndex % patterns.length],
-    isLimit: index === visibleRegionBands.length - 1,
-  }));
+  // The ways themselves, with the travel time at each end. Reachability is the
+  // whole of what puts a way in here, so nothing is ever drawn across ground
+  // that carries no way - which is what a triangulation over the nodes could
+  // not help doing.
+  //
+  // There is no band count anywhere in this: a band is one division of a time,
+  // done per fragment on screen and per piece in the export, exactly as the
+  // colour renderer evaluates its cycle. Nothing enumerates bands, so nothing
+  // has to bound how many there are.
+  const segments = getReachableWaySegments(mapData, snapshot, options);
+  const hasField = segments.length >= 6;
 
   const waterFeatures = (options.projectedBoundary?.waterFeatures ?? [])
     .concat(options.projectedBoundary?.inlandWaterFeatures ?? [])
@@ -428,28 +284,56 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
     }));
 
   const labelFontSize = options.labelFontSize ?? 12;
+  const pixelsPerMm = options.outputPixelsPerMm ?? OUTPUT_PIXELS_PER_MM;
+  const ribbonPx = ribbonWidthPx(options.ribbonWidthMm ?? RIBBON_WIDTH_MM, pixelsPerMm);
+
   // Planned on the scene rather than inside a renderer, so the screen and the
   // exported sheet put every value in the same place. Labels that moved
   // between them would be two maps with one name.
-  const { labels, gaps } = planContourLabels(bands, {
-    transform,
-    fontSize: labelFontSize,
-    widthPx,
-    heightPx,
-    spacingPx: options.labelSpacingPx,
-  });
+  // Where a way crosses a band boundary: the contour geometry and the anchor
+  // for its label, computed once and carried on the scene so the screen and
+  // the sheet draw the same lines in the same places.
+  const contourCrossings = hasField ? collectBandBoundaryCrossings(segments, bandSeconds) : [];
+  const labels = hasField
+    ? planRibbonContourLabels(contourCrossings, {
+      transform,
+      widthPx,
+      heightPx,
+      spacingPx: options.labelSpacingPx ?? Math.max(ribbonPx * 3, 160),
+      formatLabel: (seconds) => formatBandLabel(seconds / 60, options.formatMinutes),
+    })
+    : [];
 
   return {
     widthPx,
     heightPx,
-    bands,
     transform,
+    frame: {
+      offsetXPx: frame.offsetXPx,
+      offsetYPx: frame.offsetYPx,
+      effectiveScale: frame.effectiveScale,
+    },
+    ribbons: hasField
+      ? {
+        segments,
+        ordered: buildBandOrderedSegments(segments, bandSeconds),
+        bandSeconds,
+        patterns,
+        // One legend row per pattern, labelled with the time it first stands
+        // for. The cycle repeats after that, which is what the contour values
+        // on the map are there to resolve.
+        patternLabels: patterns.map(
+          (_, index) => formatBandLabel(((index + 1) * bandSeconds) / 60, options.formatMinutes),
+        ),
+        widthPx: ribbonPx,
+        outlinePx: 0.9,
+      }
+      : null,
+    contourCrossings,
     labels,
-    labelGaps: gaps,
     waterPattern: WATER_HATCH_PATTERN,
     waterInk: WATER_INK,
     roadInk: ROAD_INK,
-    bandsIncludeHoles: true,
     ink: options.ink ?? '#000000',
     paper: options.paper ?? '#ffffff',
     labelFontSize,

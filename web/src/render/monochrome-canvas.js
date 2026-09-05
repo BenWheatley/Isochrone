@@ -61,15 +61,15 @@ function tracePolygon(context, points, transform) {
 }
 
 /**
- * Paints the scene. Returns the number of bands drawn, so a caller can tell an
+ * Paints the scene. Returns the number of ways drawn, so a caller can tell an
  * empty map from a failed one.
  */
 export function drawMonochromeScene(context, scene, options = {}) {
   if (!context || typeof context.beginPath !== 'function') {
     throw new Error('context must be a 2D canvas context');
   }
-  if (!scene || !Array.isArray(scene.bands)) {
-    throw new Error('scene must carry a bands array');
+  if (!scene || typeof scene !== 'object') {
+    throw new Error('scene must be an object');
   }
   const createCanvas = options.createCanvas
     ?? ((width, height) => {
@@ -88,9 +88,8 @@ export function drawMonochromeScene(context, scene, options = {}) {
   context.fillRect(0, 0, widthPx, heightPx);
   context.lineJoin = 'round';
 
-  // Water, then roads, then the band tint over them, then contours, then
-  // labels: the hatches are transparent, so the bands read as a screen tint
-  // laid over linework the way a printed map does.
+  // The sea's ruling, then the zones, then the linework over both, then the
+  // labels over everything.
   const waterPattern = scene.waterPattern
     ? getOrCreatePattern(context, scene.waterPattern, {
       ink: scene.waterInk ?? ink,
@@ -111,6 +110,73 @@ export function drawMonochromeScene(context, scene, options = {}) {
       // even-odd, so an island stays dry: a coastline is the sea with the land
       // taken out of it.
       context.fill('evenodd');
+    }
+  }
+
+  // The same zone around the same ways the GPU draws, in the same order: the
+  // outline wider than the zone so only the outside of the union survives,
+  // then band by band from the farthest in, so the nearer time covers any
+  // ground two bands both reach.
+  // The same zone around the same ways the GPU draws, in the same order: the
+  // outline wider than the zone so only the outside of the union survives,
+  // then band by band from the farthest in, so the nearer time covers any
+  // ground two bands both reach.
+  let drawnSegments = 0;
+  if (scene.ribbons && scene.ribbons.ordered.data.length >= 6) {
+    const { ordered, patterns, widthPx: ribbonPx, outlinePx } = scene.ribbons;
+    drawnSegments = Math.floor(ordered.data.length / 6);
+
+    const strokeRange = (first, count, width, style) => {
+      context.beginPath();
+      for (let piece = 0; piece < count; piece += 1) {
+        const offset = (first + piece) * 6;
+        const [x0, y0] = transform(ordered.data[offset], ordered.data[offset + 1]);
+        const [x1, y1] = transform(ordered.data[offset + 3], ordered.data[offset + 4]);
+        context.moveTo(x0, y0);
+        context.lineTo(x1, y1);
+      }
+      context.lineCap = 'round';
+      context.lineJoin = 'round';
+      context.lineWidth = width;
+      context.strokeStyle = style;
+      context.stroke();
+    };
+
+    strokeRange(0, drawnSegments, ribbonPx + outlinePx * 2, ink);
+    for (const range of ordered.ranges) {
+      if (range.count === 0) {
+        continue;
+      }
+      strokeRange(range.first, range.count, ribbonPx, paper);
+      const pattern = patterns[((range.band % patterns.length) + patterns.length) % patterns.length];
+      if (pattern.lines.length === 0) {
+        continue;
+      }
+      const fill = getOrCreatePattern(context, pattern, {
+        ink,
+        scale: scene.patternScale,
+        createCanvas,
+      });
+      if (fill) {
+        strokeRange(range.first, range.count, ribbonPx, fill);
+      }
+    }
+  }
+
+
+  // The linework goes over the zones, not under them. A zone is opaque paper
+  // where its hatch is not inked, so anything drawn first is covered - and a
+  // reader needs the coast and the streets to place the isochrone against.
+  if (waterPattern && basemap.waterFeatures?.length) {
+    context.beginPath();
+    let tracedOutline = false;
+    for (const feature of basemap.waterFeatures) {
+      for (const path of feature.paths) {
+        tracedOutline = tracePolygon(context, Float64Array.from(path.flat()), transform)
+          || tracedOutline;
+      }
+    }
+    if (tracedOutline) {
       context.strokeStyle = ink;
       context.lineWidth = scene.contourStrokeWidth;
       context.stroke();
@@ -131,55 +197,13 @@ export function drawMonochromeScene(context, scene, options = {}) {
     context.stroke();
   }
 
-  let drawnBands = 0;
-  for (const band of scene.bands) {
-    if (band.pattern.lines.length === 0) {
-      continue;
-    }
-    const fill = getOrCreatePattern(context, band.pattern, {
-      ink,
-      scale: scene.patternScale,
-      createCanvas,
-    });
-    if (!fill) {
-      continue;
-    }
-    context.beginPath();
-    let traced = false;
-    for (const ring of band.rings) {
-      traced = tracePolygon(context, ring.points, transform) || traced;
-    }
-    if (!traced) {
-      continue;
-    }
-    context.fillStyle = fill;
-    context.fill('evenodd');
-    drawnBands += 1;
-  }
-
-  // A solid hairline between bands, and heavier on the outermost, which is not
-  // another band edge but the limit of travel - bare paper inside it is
-  // otherwise the same white as ground nobody can reach at all.
-  context.strokeStyle = ink;
-  for (const band of scene.bands) {
-    context.beginPath();
-    let traced = false;
-    for (const ring of band.rings) {
-      traced = tracePolygon(context, ring.points, transform) || traced;
-    }
-    if (!traced) {
-      continue;
-    }
-    context.lineWidth = band.isLimit ? scene.contourStrokeWidth * 2.2 : scene.contourStrokeWidth;
-    context.stroke();
-  }
-
   drawSceneLabels(context, scene);
   context.restore();
-  return drawnBands;
+  return drawnSegments;
 }
 
 function drawSceneLabels(context, scene) {
+
   const labels = scene.labels ?? [];
   if (labels.length === 0) {
     return;
