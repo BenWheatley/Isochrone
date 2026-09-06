@@ -216,18 +216,14 @@ export function buildMonochromeIsochroneSvg(scene) {
     const strokeAttributes = (width) => ` stroke-width="${formatSvgNumber(width)}"`
       + ' stroke-linecap="round" stroke-linejoin="round" />';
 
-    // The limit of travel first, heavier, outside them all.
-    const allData = pathForRange(0, Math.floor(ordered.data.length / 6));
-    if (allData.length > 0) {
-      parts.push(
-        `<path d="${allData}" fill="none" stroke="${ink}"`
-        + strokeAttributes(ribbonPx + contourWidth * 4.4),
-      );
-    }
+    // Each band's geometry is written once and stroked three times through
+    // <use>, rather than repeated per stroke. Cyprus has nearly two million
+    // pieces across a hundred and twenty-six bands, and writing their
+    // coordinates out three times over made an eighteen megabyte sheet.
+    const defs = [];
+    const limitStrokes = [];
+    const strokes = [];
 
-    // Then band by band, farthest first, so the nearer time covers any ground
-    // two bands both reach - which makes the edge between two fills the
-    // isoline itself, with no separate line needed to mark it.
     for (const range of ordered.ranges) {
       if (range.count === 0) {
         continue;
@@ -236,19 +232,30 @@ export function buildMonochromeIsochroneSvg(scene) {
       if (data.length === 0) {
         continue;
       }
+      const id = `mono-band-${range.band}`;
+      defs.push(`<path id="${id}" d="${data}" />`);
+      // The limit of travel, heavier and outside them all. Every band carries
+      // part of it, so it is the same geometry stroked wider rather than a
+      // second copy of every way on the sheet.
+      limitStrokes.push(`<use href="#${id}" fill="none" stroke="${ink}"`
+        + strokeAttributes(ribbonPx + contourWidth * 4.4));
       // Outlined before it is filled: a nearer band covers the outline of the
       // farther one everywhere but along their shared edge, so what survives
       // is a line exactly on each band boundary.
-      parts.push(`<path d="${data}" fill="none" stroke="${ink}"`
-        + strokeAttributes(ribbonPx + outlinePx * 2));
-      parts.push(`<path d="${data}" fill="none" stroke="${paper}"` + strokeAttributes(ribbonPx));
+      strokes.push(
+        `<use href="#${id}" fill="none" stroke="${ink}"`
+        + strokeAttributes(ribbonPx + outlinePx * 2),
+        `<use href="#${id}" fill="none" stroke="${paper}"` + strokeAttributes(ribbonPx),
+      );
       const pattern = patterns[((range.band % patterns.length) + patterns.length) % patterns.length];
       if (pattern.lines.length > 0) {
-        parts.push(
-          `<path d="${data}" fill="none" stroke="url(#${pattern.id})"` + strokeAttributes(ribbonPx),
+        strokes.push(
+          `<use href="#${id}" fill="none" stroke="url(#${pattern.id})"`
+          + strokeAttributes(ribbonPx),
         );
       }
     }
+    parts.push(`<defs>${defs.join('')}</defs>`, ...limitStrokes, ...strokes);
     if (coastlineRings.length > 0) {
       parts.push('</g>');
     }
