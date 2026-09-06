@@ -122,3 +122,46 @@ test('labels outside the frame are dropped', () => {
   );
   assert.deepEqual(labels, []);
 });
+
+test('a label follows its contour, not the way that happens to cross it', () => {
+  // A ring road meets a boundary running along it, not out through it. Reading
+  // the angle off that road stood the label at right angles to the line it
+  // belongs to; the boundary's own neighbouring crossings say where it runs.
+  const crossings = [];
+  for (let x = 0; x <= 300; x += 20) {
+    // A contour running due east, crossed by ways pointing every which way.
+    crossings.push({ x, y: 200, seconds: 900, wayX: 1, wayY: (x % 40 === 0) ? 3 : -3 });
+  }
+  const labels = planRibbonContourLabels(crossings, {
+    transform: (x, y) => [x, y],
+    widthPx: 400,
+    heightPx: 400,
+    spacingPx: 120,
+    formatLabel: () => '15 min',
+  });
+
+  assert.ok(labels.length > 0, 'nothing was labelled');
+  for (const label of labels) {
+    assert.ok(
+      Math.abs(label.angleDegrees) < 5,
+      `label set at ${label.angleDegrees.toFixed(1)} degrees, but its contour runs level`,
+    );
+  }
+});
+
+test('where a contour has no direction to read, the way is the fallback', () => {
+  // One crossing on its own: nothing to fit a line to, so it falls back to
+  // square across the way, which is right where a way crosses squarely.
+  const labels = planRibbonContourLabels(
+    [{ x: 50, y: 50, seconds: 900, wayX: 0, wayY: 5 }],
+    {
+      transform: (x, y) => [x, y],
+      widthPx: 200,
+      heightPx: 200,
+      spacingPx: 60,
+      formatLabel: () => '15 min',
+    },
+  );
+  assert.equal(labels.length, 1);
+  assert.ok(Math.abs(labels[0].angleDegrees) < 1e-9);
+});

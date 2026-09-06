@@ -106,6 +106,7 @@ uniform highp vec2 u_tileSizePx;
 uniform highp float u_useTile;
 uniform sampler2D u_tile;
 uniform vec4 u_ink;
+uniform vec4 u_paper;
 varying highp vec2 v_from;
 varying highp vec2 v_to;
 varying highp vec2 v_seconds;
@@ -128,10 +129,12 @@ void main(void) {
     }
   }
   if (u_useTile > 0.5) {
+    // Paper between the strokes rather than a discard, so one pass both
+    // covers what is underneath and lays the hatch on it. Discarding here
+    // meant a second pass over every zone to put the paper down first.
     vec4 texel = texture2D(u_tile, fract(screen / u_tileSizePx));
-    if (texel.a < 0.5) {
-      discard;
-    }
+    gl_FragColor = texel.a < 0.5 ? u_paper : u_ink;
+    return;
   }
   gl_FragColor = u_ink;
 }`;
@@ -420,6 +423,7 @@ export function createMonochromeWebGlPainter(gl, options = {}) {
       useTile: gl.getUniformLocation(ribbonProgram, 'u_useTile'),
       tile: gl.getUniformLocation(ribbonProgram, 'u_tile'),
       ink: gl.getUniformLocation(ribbonProgram, 'u_ink'),
+      paper: gl.getUniformLocation(ribbonProgram, 'u_paper'),
     },
     fill: {
       program: fillProgram,
@@ -532,6 +536,7 @@ function drawRibbonPass(state, scene, viewport, pass) {
   gl.uniform1f(ribbon.patternCount, scene.ribbons.patterns.length);
   gl.uniform1f(ribbon.patternIndex, -1);
   gl.uniform4fv(ribbon.ink, pass.ink);
+  gl.uniform4fv(ribbon.paper, pass.paper ?? pass.ink);
   if (pass.tile) {
     gl.uniform1f(ribbon.useTile, 1);
     gl.uniform2f(ribbon.tileSize, pass.tile.sizePx, pass.tile.sizePx);
@@ -589,21 +594,17 @@ function drawRibbons(state, scene, viewport, ink, paper) {
       count: range.count,
       ink,
     });
-    drawRibbonPass(state, scene, viewport, { halfWidthPx: half, count: range.count, ink: paper });
-
     const pattern = patterns[((range.band % patterns.length) + patterns.length) % patterns.length];
-    if (pattern.lines.length === 0) {
-      continue;
-    }
-    const tile = getOrCreateTileTexture(state, pattern, scene.patternScale, scene.ink);
-    if (tile) {
-      drawRibbonPass(state, scene, viewport, {
-        halfWidthPx: half,
-        count: range.count,
-        tile,
-        ink,
-      });
-    }
+    const tile = pattern.lines.length === 0
+      ? null
+      : getOrCreateTileTexture(state, pattern, scene.patternScale, scene.ink);
+    drawRibbonPass(state, scene, viewport, {
+      halfWidthPx: half,
+      count: range.count,
+      tile,
+      ink: tile ? ink : paper,
+      paper,
+    });
   }
   releaseRibbonAttributes(state);
   return total;

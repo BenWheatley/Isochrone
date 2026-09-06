@@ -43,6 +43,8 @@ import {
 const MAP_HATCH_PAIR = [HATCH_PATTERN_LADDER[0], HATCH_PATTERN_LADDER[1]];
 
 const ROAD_SEGMENT_CACHE_PROPERTY = '__monochromeRoadSegments';
+const BAND_GEOMETRY_PROPERTY = '__monochromeBandGeometry';
+const WAY_SEGMENT_CACHE_PROPERTY = '__monochromeWaySegments';
 // Roads are for orientation, so they have to stay legible as roads. Portsmouth's
 // whole network inside a 250px island is a grey wash, not a street map, so at
 // low zoom only the more important roads are drawn.
@@ -75,6 +77,29 @@ function minimumRoadClassForScale(effectiveScale) {
 }
 
 /**
+ * The ways cut into bands, and where they cross a boundary.
+ *
+ * Neither depends on the viewport: they are the field expressed as geometry,
+ * in graph pixels. Rebuilding them per frame put Berlin's whole 200 ms of
+ * cutting into every pan and every zoom step, which is the thing the drawing
+ * was arranged to avoid.
+ */
+function getOrBuildBandGeometry(snapshot, segments, bandSeconds) {
+  const cached = snapshot[BAND_GEOMETRY_PROPERTY];
+  if (cached && cached.segments === segments && cached.bandSeconds === bandSeconds) {
+    return cached;
+  }
+  const geometry = {
+    segments,
+    bandSeconds,
+    ordered: buildBandOrderedSegments(segments, bandSeconds),
+    crossings: collectBandBoundaryCrossings(segments, bandSeconds),
+  };
+  snapshot[BAND_GEOMETRY_PROPERTY] = geometry;
+  return geometry;
+}
+
+/**
  * The reachable ways, six floats each: both ends in graph pixels with the
  * travel time at each.
  *
@@ -89,6 +114,15 @@ function getReachableWaySegments(mapData, snapshot, options) {
     && snapshot.edgeVertexDataModeMask === allowedModeMask
   ) {
     return snapshot.edgeVertexData;
+  }
+  // Kept on the snapshot when the routing run did not leave one. The GPU's
+  // node-indexed edge renderer has no use for a plain vertex buffer, so on
+  // that path there is nothing to reuse and this walks the whole graph -
+  // 348 ms on Berlin, which is a price to pay once for a routing result and
+  // not once for every pan of it.
+  const cached = snapshot[WAY_SEGMENT_CACHE_PROPERTY];
+  if (cached && cached.allowedModeMask === allowedModeMask) {
+    return cached.segments;
   }
   const distSeconds = snapshot.distSeconds;
   if (!(distSeconds?.length >= mapData.graph.header.nNodes)) {
@@ -107,13 +141,15 @@ function getReachableWaySegments(mapData, snapshot, options) {
   if (!reachesAnything) {
     return new Float32Array(0);
   }
-  return collectAllReachableTravelTimeEdgeVertices(
+  const segments = collectAllReachableTravelTimeEdgeVertices(
     mapData.graph,
     mapData.nodePixels,
     distSeconds,
     allowedModeMask,
     { edgeTraversalCostSeconds: options.edgeTraversalCostSeconds },
   );
+  snapshot[WAY_SEGMENT_CACHE_PROPERTY] = { allowedModeMask, segments };
+  return segments;
 }
 
 function formatBandLabel(minutes, formatMinutes) {
@@ -298,7 +334,8 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
   // Where a way crosses a band boundary: the contour geometry and the anchor
   // for its label, computed once and carried on the scene so the screen and
   // the sheet draw the same lines in the same places.
-  const contourCrossings = hasField ? collectBandBoundaryCrossings(segments, bandSeconds) : [];
+  const bandGeometry = hasField ? getOrBuildBandGeometry(snapshot, segments, bandSeconds) : null;
+  const contourCrossings = bandGeometry?.crossings ?? [];
   const labels = hasField
     ? planRibbonContourLabels(contourCrossings, {
       transform,
@@ -308,7 +345,6 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
       formatLabel: (seconds) => formatBandLabel(seconds / 60, options.formatMinutes),
     })
     : [];
-
   return {
     widthPx,
     heightPx,
@@ -321,7 +357,7 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
     ribbons: hasField
       ? {
         segments,
-        ordered: buildBandOrderedSegments(segments, bandSeconds),
+        ordered: bandGeometry.ordered,
         bandSeconds,
         patterns,
         // One legend row per pattern, labelled with the time it first stands

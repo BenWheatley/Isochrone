@@ -92,6 +92,13 @@ export function collectBandBoundaryCrossings(segments, bandSeconds) {
  * Acceptance is a distance test against what has already been placed rather
  * than a bucket per cell, so which label survives does not depend on where a
  * grid happens to fall - the cells here only narrow the search.
+ *
+ * A label is set along its own contour, and the contour's direction is taken
+ * from the other crossings of the same boundary nearby, not from the way that
+ * happens to cross it. The way is only the normal of the contour where it runs
+ * straight out from the origin; a ring road meets the same boundary running
+ * along it, and reading the angle off that road stood the label at right
+ * angles to the line it belongs to.
  */
 export function planRibbonContourLabels(crossings, options) {
   const {
@@ -105,6 +112,10 @@ export function planRibbonContourLabels(crossings, options) {
   const kept = [];
   const buckets = new Map();
   const columns = Math.ceil(widthPx / spacingPx) + 3;
+
+  // Crossings of one boundary, indexed by where they are, so the direction of
+  // a contour can be read off its own neighbours.
+  const neighbourhood = buildCrossingIndex(crossings, transform, spacingPx);
 
   for (const crossing of crossings) {
     const [x, y] = transform(crossing.x, crossing.y);
@@ -132,14 +143,8 @@ export function planRibbonContourLabels(crossings, options) {
       continue;
     }
 
-    // The way runs across the contour, so the contour runs across the way.
-    let angleDegrees = (Math.atan2(crossing.wayY, crossing.wayX) * 180) / Math.PI + 90;
-    if (angleDegrees > 90) {
-      angleDegrees -= 180;
-    }
-    if (angleDegrees < -90) {
-      angleDegrees += 180;
-    }
+    const angleDegrees = contourAngleDegrees(neighbourhood, crossing.seconds, x, y, spacingPx)
+      ?? acrossTheWayDegrees(crossing);
     const label = {
       x,
       y,
@@ -157,6 +162,97 @@ export function planRibbonContourLabels(crossings, options) {
     }
   }
   return kept;
+}
+
+/** Output-space positions of every crossing, bucketed by boundary and cell. */
+function buildCrossingIndex(crossings, transform, cellPx) {
+  const byBoundary = new Map();
+  for (const crossing of crossings) {
+    const [x, y] = transform(crossing.x, crossing.y);
+    let cells = byBoundary.get(crossing.seconds);
+    if (cells === undefined) {
+      cells = new Map();
+      byBoundary.set(crossing.seconds, cells);
+    }
+    const key = `${Math.floor(y / cellPx)}|${Math.floor(x / cellPx)}`;
+    const cell = cells.get(key);
+    if (cell === undefined) {
+      cells.set(key, [x, y]);
+    } else {
+      cell.push(x, y);
+    }
+  }
+  return { byBoundary, cellPx };
+}
+
+/**
+ * The direction of a contour at a point, from the spread of the boundary's own
+ * crossings around it.
+ *
+ * The principal axis of those points is the line they lie along, which is the
+ * contour. Returns null where there are too few of them to say, or where they
+ * are scattered rather than strung out - a junction of several contours, where
+ * any angle would be a guess.
+ */
+function contourAngleDegrees(index, seconds, x, y, radiusPx) {
+  const cells = index.byBoundary.get(seconds);
+  if (cells === undefined) {
+    return null;
+  }
+  const column = Math.floor(x / index.cellPx);
+  const row = Math.floor(y / index.cellPx);
+  let count = 0;
+  let sumXX = 0;
+  let sumXY = 0;
+  let sumYY = 0;
+  for (let dy = -1; dy <= 1; dy += 1) {
+    for (let dx = -1; dx <= 1; dx += 1) {
+      const cell = cells.get(`${row + dy}|${column + dx}`);
+      if (cell === undefined) {
+        continue;
+      }
+      for (let index2 = 0; index2 + 1 < cell.length; index2 += 2) {
+        const offsetX = cell[index2] - x;
+        const offsetY = cell[index2 + 1] - y;
+        if (Math.hypot(offsetX, offsetY) > radiusPx) {
+          continue;
+        }
+        count += 1;
+        sumXX += offsetX * offsetX;
+        sumXY += offsetX * offsetY;
+        sumYY += offsetY * offsetY;
+      }
+    }
+  }
+  if (count < 4) {
+    return null;
+  }
+
+  // Principal axis of the covariance, and how strongly the points prefer it.
+  const trace = sumXX + sumYY;
+  const difference = Math.hypot(sumXX - sumYY, 2 * sumXY);
+  if (trace <= 0 || difference / trace < 0.25) {
+    return null;
+  }
+  const angle = 0.5 * Math.atan2(2 * sumXY, sumXX - sumYY);
+  return uprightDegrees((angle * 180) / Math.PI);
+}
+
+/** The fallback: square to the way, which is right where it crosses squarely. */
+function acrossTheWayDegrees(crossing) {
+  return uprightDegrees((Math.atan2(crossing.wayY, crossing.wayX) * 180) / Math.PI + 90);
+}
+
+/** Turned to within a quarter turn of level, so a value is never upside down. */
+function uprightDegrees(degrees) {
+  let upright = degrees;
+  while (upright > 90) {
+    upright -= 180;
+  }
+  while (upright < -90) {
+    upright += 180;
+  }
+  return upright;
 }
 
 /**
