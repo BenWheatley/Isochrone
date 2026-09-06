@@ -174,8 +174,31 @@ export function buildMonochromeIsochroneSvg(scene) {
         `<path d="${data}" fill="url(#${WATER_HATCH_PATTERN.id})" fill-rule="evenodd" stroke="none" />`,
       );
     }
-  }  const labels = [];
+  }  // Clipped to the land. A zone is a claim about ground someone can stand on,
+  // and the sea is not that - but a river or a lake is different, having ways
+  // along both banks whose zones legitimately meet over the water, so only the
+  // coastline clips anything. Even-odd against a rectangle of the whole sheet
+  // makes the clip the land: everything but the sea, islands included.
+  const coastline = basemap.coastlineFeatures ?? [];
+  const coastlineRings = coastline
+    .flatMap((feature) => feature.paths)
+    .map((path) => ringToPathData(Float64Array.from(path.flat()), transform))
+    .filter((data) => data.length > 0)
+    .join('');
+  const landClipId = 'mono-land';
+  if (coastlineRings.length > 0) {
+    parts.push(
+      `<clipPath id="${landClipId}" clipPathUnits="userSpaceOnUse">`
+      + `<path clip-rule="evenodd" d="M0 0H${formatSvgNumber(widthPx)}`
+      + `V${formatSvgNumber(heightPx)}H0Z${coastlineRings}" /></clipPath>`,
+    );
+  }
+
+  const labels = [];
   if (ribbons && ribbons.ordered.data.length >= 6) {
+    if (coastlineRings.length > 0) {
+      parts.push(`<g clip-path="url(#${landClipId})">`);
+    }
     const { ordered, patterns, widthPx: ribbonPx, outlinePx } = ribbons;
 
     const pathForRange = (first, count) => {
@@ -193,13 +216,12 @@ export function buildMonochromeIsochroneSvg(scene) {
     const strokeAttributes = (width) => ` stroke-width="${formatSvgNumber(width)}"`
       + ' stroke-linecap="round" stroke-linejoin="round" />';
 
-    // The outline of the union first, wider than the zone, so all of it that
-    // survives is the outside edge.
+    // The limit of travel first, heavier, outside them all.
     const allData = pathForRange(0, Math.floor(ordered.data.length / 6));
     if (allData.length > 0) {
       parts.push(
         `<path d="${allData}" fill="none" stroke="${ink}"`
-        + strokeAttributes(ribbonPx + outlinePx * 2),
+        + strokeAttributes(ribbonPx + contourWidth * 4.4),
       );
     }
 
@@ -214,6 +236,11 @@ export function buildMonochromeIsochroneSvg(scene) {
       if (data.length === 0) {
         continue;
       }
+      // Outlined before it is filled: a nearer band covers the outline of the
+      // farther one everywhere but along their shared edge, so what survives
+      // is a line exactly on each band boundary.
+      parts.push(`<path d="${data}" fill="none" stroke="${ink}"`
+        + strokeAttributes(ribbonPx + outlinePx * 2));
       parts.push(`<path d="${data}" fill="none" stroke="${paper}"` + strokeAttributes(ribbonPx));
       const pattern = patterns[((range.band % patterns.length) + patterns.length) % patterns.length];
       if (pattern.lines.length > 0) {
@@ -221,6 +248,9 @@ export function buildMonochromeIsochroneSvg(scene) {
           `<path d="${data}" fill="none" stroke="url(#${pattern.id})"` + strokeAttributes(ribbonPx),
         );
       }
+    }
+    if (coastlineRings.length > 0) {
+      parts.push('</g>');
     }
   }
 

@@ -567,7 +567,7 @@ function drawRibbons(state, scene, viewport, ink, paper) {
   // the zone, so all of it that survives is the outside edge.
   bindRibbonSegments(state, ordered.data, 0);
   drawRibbonPass(state, scene, viewport, {
-    halfWidthPx: half + outlinePx,
+    halfWidthPx: half + scene.contourStrokeWidth * 2.2,
     count: total,
     ink,
   });
@@ -579,6 +579,16 @@ function drawRibbons(state, scene, viewport, ink, paper) {
       continue;
     }
     bindRibbonSegments(state, ordered.data, range.first);
+    // Each band outlined before it is filled. A nearer band covers the outline
+    // of the farther one everywhere except along their shared edge, so what
+    // survives is a line exactly on each band boundary - the isoline - with
+    // the heavier line already laid down outside them all for the limit of
+    // travel.
+    drawRibbonPass(state, scene, viewport, {
+      halfWidthPx: half + outlinePx,
+      count: range.count,
+      ink,
+    });
     drawRibbonPass(state, scene, viewport, { halfWidthPx: half, count: range.count, ink: paper });
 
     const pattern = patterns[((range.band % patterns.length) + patterns.length) % patterns.length];
@@ -595,7 +605,30 @@ function drawRibbons(state, scene, viewport, ink, paper) {
       });
     }
   }
+  releaseRibbonAttributes(state);
   return total;
+}
+
+/**
+ * Puts the instancing divisors back.
+ *
+ * They are state of the attribute index, not of the program, so leaving them
+ * set made every later program read its second attribute once per instance
+ * instead of once per vertex - which collapsed each label to nothing while
+ * leaving the single-attribute line program working, and so looked like the
+ * labels had stopped being produced rather than stopped being drawn.
+ */
+function releaseRibbonAttributes(state) {
+  const { gl, ribbon, instancing } = state;
+  for (const location of [ribbon.from, ribbon.fromSeconds, ribbon.to, ribbon.toSeconds]) {
+    if (location >= 0) {
+      instancing.divisor(location, 0);
+      gl.disableVertexAttribArray(location);
+    }
+  }
+  if (ribbon.corner >= 0) {
+    gl.disableVertexAttribArray(ribbon.corner);
+  }
 }
 
 function drawTriangles(state, vertices, ink, viewport) {
@@ -639,7 +672,20 @@ export function drawMonochromeSceneWebGl(state, scene) {
     fillWaterThroughStencil(state, scene, viewport);
   }
 
+  // Clipped to the land. A zone is a claim about ground someone can stand on,
+  // and the sea is not that - but a river or a lake is different, having ways
+  // along both banks whose zones legitimately meet over the water, so only the
+  // coastline masks anything.
+  const coastline = scene.basemap.coastlineFeatures ?? [];
+  const clipped = coastline.length > 0
+    && maskRingsIntoStencil(state, scene, viewport, coastline);
+  if (clipped) {
+    gl.stencilFunc(gl.NOTEQUAL, 1, 1);
+  }
   const drawnSegments = drawRibbons(state, scene, viewport, ink, paper);
+  if (clipped) {
+    gl.disable(gl.STENCIL_TEST);
+  }
 
   // The linework goes over the zones, not under them. A zone is opaque paper
   // where its hatch is not inked, so anything drawn first is covered - and a
@@ -688,14 +734,18 @@ export function drawMonochromeSceneWebGl(state, scene) {
  * mask, islands excluded - and the hatch is painted through it by a single
  * quad covering the view.
  */
-function fillWaterThroughStencil(state, scene, viewport) {
-  const { gl, fill } = state;
-  const tile = getOrCreateTileTexture(state, scene.waterPattern, scene.patternScale, scene.waterInk ?? scene.ink);
-  if (!tile) {
-    return;
-  }
+/**
+ * An even-odd mask of the given rings, in the stencil buffer.
+ *
+ * Fans drawn with INVERT leave exactly the inside of a polygon with holes, so
+ * a coastline masks the sea and an island inside it comes back out. Returns
+ * whether there was anything to mask; the test is left enabled and the caller
+ * decides which side of it to draw on.
+ */
+function maskRingsIntoStencil(state, scene, viewport, features) {
+  const { gl } = state;
   const fans = [];
-  for (const feature of scene.basemap.waterFeatures) {
+  for (const feature of features) {
     for (const path of feature.paths) {
       if (path.length < 3) {
         continue;
@@ -709,9 +759,8 @@ function fillWaterThroughStencil(state, scene, viewport) {
     }
   }
   if (fans.length < 6) {
-    return;
+    return false;
   }
-
   gl.enable(gl.STENCIL_TEST);
   gl.clearStencil(0);
   gl.clear(gl.STENCIL_BUFFER_BIT);
@@ -719,10 +768,21 @@ function fillWaterThroughStencil(state, scene, viewport) {
   gl.stencilFunc(gl.ALWAYS, 0, 1);
   gl.stencilOp(gl.KEEP, gl.KEEP, gl.INVERT);
   drawTriangles(state, Float32Array.from(fans), [0, 0, 0, 1], viewport);
-
   gl.colorMask(true, true, true, true);
-  gl.stencilFunc(gl.EQUAL, 1, 1);
   gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+  return true;
+}
+
+function fillWaterThroughStencil(state, scene, viewport) {
+  const { gl, fill } = state;
+  const tile = getOrCreateTileTexture(state, scene.waterPattern, scene.patternScale, scene.waterInk ?? scene.ink);
+  if (!tile) {
+    return;
+  }
+  if (!maskRingsIntoStencil(state, scene, viewport, scene.basemap.waterFeatures)) {
+    return;
+  }
+  gl.stencilFunc(gl.EQUAL, 1, 1);
   const quad = Float32Array.of(
     0, 0, viewport[0], 0, viewport[0], viewport[1],
     0, 0, viewport[0], viewport[1], 0, viewport[1],

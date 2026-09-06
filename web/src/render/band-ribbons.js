@@ -177,16 +177,49 @@ export function buildBandOrderedSegments(segments, bandSeconds) {
   if (!(bandSeconds > 0)) {
     throw new Error('bandSeconds must be positive');
   }
-  const byBand = new Map();
-  const pushPiece = (band, x0, y0, t0, x1, y1, t1) => {
-    let pieces = byBand.get(band);
-    if (pieces === undefined) {
-      pieces = [];
-      byBand.set(band, pieces);
-    }
-    pieces.push(x0, y0, t0, x1, y1, t1);
-  };
 
+  // Counted first, then written. Berlin yields over half a million pieces, and
+  // growing an array per band to hold them was the single most expensive thing
+  // the scene did - millions of boxed pushes and the collection they feed, on
+  // a path that runs every time the start point moves.
+  const countByBand = new Map();
+  forEachBandPiece(segments, bandSeconds, (band) => {
+    countByBand.set(band, (countByBand.get(band) ?? 0) + 1);
+  });
+
+  const bands = [...countByBand.keys()].sort((a, b) => b - a);
+  const ranges = [];
+  let first = 0;
+  const cursorByBand = new Map();
+  for (const band of bands) {
+    const count = countByBand.get(band);
+    ranges.push({ band, first, count });
+    cursorByBand.set(band, first * RIBBON_SEGMENT_STRIDE);
+    first += count;
+  }
+
+  const data = new Float32Array(first * RIBBON_SEGMENT_STRIDE);
+  forEachBandPiece(segments, bandSeconds, (band, x0, y0, t0, x1, y1, t1) => {
+    const offset = cursorByBand.get(band);
+    data[offset] = x0;
+    data[offset + 1] = y0;
+    data[offset + 2] = t0;
+    data[offset + 3] = x1;
+    data[offset + 4] = y1;
+    data[offset + 5] = t1;
+    cursorByBand.set(band, offset + RIBBON_SEGMENT_STRIDE);
+  });
+  return { data, ranges };
+}
+
+/**
+ * Every way cut at every band boundary it crosses, one piece at a time.
+ *
+ * Walked twice by the caller - once to count the pieces, once to place them -
+ * because doing the arithmetic twice is far cheaper than growing an array to
+ * discover the answer.
+ */
+function forEachBandPiece(segments, bandSeconds, visit) {
   for (let offset = 0; offset + 5 < segments.length; offset += RIBBON_SEGMENT_STRIDE) {
     const fromX = segments[offset];
     const fromY = segments[offset + 1];
@@ -201,48 +234,45 @@ export function buildBandOrderedSegments(segments, bandSeconds) {
     const lowest = Math.floor(Math.min(fromSeconds, toSeconds) / bandSeconds);
     const highest = Math.floor(Math.max(fromSeconds, toSeconds) / bandSeconds);
     if (lowest === highest || span === 0) {
-      pushPiece(lowest, fromX, fromY, fromSeconds, toX, toY, toSeconds);
+      visit(lowest, fromX, fromY, fromSeconds, toX, toY, toSeconds);
       continue;
     }
 
-    const fractions = [0];
-    for (let boundary = lowest + 1; boundary <= highest; boundary += 1) {
+    // Walked in order along the way, so the pieces come out contiguous without
+    // sorting a list of crossing fractions.
+    const ascending = span > 0;
+    let previousFraction = 0;
+    for (
+      let boundary = ascending ? lowest + 1 : highest;
+      ascending ? boundary <= highest : boundary >= lowest + 1;
+      boundary += ascending ? 1 : -1
+    ) {
       const fraction = (boundary * bandSeconds - fromSeconds) / span;
-      if (fraction > 0 && fraction < 1) {
-        fractions.push(fraction);
-      }
-    }
-    fractions.push(1);
-    fractions.sort((a, b) => a - b);
-    for (let index = 0; index + 1 < fractions.length; index += 1) {
-      const start = fractions[index];
-      const end = fractions[index + 1];
-      if (end - start <= 0) {
+      if (!(fraction > previousFraction) || !(fraction < 1)) {
         continue;
       }
-      const startSeconds = fromSeconds + span * start;
-      const endSeconds = fromSeconds + span * end;
-      pushPiece(
-        Math.floor(((startSeconds + endSeconds) / 2) / bandSeconds),
-        fromX + (toX - fromX) * start, fromY + (toY - fromY) * start, startSeconds,
-        fromX + (toX - fromX) * end, fromY + (toY - fromY) * end, endSeconds,
-      );
+      emitPiece(visit, bandSeconds, previousFraction, fraction,
+        fromX, fromY, fromSeconds, toX, toY, span);
+      previousFraction = fraction;
     }
+    emitPiece(visit, bandSeconds, previousFraction, 1,
+      fromX, fromY, fromSeconds, toX, toY, span);
   }
+}
 
-  const bands = [...byBand.keys()].sort((a, b) => b - a);
-  let total = 0;
-  for (const pieces of byBand.values()) {
-    total += pieces.length;
+function emitPiece(visit, bandSeconds, start, end, fromX, fromY, fromSeconds, toX, toY, span) {
+  if (!(end > start)) {
+    return;
   }
-  const data = new Float32Array(total);
-  const ranges = [];
-  let written = 0;
-  for (const band of bands) {
-    const pieces = byBand.get(band);
-    data.set(pieces, written);
-    ranges.push({ band, first: written / RIBBON_SEGMENT_STRIDE, count: pieces.length / RIBBON_SEGMENT_STRIDE });
-    written += pieces.length;
-  }
-  return { data, ranges };
+  const startSeconds = fromSeconds + span * start;
+  const endSeconds = fromSeconds + span * end;
+  visit(
+    Math.floor(((startSeconds + endSeconds) / 2) / bandSeconds),
+    fromX + (toX - fromX) * start,
+    fromY + (toY - fromY) * start,
+    startSeconds,
+    fromX + (toX - fromX) * end,
+    fromY + (toY - fromY) * end,
+    endSeconds,
+  );
 }

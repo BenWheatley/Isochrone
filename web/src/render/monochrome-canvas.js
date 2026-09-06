@@ -142,11 +142,33 @@ export function drawMonochromeScene(context, scene, options = {}) {
       context.stroke();
     };
 
-    strokeRange(0, drawnSegments, ribbonPx + outlinePx * 2, ink);
+    // Clipped to the land. A zone is a claim about ground someone can stand
+    // on, and the sea is not that - but a river or a lake is different, having
+    // ways along both banks whose zones legitimately meet over the water, so
+    // only the coastline clips anything.
+    const coastline = basemap.coastlineFeatures ?? [];
+    context.save();
+    if (coastline.length > 0) {
+      context.beginPath();
+      context.rect(0, 0, widthPx, heightPx);
+      for (const feature of coastline) {
+        for (const path of feature.paths) {
+          tracePolygon(context, Float64Array.from(path.flat()), transform);
+        }
+      }
+      context.clip('evenodd');
+    }
+
+    // The limit of travel first, heavier, outside them all.
+    strokeRange(0, drawnSegments, ribbonPx + scene.contourStrokeWidth * 4.4, ink);
     for (const range of ordered.ranges) {
       if (range.count === 0) {
         continue;
       }
+      // Outlined before it is filled: a nearer band covers the outline of the
+      // farther one everywhere but along their shared edge, so what survives
+      // is a line exactly on each band boundary.
+      strokeRange(range.first, range.count, ribbonPx + outlinePx * 2, ink);
       strokeRange(range.first, range.count, ribbonPx, paper);
       const pattern = patterns[((range.band % patterns.length) + patterns.length) % patterns.length];
       if (pattern.lines.length === 0) {
@@ -161,6 +183,7 @@ export function drawMonochromeScene(context, scene, options = {}) {
         strokeRange(range.first, range.count, ribbonPx, fill);
       }
     }
+    context.restore();
   }
 
 

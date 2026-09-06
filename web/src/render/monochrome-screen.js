@@ -277,11 +277,16 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
   const segments = getReachableWaySegments(mapData, snapshot, options);
   const hasField = segments.length >= 6;
 
-  const waterFeatures = (options.projectedBoundary?.waterFeatures ?? [])
-    .concat(options.projectedBoundary?.inlandWaterFeatures ?? [])
-    .map((feature) => ({
-      paths: feature.paths.map((path) => path.map(([graphX, graphY]) => [graphX, graphY])),
-    }));
+  const asPaths = (features) => features.map((feature) => ({
+    paths: feature.paths.map((path) => path.map(([graphX, graphY]) => [graphX, graphY])),
+  }));
+  // The coastline and the inland water are ruled the same way, but only the
+  // coastline is a limit on where anyone can be: a river or a lake has ways
+  // running along both banks and a zone drawn around them legitimately covers
+  // the water between, while the sea has no far bank on this sheet.
+  const coastlineFeatures = asPaths(options.projectedBoundary?.waterFeatures ?? []);
+  const waterFeatures = coastlineFeatures
+    .concat(asPaths(options.projectedBoundary?.inlandWaterFeatures ?? []));
 
   const labelFontSize = options.labelFontSize ?? 12;
   const pixelsPerMm = options.outputPixelsPerMm ?? OUTPUT_PIXELS_PER_MM;
@@ -343,6 +348,7 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
     legend: false,
     basemap: {
       waterFeatures,
+      coastlineFeatures,
       roadSegments: collectVisibleRoadSegments(
         mapData,
         graph,
